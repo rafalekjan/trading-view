@@ -1,0 +1,208 @@
+//@version=6
+indicator("Levels + RS/RW Zones (Y-axis labels, RTH RS option)", overlay=true)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inputs: Levels
+// ─────────────────────────────────────────────────────────────────────────────
+grpLevels = "Poziomy (High/Low)"
+showPD    = input.bool(true,  "Prior Day High/Low", group=grpLevels)
+showPW    = input.bool(true,  "Prior Week High/Low", group=grpLevels)
+showSwing = input.bool(true,  "Recent Swing High/Low", group=grpLevels)
+
+grpMA = "Średnie kroczące"
+showSMA20  = input.bool(true,  "SMA 20", group=grpMA)
+showSMA50  = input.bool(true,  "SMA 50", group=grpMA)
+showSMA200 = input.bool(true,  "SMA 200", group=grpMA)
+
+grpVWAP = "VWAP"
+showVWAP = input.bool(true, "VWAP", group=grpVWAP)
+
+grpOR = "Opening Range"
+showOR     = input.bool(true, "Opening Range High/Low", group=grpOR)
+orSession  = input.session("0930-1600", "Sesja OR", group=grpOR)
+orMinutes  = input.int(30, "OR minuty", minval=1, group=grpOR)
+
+grpLabels = "Skróty po prawej"
+showRightLabels = input.bool(true, "Pokaż skróty przy prawej krawędzi", group=grpLabels)
+rightLabelOffset = input.int(1, "Offset etykiety (bary)", minval=0, maxval=20, group=grpLabels)
+
+grpSwing = "Swing (Pivot)"
+pLeft  = input.int(3, "Pivot Left", minval=1, group=grpSwing)
+pRight = input.int(3, "Pivot Right", minval=1, group=grpSwing)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inputs: RS/RW
+// ─────────────────────────────────────────────────────────────────────────────
+grpRS = "Relative Strength / Weakness (tło)"
+showRSZones      = input.bool(true, "Zaznacz obszar RS/RW (tło)", group=grpRS)
+benchSymbol      = input.symbol("SPY", "Benchmark", group=grpRS)
+rsLen            = input.int(20, "RS MA length", minval=1, group=grpRS)
+
+// Premarket / RTH
+excludePremarket = input.bool(true, "Wyłącz pre/after z RS (RTH only)", group=grpRS)
+rthSession       = input.session("0930-1600", "RTH session (dla RS)", group=grpRS)
+colorOnlyRTH     = input.bool(true, "Koloruj tło tylko w RTH", group=grpRS)
+
+// Trend gate (opcjonalnie)
+useTrendGate     = input.bool(false, "Wymagaj trendu (rosnie/spada)", group=grpRS)
+trendBars        = input.int(5, "Trend bars", minval=1, group=grpRS)
+
+// Wygląd tła
+rsBgAlpha        = input.int(88, "Przezroczystość tła (0-100)", minval=0, maxval=100, group=grpRS)
+trendBoost       = input.int(12, "Wzmocnienie koloru przy trend gate (0-30)", minval=0, maxval=30, group=grpRS)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Colors
+// ─────────────────────────────────────────────────────────────────────────────
+grpColors = "Kolory"
+cPDH   = input.color(color.new(color.lime,   0), "PDH", group=grpColors)
+cPDL   = input.color(color.new(color.red,    0), "PDL", group=grpColors)
+cPWH   = input.color(color.new(color.teal,   0), "PWH", group=grpColors)
+cPWL   = input.color(color.new(color.orange, 0), "PWL", group=grpColors)
+
+cS20   = input.color(color.new(color.aqua,    0), "S20", group=grpColors)
+cS50   = input.color(color.new(color.yellow,  0), "S50", group=grpColors)
+cS200  = input.color(color.new(color.fuchsia, 0), "S200", group=grpColors)
+
+cSwH   = input.color(color.new(color.green,  0), "SwH", group=grpColors)
+cSwL   = input.color(color.new(color.maroon, 0), "SwL", group=grpColors)
+
+cVWAP  = input.color(color.new(color.white,  0), "VWAP", group=grpColors)
+
+cORH   = input.color(color.new(color.blue,   0), "ORH", group=grpColors)
+cORL   = input.color(color.new(color.purple, 0), "ORL", group=grpColors)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Prior Day / Prior Week
+// ─────────────────────────────────────────────────────────────────────────────
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "D", low[1],  lookahead=barmerge.lookahead_on)
+pwh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_on)
+pwl = request.security(syminfo.tickerid, "W", low[1],  lookahead=barmerge.lookahead_on)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SMA + VWAP
+// ─────────────────────────────────────────────────────────────────────────────
+sma20  = ta.sma(close, 20)
+sma50  = ta.sma(close, 50)
+sma200 = ta.sma(close, 200)
+vwapV  = ta.vwap(hlc3)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Swings (most recent pivots)
+// ─────────────────────────────────────────────────────────────────────────────
+ph = ta.pivothigh(high, pLeft, pRight)
+pl = ta.pivotlow(low,   pLeft, pRight)
+
+var float lastSwH = na
+var float lastSwL = na
+if not na(ph)
+    lastSwH := ph
+if not na(pl)
+    lastSwL := pl
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Opening Range
+// ─────────────────────────────────────────────────────────────────────────────
+inSess    = not na(time(timeframe.period, orSession))
+sessStart = inSess and not inSess[1]
+
+tfSec  = timeframe.in_seconds(timeframe.period)
+orBars = tfSec > 0 ? int(math.round(orMinutes * 60.0 / tfSec)) : 1
+orBars := math.max(orBars, 1)
+
+var int   orCount  = 0
+var float orH      = na
+var float orL      = na
+var bool  orLocked = false
+
+if sessStart
+    orCount  := 0
+    orH      := high
+    orL      := low
+    orLocked := false
+
+if inSess and not orLocked
+    orCount += 1
+    orH := math.max(orH, high)
+    orL := math.min(orL, low)
+    if orCount >= orBars
+        orLocked := true
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RS/RW (Relative Strength vs benchmark) with premarket exclusion
+// ─────────────────────────────────────────────────────────────────────────────
+isRTH = not na(time(timeframe.period, rthSession))
+
+benchCloseRaw = request.security(benchSymbol, timeframe.period, close)
+
+// "zamrożone" close tylko z RTH (żeby pre/after nie wpływało na RS)
+var float closeRTH      = na
+var float benchCloseRTH = na
+
+if not excludePremarket
+    closeRTH      := close
+    benchCloseRTH := benchCloseRaw
+else
+    if isRTH
+        closeRTH      := close
+        benchCloseRTH := benchCloseRaw
+    else
+        closeRTH      := nz(closeRTH[1], close)
+        benchCloseRTH := nz(benchCloseRTH[1], benchCloseRaw)
+
+// RS ratio + MA
+rs   = closeRTH / benchCloseRTH
+rsMA = ta.sma(rs, rsLen)
+
+// Trend gate
+rsUp   = ta.rising(rs, trendBars)
+rsDown = ta.falling(rs, trendBars)
+
+gateRS = not useTrendGate or rsUp
+gateRW = not useTrendGate or rsDown
+
+// warunki stron
+sideUp   = rs > rsMA
+sideDown = rs < rsMA
+
+// “mocne” sygnały (z trend gate)
+strongRS = showRSZones and sideUp and gateRS
+strongRW = showRSZones and sideDown and gateRW
+
+// TŁO BEZ PRZERW:
+// - bazowy kolor zależny od strony (nad/pod MA)
+// - jeśli strongRS/strongRW: kolor trochę mocniejszy (mniejsza przezroczystość)
+allowBg = showRSZones and (not colorOnlyRTH or isRTH)
+
+alphaBase   = rsBgAlpha
+alphaStrong = math.max(0, rsBgAlpha - trendBoost)
+
+color bg = na
+if allowBg
+    bg := sideUp   ? color.new(color.lime, strongRS ? alphaStrong : alphaBase) :
+          sideDown ? color.new(color.red,  strongRW ? alphaStrong : alphaBase) :
+          na
+
+bgcolor(bg)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLOTS with Y-axis labels (trackprice=true)
+// ─────────────────────────────────────────────────────────────────────────────
+plot(showPD ? pdh : na,  title="PDH",  color=cPDH,  linewidth=1, style=plot.style_linebr, trackprice=true)
+plot(showPD ? pdl : na,  title="PDL",  color=cPDL,  linewidth=1, style=plot.style_linebr, trackprice=true)
+
+plot(showPW ? pwh : na,  title="PWH",  color=cPWH,  linewidth=1, style=plot.style_linebr, trackprice=true)
+plot(showPW ? pwl : na,  title="PWL",  color=cPWL,  linewidth=1, style=plot.style_linebr, trackprice=true)
+
+plot(showSwing ? lastSwH : na, title="SwH", color=cSwH, linewidth=1, style=plot.style_linebr, trackprice=true)
+plot(showSwing ? lastSwL : na, title="SwL", color=cSwL, linewidth=1, style=plot.style_linebr, trackprice=true)
+
+plot(showOR ? orH : na,  title="ORH",  color=cORH,  linewidth=1, style=plot.style_linebr, trackprice=true)
+plot(showOR ? orL : na,  title="ORL",  color=cORL,  linewidth=1, style=plot.style_linebr, trackprice=true)
+
+plot(showSMA20 ? sma20 : na,   title="S20",  color=cS20,  linewidth=1, trackprice=true)
+plot(showSMA50 ? sma50 : na,   title="S50",  color=cS50,  linewidth=1, trackprice=true)
+plot(showSMA200 ? sma200 : na, title="S200", color=cS200, linewidth=2, trackprice=true)
+
+plot(showVWAP ? vwapV : na, title="VWAP", color=cVWAP, linewidth=2, trackprice=true)
