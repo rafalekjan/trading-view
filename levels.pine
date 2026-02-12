@@ -22,10 +22,6 @@ showOR     = input.bool(true, "Opening Range High/Low", group=grpOR)
 orSession  = input.session("0930-1600", "Sesja OR", group=grpOR)
 orMinutes  = input.int(30, "OR minuty", minval=1, group=grpOR)
 
-grpLabels = "Skróty po prawej"
-showRightLabels = input.bool(true, "Pokaż skróty przy prawej krawędzi", group=grpLabels)
-rightLabelOffset = input.int(1, "Offset etykiety (bary)", minval=0, maxval=20, group=grpLabels)
-
 grpSwing = "Swing (Pivot)"
 pLeft  = input.int(3, "Pivot Left", minval=1, group=grpSwing)
 pRight = input.int(3, "Pivot Right", minval=1, group=grpSwing)
