@@ -1,92 +1,108 @@
 //@version=6
 indicator("Levels + RS/RW Zones (Y-axis labels, RTH RS option)", overlay=true)
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Inputs: Levels
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 grpLevels = "Poziomy (High/Low)"
 showPD    = input.bool(true,  "Prior Day High/Low", group=grpLevels)
 showPW    = input.bool(true,  "Prior Week High/Low", group=grpLevels)
 showSwing = input.bool(true,  "Recent Swing High/Low", group=grpLevels)
 
-grpMA = "Średnie kroczące"
-showSMA20  = input.bool(true,  "SMA 20", group=grpMA)
-showSMA50  = input.bool(true,  "SMA 50", group=grpMA)
-showSMA200 = input.bool(true,  "SMA 200", group=grpMA)
+grpMA = "Srednie kroczace"
+showSMA20  = input.bool(true, "SMA 20", group=grpMA)
+showSMA50  = input.bool(true, "SMA 50", group=grpMA)
+showSMA200 = input.bool(true, "SMA 200", group=grpMA)
 
 grpVWAP = "VWAP"
-showVWAP = input.bool(true, "VWAP", group=grpVWAP)
+showVWAP = input.bool(true, "VWAP (intraday)", group=grpVWAP)
 
 grpOR = "Opening Range"
-showOR     = input.bool(true, "Opening Range High/Low", group=grpOR)
-orSession  = input.session("0930-1600", "Sesja OR", group=grpOR)
-orMinutes  = input.int(30, "OR minuty", minval=1, group=grpOR)
+showOR    = input.bool(true, "Opening Range High/Low", group=grpOR)
+orSession = input.session("0930-1600", "Sesja OR", group=grpOR)
+orMinutes = input.int(30, "OR minuty", minval=1, group=grpOR)
 
 grpSwing = "Swing (Pivot)"
 pLeft  = input.int(3, "Pivot Left", minval=1, group=grpSwing)
 pRight = input.int(3, "Pivot Right", minval=1, group=grpSwing)
 
-// ─────────────────────────────────────────────────────────────────────────────
+grpLabels = "Skroty po prawej"
+showRightLabels   = input.bool(true, "Pokaz skroty przy prawej krawedzi", group=grpLabels)
+rightLabelOffset  = input.int(1, "Offset etykiety (bary)", minval=0, maxval=20, group=grpLabels)
+rightLabelTextSize = input.string("Tiny", "Rozmiar czcionki labeli", options=["Tiny", "Small", "Normal", "Large", "Huge"], group=grpLabels)
+
+// -----------------------------------------------------------------------------
 // Inputs: RS/RW
-// ─────────────────────────────────────────────────────────────────────────────
-grpRS = "Relative Strength / Weakness (tło)"
-showRSZones      = input.bool(true, "Zaznacz obszar RS/RW (tło)", group=grpRS)
+// -----------------------------------------------------------------------------
+grpRS = "Relative Strength / Weakness (tlo)"
+showRSZones      = input.bool(true, "Zaznacz obszar RS/RW (tlo)", group=grpRS)
 benchSymbol      = input.symbol("SPY", "Benchmark", group=grpRS)
 rsLen            = input.int(20, "RS MA length", minval=1, group=grpRS)
-
-// Premarket / RTH
-excludePremarket = input.bool(true, "Wyłącz pre/after z RS (RTH only)", group=grpRS)
+excludePremarket = input.bool(true, "Wylacz pre/after z RS (RTH only)", group=grpRS)
 rthSession       = input.session("0930-1600", "RTH session (dla RS)", group=grpRS)
-colorOnlyRTH     = input.bool(true, "Koloruj tło tylko w RTH", group=grpRS)
-
-// Trend gate (opcjonalnie)
+colorOnlyRTH     = input.bool(true, "Koloruj tlo tylko w RTH", group=grpRS)
 useTrendGate     = input.bool(false, "Wymagaj trendu (rosnie/spada)", group=grpRS)
 trendBars        = input.int(5, "Trend bars", minval=1, group=grpRS)
-
-// Wygląd tła
-rsBgAlpha        = input.int(88, "Przezroczystość tła (0-100)", minval=0, maxval=100, group=grpRS)
+rsBgAlpha        = input.int(88, "Przezroczystosc tla (0-100)", minval=0, maxval=100, group=grpRS)
 trendBoost       = input.int(12, "Wzmocnienie koloru przy trend gate (0-30)", minval=0, maxval=30, group=grpRS)
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Colors
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 grpColors = "Kolory"
-cPDH   = input.color(color.new(color.lime,   0), "PDH", group=grpColors)
-cPDL   = input.color(color.new(color.red,    0), "PDL", group=grpColors)
-cPWH   = input.color(color.new(color.teal,   0), "PWH", group=grpColors)
-cPWL   = input.color(color.new(color.orange, 0), "PWL", group=grpColors)
+cPDH  = input.color(color.new(color.lime,   0), "PDH", group=grpColors)
+cPDL  = input.color(color.new(color.red,    0), "PDL", group=grpColors)
+cPWH  = input.color(color.new(color.teal,   0), "PWH", group=grpColors)
+cPWL  = input.color(color.new(color.orange, 0), "PWL", group=grpColors)
+cS20  = input.color(color.new(color.aqua,    0), "S20", group=grpColors)
+cS50  = input.color(color.new(color.yellow,  0), "S50", group=grpColors)
+cS200 = input.color(color.new(color.fuchsia, 0), "S200", group=grpColors)
+cSwH  = input.color(color.new(color.green,   0), "SwH", group=grpColors)
+cSwL  = input.color(color.new(color.maroon,  0), "SwL", group=grpColors)
+cVWAP = input.color(color.new(color.white,   0), "VWAP", group=grpColors)
+cORH  = input.color(color.new(color.blue,    0), "ORH", group=grpColors)
+cORL  = input.color(color.new(color.purple,  0), "ORL", group=grpColors)
 
-cS20   = input.color(color.new(color.aqua,    0), "S20", group=grpColors)
-cS50   = input.color(color.new(color.yellow,  0), "S50", group=grpColors)
-cS200  = input.color(color.new(color.fuchsia, 0), "S200", group=grpColors)
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+labelTextSize = switch rightLabelTextSize
+    "Tiny" => size.tiny
+    "Small" => size.small
+    "Normal" => size.normal
+    "Large" => size.large
+    => size.huge
 
-cSwH   = input.color(color.new(color.green,  0), "SwH", group=grpColors)
-cSwL   = input.color(color.new(color.maroon, 0), "SwL", group=grpColors)
+f_sync_right_label(lbl, enabled, y, txt, bgCol, txtCol, xOff, lblSize) =>
+    label workLbl = lbl
+    if enabled and not na(y)
+        if na(workLbl)
+            workLbl := label.new(bar_index + xOff, y, txt, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, textcolor=txtCol, color=bgCol, size=lblSize)
+        else
+            label.set_xy(workLbl, bar_index + xOff, y)
+            label.set_text(workLbl, txt)
+            label.set_color(workLbl, bgCol)
+            label.set_textcolor(workLbl, txtCol)
+            label.set_size(workLbl, lblSize)
+    else
+        if not na(workLbl)
+            label.delete(workLbl)
+            workLbl := na
+    workLbl
 
-cVWAP  = input.color(color.new(color.white,  0), "VWAP", group=grpColors)
-
-cORH   = input.color(color.new(color.blue,   0), "ORH", group=grpColors)
-cORL   = input.color(color.new(color.purple, 0), "ORL", group=grpColors)
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Prior Day / Prior Week
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Core values
+// -----------------------------------------------------------------------------
 pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
 pdl = request.security(syminfo.tickerid, "D", low[1],  lookahead=barmerge.lookahead_on)
 pwh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_on)
 pwl = request.security(syminfo.tickerid, "W", low[1],  lookahead=barmerge.lookahead_on)
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SMA + VWAP
-// ─────────────────────────────────────────────────────────────────────────────
 sma20  = ta.sma(close, 20)
 sma50  = ta.sma(close, 50)
 sma200 = ta.sma(close, 200)
 vwapV  = ta.vwap(hlc3)
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Swings (most recent pivots)
-// ─────────────────────────────────────────────────────────────────────────────
 ph = ta.pivothigh(high, pLeft, pRight)
 pl = ta.pivotlow(low,   pLeft, pRight)
 
@@ -97,9 +113,7 @@ if not na(ph)
 if not na(pl)
     lastSwL := pl
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Opening Range
-// ─────────────────────────────────────────────────────────────────────────────
+// Opening Range (intraday)
 inSess    = not na(time(timeframe.period, orSession))
 sessStart = inSess and not inSess[1]
 
@@ -125,17 +139,12 @@ if inSess and not orLocked
     if orCount >= orBars
         orLocked := true
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RS/RW (Relative Strength vs benchmark) with premarket exclusion
-// ─────────────────────────────────────────────────────────────────────────────
+// RS/RW background
 isRTH = not na(time(timeframe.period, rthSession))
-
 benchCloseRaw = request.security(benchSymbol, timeframe.period, close)
 
-// "zamrożone" close tylko z RTH (żeby pre/after nie wpływało na RS)
 var float closeRTH      = na
 var float benchCloseRTH = na
-
 if not excludePremarket
     closeRTH      := close
     benchCloseRTH := benchCloseRaw
@@ -147,30 +156,22 @@ else
         closeRTH      := nz(closeRTH[1], close)
         benchCloseRTH := nz(benchCloseRTH[1], benchCloseRaw)
 
-// RS ratio + MA
 rs   = closeRTH / benchCloseRTH
 rsMA = ta.sma(rs, rsLen)
 
-// Trend gate
 rsUp   = ta.rising(rs, trendBars)
 rsDown = ta.falling(rs, trendBars)
 
 gateRS = not useTrendGate or rsUp
 gateRW = not useTrendGate or rsDown
 
-// warunki stron
 sideUp   = rs > rsMA
 sideDown = rs < rsMA
 
-// “mocne” sygnały (z trend gate)
 strongRS = showRSZones and sideUp and gateRS
 strongRW = showRSZones and sideDown and gateRW
 
-// TŁO BEZ PRZERW:
-// - bazowy kolor zależny od strony (nad/pod MA)
-// - jeśli strongRS/strongRW: kolor trochę mocniejszy (mniejsza przezroczystość)
 allowBg = showRSZones and (not colorOnlyRTH or isRTH)
-
 alphaBase   = rsBgAlpha
 alphaStrong = math.max(0, rsBgAlpha - trendBoost)
 
@@ -179,26 +180,55 @@ if allowBg
     bg := sideUp   ? color.new(color.lime, strongRS ? alphaStrong : alphaBase) :
           sideDown ? color.new(color.red,  strongRW ? alphaStrong : alphaBase) :
           na
-
 bgcolor(bg)
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PLOTS with Y-axis labels (trackprice=true)
-// ─────────────────────────────────────────────────────────────────────────────
-plot(showPD ? pdh : na,  title="PDH",  color=cPDH,  linewidth=1, style=plot.style_linebr, trackprice=true)
-plot(showPD ? pdl : na,  title="PDL",  color=cPDL,  linewidth=1, style=plot.style_linebr, trackprice=true)
+// -----------------------------------------------------------------------------
+// Plots (single set - no duplicate Y labels)
+// -----------------------------------------------------------------------------
+plot(showPD ? pdh : na, title="PDH", color=cPDH, linewidth=1, style=plot.style_linebr)
+plot(showPD ? pdl : na, title="PDL", color=cPDL, linewidth=1, style=plot.style_linebr)
 
-plot(showPW ? pwh : na,  title="PWH",  color=cPWH,  linewidth=1, style=plot.style_linebr, trackprice=true)
-plot(showPW ? pwl : na,  title="PWL",  color=cPWL,  linewidth=1, style=plot.style_linebr, trackprice=true)
+plot(showPW ? pwh : na, title="PWH", color=cPWH, linewidth=1, style=plot.style_linebr)
+plot(showPW ? pwl : na, title="PWL", color=cPWL, linewidth=1, style=plot.style_linebr)
 
-plot(showSwing ? lastSwH : na, title="SwH", color=cSwH, linewidth=1, style=plot.style_linebr, trackprice=true)
-plot(showSwing ? lastSwL : na, title="SwL", color=cSwL, linewidth=1, style=plot.style_linebr, trackprice=true)
+plot(showSwing ? lastSwH : na, title="SwH", color=cSwH, linewidth=1, style=plot.style_linebr)
+plot(showSwing ? lastSwL : na, title="SwL", color=cSwL, linewidth=1, style=plot.style_linebr)
+plotshape(showSwing and not na(ph), title="Pivot High", style=shape.triangledown, location=location.abovebar, size=size.tiny, color=color.new(cSwH, 0), offset=-pRight)
+plotshape(showSwing and not na(pl), title="Pivot Low",  style=shape.triangleup,   location=location.belowbar, size=size.tiny, color=color.new(cSwL, 0), offset=-pRight)
 
-plot(showOR ? orH : na,  title="ORH",  color=cORH,  linewidth=1, style=plot.style_linebr, trackprice=true)
-plot(showOR ? orL : na,  title="ORL",  color=cORL,  linewidth=1, style=plot.style_linebr, trackprice=true)
+plot(showSMA20 ? sma20 : na, title="SMA20", color=cS20, linewidth=1)
+plot(showSMA50 ? sma50 : na, title="SMA50", color=cS50, linewidth=1)
+plot(showSMA200 ? sma200 : na, title="SMA200", color=cS200, linewidth=2)
 
-plot(showSMA20 ? sma20 : na,   title="S20",  color=cS20,  linewidth=1, trackprice=true)
-plot(showSMA50 ? sma50 : na,   title="S50",  color=cS50,  linewidth=1, trackprice=true)
-plot(showSMA200 ? sma200 : na, title="S200", color=cS200, linewidth=2, trackprice=true)
+plot(showVWAP ? vwapV : na, title="VWAP", color=cVWAP, linewidth=2)
+plot(showOR ? orH : na, title="ORH", color=cORH, linewidth=1, style=plot.style_linebr)
+plot(showOR ? orL : na, title="ORL", color=cORL, linewidth=1, style=plot.style_linebr)
 
-plot(showVWAP ? vwapV : na, title="VWAP", color=cVWAP, linewidth=2, trackprice=true)
+// -----------------------------------------------------------------------------
+// Right-edge short labels
+// -----------------------------------------------------------------------------
+var label lblPDH  = na
+var label lblPDL  = na
+var label lblPWH  = na
+var label lblPWL  = na
+var label lblSwH  = na
+var label lblSwL  = na
+var label lblORH  = na
+var label lblORL  = na
+var label lblS20  = na
+var label lblS50  = na
+var label lblS200 = na
+var label lblVWAP = na
+
+lblPDH  := f_sync_right_label(lblPDH,  showRightLabels and showPD,    pdh,     "PDH",  cPDH,  color.white, rightLabelOffset, labelTextSize)
+lblPDL  := f_sync_right_label(lblPDL,  showRightLabels and showPD,    pdl,     "PDL",  cPDL,  color.white, rightLabelOffset, labelTextSize)
+lblPWH  := f_sync_right_label(lblPWH,  showRightLabels and showPW,    pwh,     "PWH",  cPWH,  color.white, rightLabelOffset, labelTextSize)
+lblPWL  := f_sync_right_label(lblPWL,  showRightLabels and showPW,    pwl,     "PWL",  cPWL,  color.white, rightLabelOffset, labelTextSize)
+lblSwH  := f_sync_right_label(lblSwH,  showRightLabels and showSwing, lastSwH, "SwH",  cSwH,  color.white, rightLabelOffset, labelTextSize)
+lblSwL  := f_sync_right_label(lblSwL,  showRightLabels and showSwing, lastSwL, "SwL",  cSwL,  color.white, rightLabelOffset, labelTextSize)
+lblORH  := f_sync_right_label(lblORH,  showRightLabels and showOR,    orH,     "ORH",  cORH,  color.white, rightLabelOffset, labelTextSize)
+lblORL  := f_sync_right_label(lblORL,  showRightLabels and showOR,    orL,     "ORL",  cORL,  color.white, rightLabelOffset, labelTextSize)
+lblS20  := f_sync_right_label(lblS20,  showRightLabels and showSMA20, sma20,   "S20",  cS20,  color.black, rightLabelOffset, labelTextSize)
+lblS50  := f_sync_right_label(lblS50,  showRightLabels and showSMA50, sma50,   "S50",  cS50,  color.black, rightLabelOffset, labelTextSize)
+lblS200 := f_sync_right_label(lblS200, showRightLabels and showSMA200,sma200,  "S200", cS200, color.white, rightLabelOffset, labelTextSize)
+lblVWAP := f_sync_right_label(lblVWAP, showRightLabels and showVWAP,  vwapV,   "VWAP", cVWAP, color.black, rightLabelOffset, labelTextSize)
