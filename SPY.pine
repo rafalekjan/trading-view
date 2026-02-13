@@ -1,11 +1,42 @@
 //@version=6
-indicator("SPY Market Regime Dashboard", overlay=true)
+indicator("SPY Market Regime Dashboard (Breadth Proxy)", overlay=true)
 
 // =====================
-// VIX DATA
+// Inputs
 // =====================
-vix = request.security("CBOE:VIX", timeframe.period, close)
-vixEma5 = ta.ema(vix, 5)
+vixSymbol = input.symbol("CBOE:VIX", "VIX symbol")
+
+// Breadth proxy basket (sector ETFs)
+b1 = input.symbol("AMEX:XLB", "Breadth #1")
+b2 = input.symbol("AMEX:XLC", "Breadth #2")
+b3 = input.symbol("AMEX:XLE", "Breadth #3")
+b4 = input.symbol("AMEX:XLF", "Breadth #4")
+b5 = input.symbol("AMEX:XLI", "Breadth #5")
+b6 = input.symbol("AMEX:XLK", "Breadth #6")
+b7 = input.symbol("AMEX:XLP", "Breadth #7")
+b8 = input.symbol("AMEX:XLU", "Breadth #8")
+b9 = input.symbol("AMEX:XLV", "Breadth #9")
+b10 = input.symbol("AMEX:XLY", "Breadth #10")
+
+breadthLen = input.int(50, "Breadth SMA length", minval=10)
+
+adxLen       = input.int(14, "ADX length", minval=5)
+adxSmooth    = input.int(14, "ADX smoothing", minval=5)
+atrLen       = input.int(14, "ATR length", minval=5)
+atrVolThresh = input.float(2.5, "ATR% threshold for Volatile", step=0.1)
+
+volLookback  = input.int(20, "Volume avg length", minval=5)
+volExpBars   = input.int(5, "Volume expansion lookback", minval=2)
+
+bigCandleMult = input.float(1.5, "Big candle = Range > ATR *", step=0.1)
+closeTopPct   = input.float(0.7, "Close in top % for Up expansion", step=0.05)
+closeBotPct   = input.float(0.3, "Close in bottom % for Down expansion", step=0.05)
+
+// =====================
+// VIX
+// =====================
+vix = request.security(vixSymbol, timeframe.period, close)
+vixEma5  = ta.ema(vix, 5)
 vixEma20 = ta.ema(vix, 20)
 
 vixTrend =
@@ -17,58 +48,80 @@ vixLevel =
      vix <= 25 ? "20-25" : ">25"
 
 // =====================
-// MARKET REGIME
+// Market regime (ADX via DMI + ATR%)
 // =====================
-adx = ta.adx(14)
-atr = ta.atr(14)
-atrPerc = atr / close * 100
+atr = ta.atr(atrLen)
+atrPerc = atr / close * 100.0
+[plusDI, minusDI, adx] = ta.dmi(adxLen, adxSmooth)
 
 marketRegime =
-     atrPerc > 2.5 ? "Volatile" :
+     atrPerc > atrVolThresh ? "Volatile" :
      adx > 20 ? "Trending" : "Ranging"
 
 // =====================
-// VOLUME CONFIRMATION
+// Volume confirmation
 // =====================
-volAvg = ta.sma(volume, 20)
-volConfirm = volume > volAvg ? "Yes" : "No"
-volExpansion = volume > ta.highest(volume[1], 5) ? "Yes" : "No"
+volAvg = ta.sma(volume, volLookback)
+volConfirm   = volume > volAvg ? "Yes" : "No"
+volExpansion = volume > ta.highest(volume[1], volExpBars) ? "Yes" : "No"
 
 // =====================
-// BREADTH (SPX % > 50 SMA)
+// Breadth proxy: % of sector ETFs above SMA(breadthLen)
 // =====================
-breadthRaw = request.security("USI:SPX50R", timeframe.period, close)
+f_aboveSMA(sym) =>
+    c = request.security(sym, "D", close)
+    s = request.security(sym, "D", ta.sma(close, breadthLen))
+    na(c) or na(s) ? na : (c > s ? 1 : 0)
+
+a1  = f_aboveSMA(b1)
+a2  = f_aboveSMA(b2)
+a3  = f_aboveSMA(b3)
+a4  = f_aboveSMA(b4)
+a5  = f_aboveSMA(b5)
+a6  = f_aboveSMA(b6)
+a7  = f_aboveSMA(b7)
+a8  = f_aboveSMA(b8)
+a9  = f_aboveSMA(b9)
+a10 = f_aboveSMA(b10)
+
+// Count only non-na tickers (in case user removes some)
+validCount = (na(a1)?0:1)+(na(a2)?0:1)+(na(a3)?0:1)+(na(a4)?0:1)+(na(a5)?0:1)+(na(a6)?0:1)+(na(a7)?0:1)+(na(a8)?0:1)+(na(a9)?0:1)+(na(a10)?0:1)
+sumAbove   = (na(a1)?0:a1)+(na(a2)?0:a2)+(na(a3)?0:a3)+(na(a4)?0:a4)+(na(a5)?0:a5)+(na(a6)?0:a6)+(na(a7)?0:a7)+(na(a8)?0:a8)+(na(a9)?0:a9)+(na(a10)?0:a10)
+
+breadthPct = validCount == 0 ? na : (100.0 * sumAbove / validCount)
+
 breadth =
-     breadthRaw > 60 ? "Strong" :
-     breadthRaw < 40 ? "Weak" : "Neutral"
+     na(breadthPct) ? "N/A" :
+     breadthPct > 60 ? "Strong" :
+     breadthPct < 40 ? "Weak" : "Neutral"
 
 // =====================
-// COMPRESSION
+// Compression (ATR decreasing 3 bars)
 // =====================
 atrDeclining = atr < atr[1] and atr[1] < atr[2]
 compression = atrDeclining ? "Yes" : "No"
 
 // =====================
-// PRICE EXPANSION
+// Price expansion (big candle + close location)
 // =====================
-range = high - low
-bigCandle = range > atr * 1.5
+candleRange = high - low
+bigCandle = candleRange > atr * bigCandleMult
+closePos = candleRange == 0 ? 0.5 : (close - low) / candleRange
 
-closePos = (close - low) / (high - low)
-expansion =
-     bigCandle and closePos > 0.7 ? "Up" :
-     bigCandle and closePos < 0.3 ? "Down" : "No"
+priceExpansion =
+     bigCandle and closePos > closeTopPct ? "Up" :
+     bigCandle and closePos < closeBotPct ? "Down" : "No"
 
 // =====================
-// TABLE DISPLAY
+// Table
 // =====================
-var table dashboard = table.new(position.top_right, 2, 8, border_width=1)
+var table dashboard = table.new(position.top_right, 2, 9, border_width=1)
 
 if barstate.islast
     table.cell(dashboard, 0, 0, "Market Regime")
     table.cell(dashboard, 1, 0, marketRegime)
 
-    table.cell(dashboard, 0, 1, "Volume >20D")
+    table.cell(dashboard, 0, 1, "Volume > 20D avg")
     table.cell(dashboard, 1, 1, volConfirm)
 
     table.cell(dashboard, 0, 2, "Volume Expansion")
@@ -80,11 +133,14 @@ if barstate.islast
     table.cell(dashboard, 0, 4, "VIX Level")
     table.cell(dashboard, 1, 4, vixLevel)
 
-    table.cell(dashboard, 0, 5, "Breadth")
-    table.cell(dashboard, 1, 5, breadth)
+    table.cell(dashboard, 0, 5, "Breadth (Sector %>SMA50)")
+    table.cell(dashboard, 1, 5, na(breadthPct) ? "N/A" : (breadth + " (" + str.tostring(math.round(breadthPct)) + "%)"))
 
     table.cell(dashboard, 0, 6, "Compression")
     table.cell(dashboard, 1, 6, compression)
 
     table.cell(dashboard, 0, 7, "Price Expansion")
-    table.cell(dashboard, 1, 7, expansion)
+    table.cell(dashboard, 1, 7, priceExpansion)
+
+    table.cell(dashboard, 0, 8, "ADX / ATR%")
+    table.cell(dashboard, 1, 8, str.tostring(math.round(adx, 1)) + " / " + str.tostring(math.round(atrPerc, 2)) + "%")
