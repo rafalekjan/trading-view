@@ -1,0 +1,60 @@
+//@version=6
+indicator("RS/RW Zones", overlay=true)
+
+// -----------------------------------------------------------------------------
+// Inputs: RS/RW
+// -----------------------------------------------------------------------------
+grpRS = "Relative Strength / Weakness (tlo)"
+showRSZones      = input.bool(true, "Zaznacz obszar RS/RW (tlo)", group=grpRS)
+benchSymbol      = input.symbol("SPY", "Benchmark", group=grpRS)
+rsLen            = input.int(20, "RS MA length", minval=1, group=grpRS)
+excludePremarket = input.bool(true, "Wylacz pre/after z RS (RTH only)", group=grpRS)
+rthSession       = input.session("0930-1600", "RTH session (dla RS)", group=grpRS)
+colorOnlyRTH     = input.bool(true, "Koloruj tlo tylko w RTH", group=grpRS)
+useTrendGate     = input.bool(false, "Wymagaj trendu (rosnie/spada)", group=grpRS)
+trendBars        = input.int(5, "Trend bars", minval=1, group=grpRS)
+rsBgAlpha        = input.int(88, "Przezroczystosc tla (0-100)", minval=0, maxval=100, group=grpRS)
+trendBoost       = input.int(12, "Wzmocnienie koloru przy trend gate (0-30)", minval=0, maxval=30, group=grpRS)
+
+// RS/RW background
+isRTH = not na(time(timeframe.period, rthSession))
+benchCloseRaw = request.security(benchSymbol, timeframe.period, close)
+
+var float closeRTH      = na
+var float benchCloseRTH = na
+if not excludePremarket
+    closeRTH      := close
+    benchCloseRTH := benchCloseRaw
+else
+    if isRTH
+        closeRTH      := close
+        benchCloseRTH := benchCloseRaw
+    else
+        closeRTH      := nz(closeRTH[1], close)
+        benchCloseRTH := nz(benchCloseRTH[1], benchCloseRaw)
+
+rs   = closeRTH / benchCloseRTH
+rsMA = ta.sma(rs, rsLen)
+
+rsUp   = ta.rising(rs, trendBars)
+rsDown = ta.falling(rs, trendBars)
+
+gateRS = not useTrendGate or rsUp
+gateRW = not useTrendGate or rsDown
+
+sideUp   = rs > rsMA
+sideDown = rs < rsMA
+
+strongRS = showRSZones and sideUp and gateRS
+strongRW = showRSZones and sideDown and gateRW
+
+allowBg = showRSZones and (not colorOnlyRTH or isRTH)
+alphaBase   = rsBgAlpha
+alphaStrong = math.max(0, rsBgAlpha - trendBoost)
+
+color bg = na
+if allowBg
+    bg := sideUp   ? color.new(color.lime, strongRS ? alphaStrong : alphaBase) :
+          sideDown ? color.new(color.red,  strongRW ? alphaStrong : alphaBase) :
+          na
+bgcolor(bg)
