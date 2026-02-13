@@ -30,13 +30,10 @@ closeBotPct = input.float(0.3, "Close in bottom % for Down expansion", step=0.05
 
 pivL = input.int(3, "Pivot left bars", minval=1)
 pivR = input.int(3, "Pivot right bars", minval=1)
+quickSwingLen = input.int(3, "Quick swing lookback", minval=2)
 
 rangeN = input.int(20, "Breaking range lookback", minval=10)
 vwapTF = input.timeframe("D", "VWAP timeframe")
-
-biasMode = input.string("Hybrid", "Bias mode", options=["Structure","MA Alignment","Hybrid"])
-locationMode = input.string("Range Breakout", "Location mode", options=["Range Breakout","SMA200 Proximity","Swing Proximity"])
-roomMode = input.string("Weekly Range %", "Room mode", options=["Weekly Range %","ATR Multiple","Structure Continuation"])
 
 nearPctSR = input.float(1.0, "Near level threshold (%)", step=0.1)
 roomNonePct = input.float(1.0, "Room None threshold (%)", step=0.1)
@@ -52,8 +49,7 @@ f_roomFromATR(distATR) => distATR <= roomNoneATR ? "None" : distATR <= roomLimAT
 
 // ===================== Breadth proxy =====================
 f_aboveSMA(sym) =>
-    c = request.security(sym, "D", close)
-    s = request.security(sym, "D", ta.sma(close, breadthLen))
+    [c, s] = request.security(sym, "D", [close, ta.sma(close, breadthLen)])
     na(c) or na(s) ? na : (c > s ? 1 : 0)
 
 a1 = f_aboveSMA(b1), a2 = f_aboveSMA(b2), a3 = f_aboveSMA(b3), a4 = f_aboveSMA(b4), a5 = f_aboveSMA(b5)
@@ -73,35 +69,24 @@ vixTrend = vixEma5 > vixEma20 ? "Rising" : vixEma5 < vixEma20 ? "Falling" : "Fla
 vixLevel = vix < 20 ? "<20" : vix <= 25 ? "20-25" : ">25"
 
 // ===================== Daily series =====================
-dClose = request.security(syminfo.tickerid, "D", close)
-dHigh = request.security(syminfo.tickerid, "D", high)
-dLow = request.security(syminfo.tickerid, "D", low)
-dVol = request.security(syminfo.tickerid, "D", volume)
-
-dSma20 = request.security(syminfo.tickerid, "D", ta.sma(close, 20))
-dSma50 = request.security(syminfo.tickerid, "D", ta.sma(close, 50))
-dSma200 = request.security(syminfo.tickerid, "D", ta.sma(close, 200))
+[dClose, dHigh, dLow, dVol, dSma20, dSma50, dSma200, dAtr, dVolAvg, dVolHighestPrev, rsi14, ema21, ema50, roc20] = request.security(syminfo.tickerid, "D", [close, high, low, volume, ta.sma(close, 20), ta.sma(close, 50), ta.sma(close, 200), ta.atr(atrLen), ta.sma(volume, volLookback), ta.highest(volume[1], volExpBars), ta.rsi(close, 14), ta.ema(close, 21), ta.ema(close, 50), ta.roc(close, 20)])
+[macdLine, macdSignal, macdHist] = request.security(syminfo.tickerid, "D", ta.macd(close, 12, 26, 9))
+[_, __, dAdx] = request.security(syminfo.tickerid, "D", ta.dmi(adxLen, adxSmooth))
+[pwHigh, pwLow] = request.security(syminfo.tickerid, "W", [high[1], low[1]])
 
 above2050 = (dClose > dSma20) and (dClose > dSma50)
 above200 = dClose > dSma200
 
-pwHigh = request.security(syminfo.tickerid, "W", high[1])
-pwLow  = request.security(syminfo.tickerid, "W", low[1])
-
 // ===================== VWAP (best-effort) =====================
-tfClose = request.security(syminfo.tickerid, vwapTF, close)
-tfVWAP  = request.security(syminfo.tickerid, vwapTF, ta.vwap(hlc3))
+[tfClose, tfVWAP] = request.security(syminfo.tickerid, vwapTF, [close, ta.vwap(hlc3)])
 vwapState = na(tfVWAP) ? "Zrob sam" : (tfClose > tfVWAP ? "Above" : "Below")
 
 // ===================== Market regime =====================
-dAtr = request.security(syminfo.tickerid, "D", ta.atr(atrLen))
 dAtrPerc = (dAtr / dClose) * 100.0
-[_, __, dAdx] = request.security(syminfo.tickerid, "D", ta.dmi(adxLen, adxSmooth))
 
 // ===================== Volume confirmation =====================
-dVolAvg = request.security(syminfo.tickerid, "D", ta.sma(volume, volLookback))
 volGt20d = dVol > dVolAvg ? "Yes" : "No"
-volExp = dVol > request.security(syminfo.tickerid, "D", ta.highest(volume[1], volExpBars)) ? "Yes" : "No"
+volExp = dVol > dVolHighestPrev ? "Yes" : "No"
 
 // ===================== Structure from pivots =====================
 ph = ta.pivothigh(dHigh, pivL, pivR)
@@ -119,14 +104,8 @@ isLL = not na(lastPL) and not na(prevPL) and lastPL < prevPL
 // =====================
 // Momentum core (internal only)
 // =====================
-rsi14 = request.security(syminfo.tickerid, "D", ta.rsi(close, 14))
-[macdLine, macdSignal, macdHist] = request.security(syminfo.tickerid, "D", ta.macd(close, 12, 26, 9))
-ema21 = request.security(syminfo.tickerid, "D", ta.ema(close, 21))
-ema50 = request.security(syminfo.tickerid, "D", ta.ema(close, 50))
-roc20 = request.security(syminfo.tickerid, "D", ta.roc(close, 20))
-
-momentumBullScore = (rsi14 > 50 ? 1 : 0) + (macdLine > macdSignal ? 1 : 0) + (ema21 > ema50 ? 1 : 0)
-momentumBearScore = (rsi14 < 50 ? 1 : 0) + (macdLine < macdSignal ? 1 : 0) + (ema21 < ema50 ? 1 : 0)
+momentumBullScore = (rsi14 > 52 ? 1 : 0) + (macdLine > macdSignal ? 1 : 0) + (ema21 > ema50 ? 1 : 0)
+momentumBearScore = (rsi14 < 48 ? 1 : 0) + (macdLine < macdSignal ? 1 : 0) + (ema21 < ema50 ? 1 : 0)
 momentumBull = momentumBullScore >= 2
 momentumBear = momentumBearScore >= 2
 momentumBullStrong = momentumBull and roc20 > 0
@@ -136,6 +115,12 @@ momentumBearStrong = momentumBear and roc20 < 0
 structureRaw = (isHH and isHL) ? "HH/HL" : (isLL and isLH) ? "LL/LH" : "Mixed"
 structure = structureRaw
 trendTxt = structure == "HH/HL" ? "Higher lows" : structure == "LL/LH" ? "Lower highs" : "None"
+quickHighNow = ta.highest(dHigh, quickSwingLen)
+quickHighPrev = ta.highest(dHigh[quickSwingLen], quickSwingLen)
+quickLowNow = ta.lowest(dLow, quickSwingLen)
+quickLowPrev = ta.lowest(dLow[quickSwingLen], quickSwingLen)
+quickLH = not na(quickHighNow) and not na(quickHighPrev) and quickHighNow < quickHighPrev
+quickHL = not na(quickLowNow) and not na(quickLowPrev) and quickLowNow > quickLowPrev
 
 macdHistGrowing = macdHist > macdHist[1]
 macdHistFalling = macdHist < macdHist[1]
@@ -157,13 +142,14 @@ priceExpansion = (bigCandle and closePos > closeTopPct and momentumBullStrong) ?
 // ===================== Bias variants =====================
 bias_structure = structure == "HH/HL" ? "Bullish" : structure == "LL/LH" ? "Bearish" : "Neutral"
 bias_ma = (dClose > dSma200 and dSma50 > dSma200) ? "Bullish" : (dClose < dSma200 and dSma50 < dSma200) ? "Bearish" : "Neutral"
-rsiNeutralZone = rsi14 >= 48 and rsi14 <= 52
-edgeBullScore = (rsi14 > 52 ? 1 : 0) + (macdLine > macdSignal ? 1 : 0) + (ema21 > ema50 ? 1 : 0)
-edgeBearScore = (rsi14 < 48 ? 1 : 0) + (macdLine < macdSignal ? 1 : 0) + (ema21 < ema50 ? 1 : 0)
-edgeBull = edgeBullScore >= 2
-edgeBear = edgeBearScore >= 2
-bias_hybrid = rsiNeutralZone ? "Neutral" : (structure == "LL/LH" and dClose < dSma200 and edgeBear) ? "Bearish" : (structure == "HH/HL" and dClose > dSma200 and edgeBull) ? "Bullish" : bias_ma
-bias_selected = biasMode == "Structure" ? bias_structure : biasMode == "MA Alignment" ? bias_ma : bias_hybrid
+earlyBear = structureRaw == "Mixed" and (isLH or quickLH) and dClose < dSma20 and momentumBear
+earlyBull = structureRaw == "Mixed" and (isHL or quickHL) and dClose > dSma20 and momentumBull
+bias_hybrid = structure == "LL/LH" and dClose < dSma200 ? "Bearish" :
+              structure == "HH/HL" and dClose > dSma200 ? "Bullish" :
+              earlyBear ? "Bearish (Early)" :
+              earlyBull ? "Bullish (Early)" :
+              bias_ma
+bias_selected = bias_hybrid
 
 // ===================== Location variants =====================
 priorHigh = ta.highest(dHigh, rangeN)[1]
