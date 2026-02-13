@@ -1,5 +1,5 @@
 //@version=6
-indicator("SPY Gatekeeper Dashboard (3x Bias/Location/Room, split behavior)", overlay=true)
+indicator("SPY Gatekeeper)", overlay=true)
 
 // ===================== Inputs =====================
 vixSymbol = input.symbol("CBOE:VIX", "VIX symbol")
@@ -157,7 +157,12 @@ priceExpansion = (bigCandle and closePos > closeTopPct and momentumBullStrong) ?
 // ===================== Bias variants =====================
 bias_structure = structure == "HH/HL" ? "Bullish" : structure == "LL/LH" ? "Bearish" : "Neutral"
 bias_ma = (dClose > dSma200 and dSma50 > dSma200) ? "Bullish" : (dClose < dSma200 and dSma50 < dSma200) ? "Bearish" : "Neutral"
-bias_hybrid = (structure == "HH/HL" and dClose > dSma200 and momentumBull) ? "Bullish" : (structure == "LL/LH" and dClose < dSma200 and momentumBear) ? "Bearish" : bias_ma
+rsiNeutralZone = rsi14 >= 48 and rsi14 <= 52
+edgeBullScore = (rsi14 > 52 ? 1 : 0) + (macdLine > macdSignal ? 1 : 0) + (ema21 > ema50 ? 1 : 0)
+edgeBearScore = (rsi14 < 48 ? 1 : 0) + (macdLine < macdSignal ? 1 : 0) + (ema21 < ema50 ? 1 : 0)
+edgeBull = edgeBullScore >= 2
+edgeBear = edgeBearScore >= 2
+bias_hybrid = rsiNeutralZone ? "Neutral" : (structure == "LL/LH" and dClose < dSma200 and edgeBear) ? "Bearish" : (structure == "HH/HL" and dClose > dSma200 and edgeBull) ? "Bullish" : bias_ma
 bias_selected = biasMode == "Structure" ? bias_structure : biasMode == "MA Alignment" ? bias_ma : bias_hybrid
 
 // ===================== Location variants =====================
