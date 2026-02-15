@@ -1,0 +1,219 @@
+//@version=6
+indicator("Structure & Planning - 4h", overlay=true)
+
+//===================== INPUTS =====================
+tf4h            = input.timeframe("240", "4H timeframe (fixed)")
+pivL            = input.int(3, "Pivot left", minval=1)
+pivR            = input.int(3, "Pivot right", minval=1)
+
+ema20Len        = input.int(20, "EMA20", minval=5)
+ema50Len        = input.int(50, "EMA50", minval=10)
+sma200Len       = input.int(200, "SMA200", minval=50)
+
+atrLen          = input.int(14, "ATR len", minval=5)
+adxLen          = input.int(14, "ADX len", minval=5)
+
+anchorMidPct    = input.float(0.35, "Anchor 'Around' band (%)", step=0.05)  // around EMA20 band
+rangeN          = input.int(40, "4H range lookback", minval=10)
+nearEdgePct     = input.float(20.0, "Near edge if within (%) of range", step=1.0)
+
+nearLvlATR      = input.float(0.5, "Near level (ATR multiple)", step=0.1)  // for key-level proximity
+
+showDash        = input.bool(true, "Show dashboard")
+pos             = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"])
+vis             = input.int(20, "Table transparency (0-90)", minval=0, maxval=90)
+
+//===================== HELPERS =====================
+f_pos(p) => p == "Top Right" ? position.top_right : p == "Top Left" ? position.top_left : p == "Bottom Right" ? position.bottom_right : position.bottom_left
+
+f_anchorState(price, anchor) =>
+    band = anchor * (anchorMidPct / 100.0)
+    price > anchor + band ? "Above anchor" : price < anchor - band ? "Below anchor" : "Around anchor"
+
+f_levelPos(price, hi, lo) =>
+    rng = hi - lo
+    rng == 0 ? "Mid-range" :
+     ((price - lo) / rng) * 100.0 <= nearEdgePct ? "Near support" :
+     ((hi - price) / rng) * 100.0 <= nearEdgePct ? "Near resistance" :
+     price >= hi ? "Range high" :
+     price <= lo ? "Range low" :
+     "Mid-range"
+
+f_nearLvl(price, lvl, atr) =>
+    (na(lvl) or atr == 0) ? false : math.abs(price - lvl) <= (atr * nearLvlATR)
+
+f_pack3(a, b, c) => "M1: " + a + "\nM2: " + b + "\nM3: " + c
+
+f_adx(len) =>
+    up = ta.change(high)
+    down = -ta.change(low)
+    plusDM = (up > down and up > 0) ? up : 0.0
+    minusDM = (down > up and down > 0) ? down : 0.0
+    trur = ta.rma(ta.tr(true), len)
+    plus = trur == 0 ? 0.0 : 100.0 * ta.rma(plusDM, len) / trur
+    minus = trur == 0 ? 0.0 : 100.0 * ta.rma(minusDM, len) / trur
+    sumDI = plus + minus
+    dx = sumDI == 0 ? 0.0 : 100.0 * math.abs(plus - minus) / sumDI
+    ta.rma(dx, len)
+
+//===================== 4H SERIES =====================
+c4  = request.security(syminfo.tickerid, tf4h, close)
+o4  = request.security(syminfo.tickerid, tf4h, open)
+h4  = request.security(syminfo.tickerid, tf4h, high)
+l4  = request.security(syminfo.tickerid, tf4h, low)
+v4  = request.security(syminfo.tickerid, tf4h, volume)
+
+ema20_4  = request.security(syminfo.tickerid, tf4h, ta.ema(close, ema20Len))
+ema50_4  = request.security(syminfo.tickerid, tf4h, ta.ema(close, ema50Len))
+sma200_4 = request.security(syminfo.tickerid, tf4h, ta.sma(close, sma200Len))
+
+atr4     = request.security(syminfo.tickerid, tf4h, ta.atr(atrLen))
+atrp4    = c4 == 0 ? na : (atr4 / c4) * 100.0
+atrp4ma  = request.security(syminfo.tickerid, tf4h, ta.sma((ta.atr(atrLen) / close) * 100.0, 20))
+
+adx4     = request.security(syminfo.tickerid, tf4h, f_adx(adxLen))
+
+rangeHi4 = request.security(syminfo.tickerid, tf4h, ta.highest(high, rangeN))
+rangeLo4 = request.security(syminfo.tickerid, tf4h, ta.lowest(low, rangeN))
+loc4     = f_levelPos(c4, rangeHi4, rangeLo4)
+
+//===================== STRUCTURE (3 METHODS) =====================
+// M1: pivots HH/HL vs LL/LH
+ph4 = request.security(syminfo.tickerid, tf4h, ta.pivothigh(high, pivL, pivR))
+pl4 = request.security(syminfo.tickerid, tf4h, ta.pivotlow(low, pivL, pivR))
+lastPH4 = ta.valuewhen(not na(ph4), ph4, 0)
+prevPH4 = ta.valuewhen(not na(ph4), ph4, 1)
+lastPL4 = ta.valuewhen(not na(pl4), pl4, 0)
+prevPL4 = ta.valuewhen(not na(pl4), pl4, 1)
+
+isHH4 = not na(lastPH4) and not na(prevPH4) and lastPH4 > prevPH4
+isLH4 = not na(lastPH4) and not na(prevPH4) and lastPH4 < prevPH4
+isHL4 = not na(lastPL4) and not na(prevPL4) and lastPL4 > prevPL4
+isLL4 = not na(lastPL4) and not na(prevPL4) and lastPL4 < prevPL4
+structureM1 = (isHH4 and isHL4) ? "HH/HL" : (isLL4 and isLH4) ? "LL/LH" : "Mixed"
+
+// M2: EMA20 slope + price vs EMA20
+slope20 = request.security(syminfo.tickerid, tf4h, ta.linreg(ta.ema(close, ema20Len), 10, 0) - ta.linreg(ta.ema(close, ema20Len), 10, 1))
+structureM2 = (slope20 > 0 and c4 > ema20_4) ? "HH/HL" : (slope20 < 0 and c4 < ema20_4) ? "LL/LH" : "Mixed"
+
+// M3: EMA20 vs EMA50 + price location
+structureM3 = (ema20_4 > ema50_4 and c4 > ema20_4) ? "HH/HL" : (ema20_4 < ema50_4 and c4 < ema20_4) ? "LL/LH" : "Mixed"
+
+//===================== BIAS (3 METHODS) =====================
+// M1: structureM1 + SMA200 filter
+biasM1 = (structureM1 == "HH/HL" and c4 > sma200_4) ? "Bullish" : (structureM1 == "LL/LH" and c4 < sma200_4) ? "Bearish" : "Neutral"
+// M2: MA alignment
+biasM2 = (c4 > sma200_4 and ema50_4 > sma200_4) ? "Bullish" : (c4 < sma200_4 and ema50_4 < sma200_4) ? "Bearish" : "Neutral"
+// M3: anchor + EMA stack
+biasM3 = (c4 > ema20_4 and ema20_4 > ema50_4) ? "Bullish" : (c4 < ema20_4 and ema20_4 < ema50_4) ? "Bearish" : "Neutral"
+
+//===================== ANCHOR STATE (1 METHOD) =====================
+anchorState = (na(c4) or na(ema20_4)) ? "---" : f_anchorState(c4, ema20_4)
+
+//===================== PLANNED SETUP (AUTO HEURISTIC) =====================
+// You will still select manually in UI; this is just a suggestion.
+priorHi = request.security(syminfo.tickerid, tf4h, ta.highest(high, rangeN)[1])
+priorLo = request.security(syminfo.tickerid, tf4h, ta.lowest(low, rangeN)[1])
+
+breakUp = not na(priorHi) and c4 > priorHi
+breakDn = not na(priorLo) and c4 < priorLo
+
+pullbackWithinBull = (biasM2 == "Bullish") and (c4 < ema20_4) and (c4 > sma200_4)
+pullbackWithinBear = (biasM2 == "Bearish") and (c4 > ema20_4) and (c4 < sma200_4)
+
+setupAuto =
+     breakUp and biasM2 == "Bullish" ? "Breakout continuation" :
+     breakDn and biasM2 == "Bearish" ? "Breakdown continuation" :
+     pullbackWithinBull or pullbackWithinBear ? "Pullback within trend" :
+     (loc4 == "Mid-range") ? "Range play" :
+     "Reversal attempt"
+
+//===================== TREND QUALITY (2 METHODS -> show both) =====================
+// M1: ADX-based
+trendQualityM1 =
+     na(adx4) ? "---" :
+     adx4 >= 25 ? "Clean" :
+     adx4 >= 18 ? "Acceptable" :
+     "Choppy"
+
+// M2: whipsaw proxy (how often price crosses EMA20 in last 20 bars)
+crossCount = request.security(syminfo.tickerid, tf4h, ta.sma(ta.cross(close, ta.ema(close, ema20Len)) ? 1.0 : 0.0, 20) * 20.0)
+trendQualityM2 =
+     na(crossCount) ? "---" :
+     crossCount >= 6 ? "Choppy" :
+     crossCount >= 3 ? "Acceptable" :
+     "Clean"
+
+//===================== VOLATILITY PROFILE (1) =====================
+volProfile =
+     (na(atrp4) or na(atrp4ma)) ? "---" :
+     atrp4 > atrp4ma ? "Expanding" :
+     atrp4 < atrp4ma ? "Contracting" :
+     "Stable"
+
+//===================== KEY LEVEL TYPE (SUGGEST) =====================
+// We can suggest whether current price is near these *levels*.
+// Supply/Demand is not reliably computable -> "---".
+dHigh1 = request.security(syminfo.tickerid, "D", high[1])
+dLow1  = request.security(syminfo.tickerid, "D", low[1])
+
+wHigh1 = request.security(syminfo.tickerid, "W", high[1])
+wLow1  = request.security(syminfo.tickerid, "W", low[1])
+
+nearPDH = f_nearLvl(c4, dHigh1, atr4) or f_nearLvl(c4, dLow1, atr4)
+nearWHL = f_nearLvl(c4, wHigh1, atr4) or f_nearLvl(c4, wLow1, atr4)
+
+midRange4 = (rangeHi4 + rangeLo4) / 2.0
+nearRangeLvl = f_nearLvl(c4, rangeHi4, atr4) or f_nearLvl(c4, rangeLo4, atr4) or f_nearLvl(c4, midRange4, atr4)
+
+ma50 = ema50_4
+ma200 = sma200_4
+nearMajorMA = f_nearLvl(c4, ma50, atr4) or f_nearLvl(c4, ma200, atr4)
+
+htfSupplyDemand = "---"  // cannot auto-detect robustly
+
+keyLevelsTxt =
+     "Prior day H/L: " + (nearPDH ? "Yes" : "No") +
+     "\nWeekly H/L: " + (nearWHL ? "Yes" : "No") +
+     "\n4H range level: " + (nearRangeLvl ? "Yes" : "No") +
+     "\nMajor MA (50/200): " + (nearMajorMA ? "Yes" : "No") +
+     "\nHTF supply/demand: " + htfSupplyDemand
+
+//===================== RISK PLANNING FIELDS (NOT TV) =====================
+invalidationLogic = "---"
+liquidityCheck    = "---"
+notesTxt          = "---"
+
+//===================== TABLE =====================
+bg   = color.new(color.black, vis)
+kbg  = color.new(color.silver, vis)
+txt  = color.new(color.white, vis)
+
+var table t = table.new(f_pos(pos), 2, 16, border_width=1, frame_color=color.new(color.white, vis))
+
+f_row(r, k, v) =>
+    table.cell(t, 0, r, k, bgcolor=kbg, text_color=txt, text_halign=text.align_left)
+    table.cell(t, 1, r, v, bgcolor=bg,  text_color=txt, text_halign=text.align_left)
+
+if barstate.islast
+    if showDash
+        f_row(0,  "Ticker", syminfo.ticker)
+        f_row(1,  "Bias", f_pack3(biasM1, biasM2, biasM3))
+        f_row(2,  "Structure", f_pack3(structureM1, structureM2, structureM3))
+        f_row(3,  "Anchor state (EMA20)", anchorState)
+        f_row(4,  "Location", loc4)
+        f_row(5,  "Key level type (suggest)", keyLevelsTxt)
+        f_row(6,  "Planned setup (auto)", setupAuto)
+        f_row(7,  "Trend quality", "M1 ADX: " + trendQualityM1 + "\nM2 Crosses: " + trendQualityM2)
+        f_row(8,  "Volatility profile", volProfile)
+        f_row(9,  "Invalidation logic", invalidationLogic)
+        f_row(10, "Liquidity check", liquidityCheck)
+        f_row(11, "Notes", notesTxt)
+
+        // Useful numeric context (optional)
+        f_row(12, "ATR(4H)", na(atr4) ? "---" : str.tostring(atr4, format.mintick))
+        f_row(13, "ADX(4H)", na(adx4) ? "---" : str.tostring(adx4, "#.0"))
+        f_row(14, "Range hi/lo", (na(rangeHi4) or na(rangeLo4)) ? "---" : (str.tostring(rangeHi4, format.mintick) + " / " + str.tostring(rangeLo4, format.mintick)))
+        f_row(15, "Pivot S/R (suggest)", "S: " + (na(lastPL4) ? "---" : str.tostring(lastPL4, format.mintick)) + "\nR: " + (na(lastPH4) ? "---" : str.tostring(lastPH4, format.mintick)))
+    else
+        table.clear(t, 0, 0, 1, 15)
