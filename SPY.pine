@@ -1,5 +1,5 @@
 //@version=6
-indicator("SPY Gatekeeper)", overlay=true)
+indicator("SPY Gatekeeper", overlay=true)
 
 // ===================== Inputs =====================
 vixSymbol = input.symbol("CBOE:VIX", "VIX symbol")
