@@ -153,7 +153,7 @@ volProfile =
 
 //===================== KEY LEVEL TYPE (SUGGEST) =====================
 // We can suggest whether current price is near these *levels*.
-// Supply/Demand is not reliably computable -> "---".
+// Supply/Demand is not reliably computable in a robust way.
 dHigh1 = request.security(syminfo.tickerid, "D", high[1])
 dLow1  = request.security(syminfo.tickerid, "D", low[1])
 
@@ -170,26 +170,18 @@ ma50 = ema50_4
 ma200 = sma200_4
 nearMajorMA = f_nearLvl(c4, ma50, atr4) or f_nearLvl(c4, ma200, atr4)
 
-htfSupplyDemand = "---"  // cannot auto-detect robustly
-
 keyLevelsTxt =
      "Prior day H/L: " + (nearPDH ? "Yes" : "No") +
      "\nWeekly H/L: " + (nearWHL ? "Yes" : "No") +
      "\n4H range level: " + (nearRangeLvl ? "Yes" : "No") +
-     "\nMajor MA (50/200): " + (nearMajorMA ? "Yes" : "No") +
-     "\nHTF supply/demand: " + htfSupplyDemand
-
-//===================== RISK PLANNING FIELDS (NOT TV) =====================
-invalidationLogic = "---"
-liquidityCheck    = "---"
-notesTxt          = "---"
+     "\nMajor MA (50/200): " + (nearMajorMA ? "Yes" : "No")
 
 //===================== TABLE =====================
 bg   = color.new(color.black, vis)
 kbg  = color.new(color.silver, vis)
 txt  = color.new(color.white, vis)
 
-var table t = table.new(f_pos(pos), 2, 16, border_width=1, frame_color=color.new(color.white, vis))
+var table t = table.new(f_pos(pos), 2, 12, border_width=1, frame_color=color.new(color.white, vis))
 
 f_row(r, k, v) =>
     table.cell(t, 0, r, k, bgcolor=kbg, text_color=txt, text_halign=text.align_left)
@@ -197,23 +189,19 @@ f_row(r, k, v) =>
 
 if barstate.islast
     if showDash
-        f_row(0,  "Ticker", syminfo.ticker)
-        f_row(1,  "Bias", f_pack3(biasM1, biasM2, biasM3))
-        f_row(2,  "Structure", f_pack3(structureM1, structureM2, structureM3))
-        f_row(3,  "Anchor state (EMA20)", anchorState)
-        f_row(4,  "Location", loc4)
-        f_row(5,  "Key level type (suggest)", keyLevelsTxt)
-        f_row(6,  "Planned setup (auto)", setupAuto)
-        f_row(7,  "Trend quality", "M1 ADX: " + trendQualityM1 + "\nM2 Crosses: " + trendQualityM2)
-        f_row(8,  "Volatility profile", volProfile)
-        f_row(9,  "Invalidation logic", invalidationLogic)
-        f_row(10, "Liquidity check", liquidityCheck)
-        f_row(11, "Notes", notesTxt)
+        f_row(0,  "Bias", f_pack3(biasM1, biasM2, biasM3))
+        f_row(1,  "Structure", f_pack3(structureM1, structureM2, structureM3))
+        f_row(2,  "Anchor state (EMA20)", anchorState)
+        f_row(3,  "Location", loc4)
+        f_row(4,  "Key level type (suggest)", keyLevelsTxt)
+        f_row(5,  "Planned setup (auto)", setupAuto)
+        f_row(6,  "Trend quality", "M1 ADX: " + trendQualityM1 + "\nM2 Crosses: " + trendQualityM2)
+        f_row(7,  "Volatility profile", volProfile)
 
         // Useful numeric context (optional)
-        f_row(12, "ATR(4H)", na(atr4) ? "---" : str.tostring(atr4, format.mintick))
-        f_row(13, "ADX(4H)", na(adx4) ? "---" : str.tostring(adx4, "#.0"))
-        f_row(14, "Range hi/lo", (na(rangeHi4) or na(rangeLo4)) ? "---" : (str.tostring(rangeHi4, format.mintick) + " / " + str.tostring(rangeLo4, format.mintick)))
-        f_row(15, "Pivot S/R (suggest)", "S: " + (na(lastPL4) ? "---" : str.tostring(lastPL4, format.mintick)) + "\nR: " + (na(lastPH4) ? "---" : str.tostring(lastPH4, format.mintick)))
+        f_row(8,  "ATR(4H)", na(atr4) ? "---" : str.tostring(atr4, format.mintick))
+        f_row(9,  "ADX(4H)", na(adx4) ? "---" : str.tostring(adx4, "#.0"))
+        f_row(10, "Range hi/lo", (na(rangeHi4) or na(rangeLo4)) ? "---" : (str.tostring(rangeHi4, format.mintick) + " / " + str.tostring(rangeLo4, format.mintick)))
+        f_row(11, "Pivot S/R (suggest)", "S: " + (na(lastPL4) ? "---" : str.tostring(lastPL4, format.mintick)) + "\nR: " + (na(lastPH4) ? "---" : str.tostring(lastPH4, format.mintick)))
     else
-        table.clear(t, 0, 0, 1, 15)
+        table.clear(t, 0, 0, 1, 11)

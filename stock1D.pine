@@ -1,5 +1,5 @@
 //@version=6
-indicator("Direction & Context", overlay=true)
+indicator("Direction & Context - 1D", overlay=true)
 
 //===================== INPUTS =====================
 spySymbol   = input.symbol("AMEX:SPY", "SPY symbol (for RS + alignment)")
@@ -257,9 +257,6 @@ gapPct = dClose[1] == 0 ? na : math.abs(dOpen - dClose[1]) / dClose[1] * 100.0
 gapAvg = ta.sma(gapPct, 20)
 gapRisk = na(gapAvg) ? "---" : (gapAvg <= gapLowPct ? "Low" : gapAvg >= gapHighPct ? "High" : "Medium")
 
-//===================== OPTIONS LIQUIDITY (NOT RELIABLE FROM TV) =====================
-optionsLiq = "---"  // keep manual (requires options chain / spreads / OI)
-
 //===================== EVENTS (NOT RELIABLE FROM TV) =====================
 earningsSoon = "---"
 dividendsSoon = "---"
@@ -281,7 +278,7 @@ bg   = color.new(color.black, vis)
 kbg  = color.new(color.silver, vis)
 txt  = color.new(color.white, vis)
 
-var table t = table.new(f_pos(pos), 2, 20, border_width=1, frame_color=color.new(color.white, vis))
+var table t = table.new(f_pos(pos), 2, 18, border_width=1, frame_color=color.new(color.white, vis))
 
 f_row(r, k, v) =>
     table.cell(t, 0, r, k, bgcolor=kbg, text_color=txt, text_halign=text.align_left)
@@ -306,15 +303,13 @@ if barstate.islast
         f_row(10, "Phase", f_pack3(phaseM1, phaseM2, phaseM3))
         f_row(11, "Pullback", f_pack3(pullbackM1, pullbackM2, pullbackM3))
 
-        f_row(12, "Trend quality", "---") // choppiness is subjective; keep manual unless you want a strict formula later
-        f_row(13, "Volatility state", volState)
-        f_row(14, "Extension state", extM1)
+        f_row(12, "Volatility state", volState)
+        f_row(13, "Extension state", extM1)
 
-        f_row(15, "Gap risk (proxy)", gapRisk)
-        f_row(16, "Options liquidity", optionsLiq)
+        f_row(14, "Gap risk (proxy)", gapRisk)
 
-        f_row(17, "Level position (proxy)", lvlPos)
-        f_row(18, "Support (suggest)", supportSuggest)
-        f_row(19, "Resistance (suggest)", resistSuggest)
+        f_row(15, "Level position (proxy)", lvlPos)
+        f_row(16, "Support (suggest)", supportSuggest)
+        f_row(17, "Resistance (suggest)", resistSuggest)
     else
-        table.clear(t, 0, 0, 1, 19)
+        table.clear(t, 0, 0, 1, 17)

@@ -1,0 +1,386 @@
+//@version=6
+indicator("Execution & Timing - 15m", overlay=true, max_labels_count=500)
+
+// =====================================================
+// Inputs
+// =====================================================
+spySymbol = input.symbol("AMEX:SPY", "SPY symbol (for alignment)")
+tf        = input.timeframe("15", "Execution TF (use 15)")
+showDash  = input.bool(true, "Show dashboard table")
+pos       = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"])
+vis       = input.int(20, "Table transparency (0 solid - 90 faint)", minval=0, maxval=90)
+
+// Sessions (US equities defaults)
+rthSession     = input.session("0930-1600", "RTH session (exchange time)")
+premarketSess  = input.session("0400-0930", "Premarket session (exchange time)")
+orMinutes      = input.int(30, "Opening Range minutes", minval=15, step=15)
+
+// Structure
+pivL = input.int(3, "Pivot left bars", minval=1)
+pivR = input.int(3, "Pivot right bars", minval=1)
+
+// Anchors / momentum
+emaFastLen = input.int(20, "EMA20 (micro anchor)", minval=5)
+emaSlowLen = input.int(50, "EMA50 (trend pressure)", minval=10)
+
+// Volume
+volLen     = input.int(20, "Volume MA length", minval=5)
+impMult    = input.float(1.20, "Impulse vol confirm (x MA)", step=0.05)
+dryMult    = input.float(0.80, "Pullback dries up (x MA)", step=0.05)
+
+// Trigger heuristics
+rangeLen   = input.int(20, "Breakout/Breakdown range lookback", minval=10)
+nearPct    = input.float(0.15, "Near-level band (%)", step=0.05) // for rejection detection
+
+// =====================================================
+// Helpers
+// =====================================================
+f_pos(p) => p == "Top Right" ? position.top_right : p == "Top Left" ? position.top_left : p == "Bottom Right" ? position.bottom_right : position.bottom_left
+
+f_str(v) => na(v) ? "---" : v
+
+f_near(price, level) =>
+    level == 0.0 ? false : math.abs(price - level) / level * 100.0 <= nearPct
+
+f_anchorState(price, anchor, midBandPct) =>
+    band = anchor * (midBandPct / 100.0)
+    price > anchor + band ? "Above" : price < anchor - band ? "Below" : "Middle"
+
+f_align(stockBias, spyBias) =>
+    (stockBias == "Neutral" or spyBias == "Neutral") ? "Diverging" :
+     (stockBias == spyBias) ? "Aligned" : "Opposite"
+
+f_isRTH() =>
+    not na(time(tf, rthSession))
+
+f_isPremarket() =>
+    not na(time(tf, premarketSess))
+
+// =====================================================
+// Series (15m base)
+// =====================================================
+c = request.security(syminfo.tickerid, tf, close)
+o = request.security(syminfo.tickerid, tf, open)
+h = request.security(syminfo.tickerid, tf, high)
+l = request.security(syminfo.tickerid, tf, low)
+v = request.security(syminfo.tickerid, tf, volume)
+
+ema20 = request.security(syminfo.tickerid, tf, ta.ema(close, emaFastLen))
+ema50 = request.security(syminfo.tickerid, tf, ta.ema(close, emaSlowLen))
+
+// VWAP (intraday). If chart doesn't support, you'll see na -> "---"
+vwap = request.security(syminfo.tickerid, tf, ta.vwap(hlc3))
+vwapState = na(vwap) ? "---" : (c > vwap ? "Above" : c < vwap ? "Below" : "Middle")
+
+// =====================================================
+// SPY context (15m)
+// =====================================================
+spyC    = request.security(spySymbol, tf, close)
+spyVwap = request.security(spySymbol, tf, ta.vwap(hlc3))
+spyVwapState = na(spyVwap) ? "---" : (spyC > spyVwap ? "Above" : "Below")
+
+// =====================================================
+// Structure (15m) — pivots
+// =====================================================
+ph = request.security(syminfo.tickerid, tf, ta.pivothigh(high, pivL, pivR))
+pl = request.security(syminfo.tickerid, tf, ta.pivotlow(low, pivL, pivR))
+
+lastPH = ta.valuewhen(not na(ph), ph, 0)
+prevPH = ta.valuewhen(not na(ph), ph, 1)
+lastPL = ta.valuewhen(not na(pl), pl, 0)
+prevPL = ta.valuewhen(not na(pl), pl, 1)
+
+isHH = not na(lastPH) and not na(prevPH) and lastPH > prevPH
+isLH = not na(lastPH) and not na(prevPH) and lastPH < prevPH
+isHL = not na(lastPL) and not na(prevPL) and lastPL > prevPL
+isLL = not na(lastPL) and not na(prevPL) and lastPL < prevPL
+
+structure15 = (isHH and isHL) ? "HH/HL" : (isLL and isLH) ? "LL/LH" : "Mixed"
+
+// Bias (15m) — simple, reactive
+// Bullish if price > EMA20 and EMA20>EMA50; Bearish if price < EMA20 and EMA20<EMA50; else Neutral.
+bias15 = (c > ema20 and ema20 > ema50) ? "Bullish" : (c < ema20 and ema20 < ema50) ? "Bearish" : "Neutral"
+
+// SPY bias proxy (15m) — same method
+spyEma20 = request.security(spySymbol, tf, ta.ema(close, emaFastLen))
+spyEma50 = request.security(spySymbol, tf, ta.ema(close, emaSlowLen))
+spyBias15 = (spyC > spyEma20 and spyEma20 > spyEma50) ? "Bullish" : (spyC < spyEma20 and spyEma20 < spyEma50) ? "Bearish" : "Neutral"
+
+spyAlign15 = f_align(bias15, spyBias15)
+
+// =====================================================
+// Session timing (auto)
+// =====================================================
+isRTH = f_isRTH()
+// Bar counter within RTH each day
+var int rthBarCount = 0
+newDay = ta.change(time("D")) != 0
+if newDay
+    rthBarCount := 0
+if isRTH
+    rthBarCount += 1
+
+barsInOR = math.max(1, int(orMinutes / 15))
+sessTiming2 = "---"
+if not isRTH
+    sessTiming2 := "---"
+else if rthBarCount <= barsInOR
+    sessTiming2 := "Open (first 30m)"
+else if (not na(time(tf, rthSession)) and na(time(tf, rthSession)[1]))
+    sessTiming2 := "Close"
+else if hour(time) >= 15
+    sessTiming2 := "Power hour"
+else if hour(time) >= 12 and hour(time) < 14
+    sessTiming2 := "Midday"
+else
+    sessTiming2 := "Midday"
+// =====================================================
+// Key intraday levels (auto where possible)
+// =====================================================
+// PDH/PDL
+pdh = request.security(syminfo.tickerid, "D", high[1])
+pdl = request.security(syminfo.tickerid, "D", low[1])
+
+// Premarket H/L (computed on 15m using premarket session)
+var float pmH = na
+var float pmL = na
+if newDay
+    pmH := na
+    pmL := na
+if f_isPremarket()
+    pmH := na(pmH) ? h : math.max(pmH, h)
+    pmL := na(pmL) ? l : math.min(pmL, l)
+
+// Opening Range H/L (first N minutes of RTH)
+var float orH = na
+var float orL = na
+var int orCount = 0
+if newDay
+    orH := na
+    orL := na
+    orCount := 0
+if isRTH
+    if orCount < barsInOR
+        orH := na(orH) ? h : math.max(orH, h)
+        orL := na(orL) ? l : math.min(orL, l)
+        orCount += 1
+
+// Last swing (from pivots)
+lastSwingLow  = lastPL
+lastSwingHigh = lastPH
+
+// =====================================================
+// Volume signals (auto)
+// =====================================================
+volMA = ta.sma(v, volLen)
+impulseVolConfirms = not na(volMA) and v >= volMA * impMult
+
+// Pullback “dries up” heuristic: in pullback against bias, volume < MA * dryMult
+isPullbackBull = bias15 == "Bullish" and c < ema20 and c > ema50
+isPullbackBear = bias15 == "Bearish" and c > ema20 and c < ema50
+pullbackDries = not na(volMA) and v <= volMA * dryMult and (isPullbackBull or isPullbackBear)
+
+// =====================================================
+// Structure breaks (auto)
+// =====================================================
+// If bullish: break = close < last swing low. If bearish: break = close > last swing high.
+string structureBreaksTxt = "---"
+if bias15 == "Bullish" and not na(lastSwingLow)
+    structureBreaksTxt := c < lastSwingLow ? "Yes" : "No"
+else if bias15 == "Bearish" and not na(lastSwingHigh)
+    structureBreaksTxt := c > lastSwingHigh ? "Yes" : "No"
+
+// =====================================================
+// Trigger detection (heuristics)
+// =====================================================
+// Range breakout/breakdown based on last N bars (excluding current bar)
+priorHi = ta.highest(h, rangeLen)[1]
+priorLo = ta.lowest(l, rangeLen)[1]
+
+// Reclaim: cross above VWAP/EMA20 after being below
+crossOverVwap = ta.crossover(c, vwap)
+crossOverEma20 = ta.crossover(c, ema20)
+crossAnyVwap = ta.cross(c, vwap)
+crossAnyEma20 = ta.cross(c, ema20)
+reclaim = (not na(vwap) and crossOverVwap) or crossOverEma20
+breakout = not na(priorHi) and c > priorHi
+breakdown = not na(priorLo) and c < priorLo
+
+// Rejection: price probes level (high/low beyond or into) but closes back away
+// We'll use nearest of: PDH/PDL/ORH/ORL/VWAP/PMH/PML if available
+nearPDH = not na(pdh) and f_near(c, pdh)
+nearPDL = not na(pdl) and f_near(c, pdl)
+nearORH = not na(orH) and f_near(c, orH)
+nearORL = not na(orL) and f_near(c, orL)
+nearVW  = not na(vwap) and f_near(c, vwap)
+nearPMH = not na(pmH) and f_near(c, pmH)
+nearPML = not na(pmL) and f_near(c, pmL)
+
+rejectionUp = (nearPDH or nearORH or nearPMH) and h > c and c < o  // wick up + red close
+rejectionDn = (nearPDL or nearORL or nearPML) and l < c and c > o  // wick down + green close
+rejection = rejectionUp or rejectionDn
+
+// Fade: opposite move vs current bias near a level (very heuristic)
+fade = (bias15 == "Bullish" and rejectionUp) or (bias15 == "Bearish" and rejectionDn)
+
+// Choose trigger type with priority
+string triggerType = "---"
+if breakout
+    triggerType := "Breakout"
+else if breakdown
+    triggerType := "Breakdown"
+else if reclaim
+    triggerType := "Reclaim"
+else if rejection
+    triggerType := "Rejection"
+else if fade
+    triggerType := "Fade"
+
+// Trigger confirmed: basic rule (close beyond level + impulse volume) OR reclaim with follow-through
+triggerConfirmed = (triggerType == "Breakout" and breakout and impulseVolConfirms) or (triggerType == "Breakdown" and breakdown and impulseVolConfirms) or (triggerType == "Reclaim" and reclaim and (impulseVolConfirms or c > ema20)) or (triggerType == "Rejection" and rejection and impulseVolConfirms)
+
+triggerConfirmedTxt = triggerType == "---" ? "---" : (triggerConfirmed ? "Yes" : "No")
+
+// Trigger level suggestion
+float triggerLevel = na
+if triggerType == "Breakout"
+    triggerLevel := priorHi
+else if triggerType == "Breakdown"
+    triggerLevel := priorLo
+else if triggerType == "Reclaim"
+    triggerLevel := na(vwap) ? ema20 : vwap
+else if triggerType == "Rejection"
+    if rejectionUp
+        if not na(pdh) and nearPDH
+            triggerLevel := pdh
+        else if not na(orH) and nearORH
+            triggerLevel := orH
+        else if not na(pmH) and nearPMH
+            triggerLevel := pmH
+    else if rejectionDn
+        if not na(pdl) and nearPDL
+            triggerLevel := pdl
+        else if not na(orL) and nearORL
+            triggerLevel := orL
+        else if not na(pmL) and nearPML
+            triggerLevel := pmL
+
+// Invalidation level suggestion (stop proxy)
+float invalidationLevel = na
+if bias15 == "Bullish"
+    invalidationLevel := lastSwingLow
+else if bias15 == "Bearish"
+    invalidationLevel := lastSwingHigh
+
+// =====================================================
+// Momentum state (auto, heuristic)
+// =====================================================
+// Expanding with move: EMA20 slope agrees with bias + impulse vol confirms
+ema20Slope = ta.linreg(ema20, 10, 0) - ta.linreg(ema20, 10, 1)
+expandingMove = (bias15 == "Bullish" and ema20Slope > 0 and c > ema20) or (bias15 == "Bearish" and ema20Slope < 0 and c < ema20)
+diverging = (bias15 == "Bullish" and c < ema20) or (bias15 == "Bearish" and c > ema20)
+
+// Overextended: distance from EMA20 >= 2 * ATR(14) on 15m
+atr = ta.atr(14)
+overext = atr != 0.0 and math.abs(c - ema20) / atr >= 2.0
+
+// Failed reclaim / turn back down: crossed above VWAP/EMA20 recently but fell back below
+failedReclaim = (crossAnyEma20 and c < ema20) or (not na(vwap) and crossAnyVwap and c < vwap)
+
+string momentumState = "---"
+if overext
+    momentumState := "Overextended"
+else if failedReclaim
+    momentumState := "Failed reclaim / turn back down"
+else if expandingMove
+    momentumState := "Expanding with move"
+else if diverging
+    momentumState := "Diverging"
+
+// =====================================================
+// Retest quality (auto-ish)
+// =====================================================
+// Clean retest: breakout then next bar pulls back to level and closes back in direction
+// Wicky: long wick around level
+// No retest: breakout and continues away
+rangeNow = h - l
+wickUpPct = rangeNow == 0 ? 0.0 : (h - math.max(o, c)) / rangeNow
+wickDnPct = rangeNow == 0 ? 0.0 : (math.min(o, c) - l) / rangeNow
+wicky = (wickUpPct > 0.45) or (wickDnPct > 0.45)
+
+bool hasRetest = false
+if triggerType == "Breakout"
+    hasRetest := not na(priorHi) and f_near(l, priorHi)
+else if triggerType == "Breakdown"
+    hasRetest := not na(priorLo) and f_near(h, priorLo)
+else if triggerType == "Reclaim"
+    hasRetest := f_near(l, ema20)
+else if triggerType == "Rejection"
+    hasRetest := true
+
+string retestQuality = "---"
+if triggerType == "---"
+    retestQuality := "---"
+else if not hasRetest
+    retestQuality := "No retest"
+else if wicky
+    retestQuality := "Wicky"
+else
+    retestQuality := "Clean retest"
+
+// =====================================================
+// Micro S/R involved (checkbox-like outputs)
+// =====================================================
+micro_PDH_PDL = (not na(pdh) and f_near(c, pdh)) or (not na(pdl) and f_near(c, pdl)) ? "Yes" : "No"
+micro_ORH_ORL = (not na(orH) and f_near(c, orH)) or (not na(orL) and f_near(c, orL)) ? "Yes" : "No"
+micro_VWAP    = (not na(vwap) and f_near(c, vwap)) ? "Yes" : "No"
+micro_PMHL    = (not na(pmH) and f_near(c, pmH)) or (not na(pmL) and f_near(c, pmL)) ? "Yes" : "No"
+micro_LastSw  = (not na(lastSwingHigh) and f_near(c, lastSwingHigh)) or (not na(lastSwingLow) and f_near(c, lastSwingLow)) ? "Yes" : "No"
+
+// =====================================================
+// Table
+// =====================================================
+bg  = color.new(color.black, vis)
+kbg = color.new(color.silver, vis)
+txt = color.new(color.white, vis)
+
+var table t = table.new(f_pos(pos), 2, 21, border_width=1, frame_color=color.new(color.white, vis))
+
+f_row(r, k, v_) =>
+    table.cell(t, 0, r, k, bgcolor=kbg, text_color=txt, text_halign=text.align_left)
+    table.cell(t, 1, r, v_, bgcolor=bg, text_color=txt, text_halign=text.align_left)
+
+fmtLvl(x) => na(x) ? "---" : str.tostring(x, format.mintick)
+
+if barstate.islast
+    if showDash
+        f_row(0,  "TF", tf)
+        f_row(1,  "Bias (15m)", bias15)
+        f_row(2,  "Structure (15m)", structure15)
+        f_row(3,  "VWAP (15m)", vwapState)
+
+        f_row(4,  "SPY 15m alignment", spyAlign15)
+        f_row(5,  "SPY VWAP (15m)", spyVwapState)
+
+        f_row(6,  "Structure breaks", structureBreaksTxt)
+        f_row(7,  "Trigger type (15m)", triggerType)
+        f_row(8,  "Trigger confirmed?", triggerConfirmedTxt)
+        f_row(9,  "Trigger level (suggest)", fmtLvl(triggerLevel))
+        f_row(10, "Invalidation (suggest)", fmtLvl(invalidationLevel))
+
+        f_row(11, "Momentum state (15m)", momentumState)
+        f_row(12, "Retest quality", retestQuality)
+        f_row(13, "Session timing", sessTiming2)
+
+        f_row(14, "Volume: impulse confirms", impulseVolConfirms ? "Yes" : "No")
+        f_row(15, "Volume: pullback dries up", pullbackDries ? "Yes" : "No")
+
+        f_row(16, "Micro S/R: PDH/PDL", micro_PDH_PDL)
+        f_row(17, "Micro S/R: ORH/ORL", micro_ORH_ORL)
+        f_row(18, "Micro S/R: VWAP", micro_VWAP)
+        f_row(19, "Micro S/R: Premarket H/L", micro_PMHL)
+        f_row(20, "Micro S/R: Last swing", micro_LastSw)
+
+    else
+        table.clear(t, 0, 0, 1, 20)
+
