@@ -18,6 +18,7 @@ rangeN          = input.int(40, "4H range lookback", minval=10)
 nearEdgePct     = input.float(20.0, "Near edge if within (%) of range", step=1.0)
 
 nearLvlATR      = input.float(0.5, "Near level (ATR multiple)", step=0.1)  // for key-level proximity
+nearLevelPct    = input.float(1.0, "Near SMA200/swing threshold (%)", step=0.1)
 
 showDash        = input.bool(true, "Show dashboard")
 pos             = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"])
@@ -30,13 +31,24 @@ f_anchorState(price, anchor) =>
     band = anchor * (anchorMidPct / 100.0)
     price > anchor + band ? "Above anchor" : price < anchor - band ? "Below anchor" : "Around anchor"
 
-f_levelPos(price, hi, lo) =>
+f_locRange(price, priorHi, priorLo, hi, lo) =>
     rng = hi - lo
     rng == 0 ? "Mid-range" :
+     (not na(priorHi) and price > priorHi) ? "Breaking range (Up)" :
+     (not na(priorLo) and price < priorLo) ? "Breaking range (Down)" :
      ((price - lo) / rng) * 100.0 <= nearEdgePct ? "Near support" :
      ((hi - price) / rng) * 100.0 <= nearEdgePct ? "Near resistance" :
-     price >= hi ? "Range high" :
-     price <= lo ? "Range low" :
+     "Mid-range"
+
+f_locSma200(price, sma200) =>
+    (na(price) or na(sma200) or price == 0) ? "Mid-range" :
+     (math.abs(price - sma200) / price) * 100.0 <= nearLevelPct ? (price > sma200 ? "At support" : "At resistance") : "Mid-range"
+
+f_locSwing(price, swingRes, swingSup) =>
+    (not na(swingSup) and price != 0 and math.abs(price - swingSup) / price * 100.0 <= nearLevelPct) ? "At support" :
+     (not na(swingRes) and price != 0 and math.abs(price - swingRes) / price * 100.0 <= nearLevelPct) ? "At resistance" :
+     (not na(swingRes) and price > swingRes) ? "Breaking range (Up)" :
+     (not na(swingSup) and price < swingSup) ? "Breaking range (Down)" :
      "Mid-range"
 
 f_nearLvl(price, lvl, atr) =>
@@ -75,7 +87,8 @@ adx4     = request.security(syminfo.tickerid, tf4h, f_adx(adxLen))
 
 rangeHi4 = request.security(syminfo.tickerid, tf4h, ta.highest(high, rangeN))
 rangeLo4 = request.security(syminfo.tickerid, tf4h, ta.lowest(low, rangeN))
-loc4     = f_levelPos(c4, rangeHi4, rangeLo4)
+priorHi4 = request.security(syminfo.tickerid, tf4h, ta.highest(high, rangeN)[1])
+priorLo4 = request.security(syminfo.tickerid, tf4h, ta.lowest(low, rangeN)[1])
 
 //===================== STRUCTURE (3 METHODS) =====================
 // M1: pivots HH/HL vs LL/LH
@@ -112,11 +125,14 @@ anchorState = (na(c4) or na(ema20_4)) ? "---" : f_anchorState(c4, ema20_4)
 
 //===================== PLANNED SETUP (AUTO HEURISTIC) =====================
 // You will still select manually in UI; this is just a suggestion.
-priorHi = request.security(syminfo.tickerid, tf4h, ta.highest(high, rangeN)[1])
-priorLo = request.security(syminfo.tickerid, tf4h, ta.lowest(low, rangeN)[1])
+breakUp = not na(priorHi4) and c4 > priorHi4
+breakDn = not na(priorLo4) and c4 < priorLo4
 
-breakUp = not na(priorHi) and c4 > priorHi
-breakDn = not na(priorLo) and c4 < priorLo
+validSwingRes4 = (not na(lastPH4) and lastPH4 > c4) ? lastPH4 : na
+validSwingSup4 = (not na(lastPL4) and lastPL4 < c4) ? lastPL4 : na
+loc4M1 = f_locRange(c4, priorHi4, priorLo4, rangeHi4, rangeLo4)
+loc4M2 = f_locSma200(c4, sma200_4)
+loc4M3 = f_locSwing(c4, validSwingRes4, validSwingSup4)
 
 pullbackWithinBull = (biasM2 == "Bullish") and (c4 < ema20_4) and (c4 > sma200_4)
 pullbackWithinBear = (biasM2 == "Bearish") and (c4 > ema20_4) and (c4 < sma200_4)
@@ -125,7 +141,7 @@ setupAuto =
      breakUp and biasM2 == "Bullish" ? "Breakout continuation" :
      breakDn and biasM2 == "Bearish" ? "Breakdown continuation" :
      pullbackWithinBull or pullbackWithinBear ? "Pullback within trend" :
-     (loc4 == "Mid-range") ? "Range play" :
+     (loc4M1 == "Mid-range") ? "Range play" :
      "Reversal attempt"
 
 //===================== TREND QUALITY (2 METHODS -> show both) =====================
@@ -192,7 +208,7 @@ if barstate.islast
         f_row(0,  "Bias", f_pack3(biasM1, biasM2, biasM3))
         f_row(1,  "Structure", f_pack3(structureM1, structureM2, structureM3))
         f_row(2,  "Anchor state (EMA20)", anchorState)
-        f_row(3,  "Location", loc4)
+        f_row(3,  "Location", f_pack3(loc4M1, loc4M2, loc4M3))
         f_row(4,  "Key level type (suggest)", keyLevelsTxt)
         f_row(5,  "Planned setup (auto)", setupAuto)
         f_row(6,  "Trend quality", "M1 ADX: " + trendQualityM1 + "\nM2 Crosses: " + trendQualityM2)
@@ -202,6 +218,8 @@ if barstate.islast
         f_row(8,  "ATR(4H)", na(atr4) ? "---" : str.tostring(atr4, format.mintick))
         f_row(9,  "ADX(4H)", na(adx4) ? "---" : str.tostring(adx4, "#.0"))
         f_row(10, "Range hi/lo", (na(rangeHi4) or na(rangeLo4)) ? "---" : (str.tostring(rangeHi4, format.mintick) + " / " + str.tostring(rangeLo4, format.mintick)))
-        f_row(11, "Pivot S/R (suggest)", "S: " + (na(lastPL4) ? "---" : str.tostring(lastPL4, format.mintick)) + "\nR: " + (na(lastPH4) ? "---" : str.tostring(lastPH4, format.mintick)))
+        supportLvl4 = not na(validSwingSup4) ? validSwingSup4 : ((not na(rangeLo4) and rangeLo4 < c4) ? rangeLo4 : na)
+        resistLvl4  = not na(validSwingRes4) ? validSwingRes4 : ((not na(rangeHi4) and rangeHi4 > c4) ? rangeHi4 : na)
+        f_row(11, "Pivot S/R (suggest)", "S: " + (na(supportLvl4) ? "---" : str.tostring(supportLvl4, format.mintick)) + "\nR: " + (na(resistLvl4) ? "---" : str.tostring(resistLvl4, format.mintick)))
     else
         table.clear(t, 0, 0, 1, 11)

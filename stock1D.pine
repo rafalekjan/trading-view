@@ -1,315 +1,350 @@
 //@version=6
-indicator("Direction & Context - 1D", overlay=true)
+indicator("SPY - Gatekeeper 1D", overlay=true, max_labels_count=500)
 
-//===================== INPUTS =====================
-spySymbol   = input.symbol("AMEX:SPY", "SPY symbol (for RS + alignment)")
-tf          = input.timeframe("D", "Base timeframe (use D for 1D template)")
+//====================================================
+// INPUTS
+//====================================================
+groupUI = "UI"
+showTable = input.bool(true, "Show Gatekeeper Table", group=groupUI)
 
-// Structure / pivots
-pivL        = input.int(3, "Pivot left bars", minval=1)
-pivR        = input.int(3, "Pivot right bars", minval=1)
+groupSrc = "Sources"
+vixSymbol = input.symbol("CBOE:VIX", "VIX symbol", group=groupSrc)
+qqqSymbol = input.symbol("NASDAQ:QQQ", "QQQ symbol (risk proxy)", group=groupSrc)
+iwmSymbol = input.symbol("AMEX:IWM", "IWM symbol (breadth proxy)", group=groupSrc)
 
-// Moving averages / anchors
-emaFastLen  = input.int(20, "EMA anchor length", minval=5)
-ema21Len    = input.int(21, "EMA21 length", minval=5)
-ema50Len    = input.int(50, "EMA50 length", minval=10)
-sma200Len   = input.int(200, "SMA200 length", minval=50)
+groupMA = "Moving Averages"
+emaLen = input.int(20, "EMA length", minval=1, group=groupMA)
+sma50Len = input.int(50, "SMA50 length", minval=1, group=groupMA)
+sma200Len = input.int(200, "SMA200 length", minval=1, group=groupMA)
 
-// Bands / thresholds
-anchorMidPct = input.float(0.35, "Anchor 'Middle' band (%)", step=0.05) // e.g. 0.35% around anchor = Middle
-rsMidPct     = input.float(0.35, "RS 'Neutral' band (%)", step=0.05)    // RS ratio band around RS MA
-gapLowPct    = input.float(0.70, "Gap risk Low threshold (%)", step=0.05)
-gapHighPct   = input.float(1.50, "Gap risk High threshold (%)", step=0.05)
-betaHigh     = input.float(1.20, "High beta threshold (beta est.)", step=0.05)
+groupATR = "ATR"
+atrLen = input.int(14, "ATR length", minval=1, group=groupATR)
+atrPctVolatile = input.float(2.0, "ATR% volatile threshold", minval=0.5, maxval=10.0, step=0.1, group=groupATR)
+atrPctLow = input.float(1.0, "ATR% low threshold", minval=0.2, maxval=5.0, step=0.1, group=groupATR)
 
-// Volatility
-atrLen       = input.int(14, "ATR length", minval=5)
-volLookback  = input.int(20, "Volatility state lookback", minval=10)
+groupVIX = "VIX thresholds"
+vixLow = input.float(20.0, "Low (<)", minval=10, maxval=40, step=0.5, group=groupVIX)
+vixHigh = input.float(25.0, "High (>=)", minval=10, maxval=60, step=0.5, group=groupVIX)
+vixFast = input.int(5, "VIX fast SMA", minval=1, group=groupVIX)
+vixSlow = input.int(20, "VIX slow SMA", minval=1, group=groupVIX)
 
-// Levels / range position
-rangeN       = input.int(20, "Range lookback for Level Position", minval=10)
-nearRangePct  = input.float(20.0, "Near support/resistance if within (%) of range edge", step=1.0)
+groupStructure = "Structure / Regime"
+pivotLen = input.int(5, "Pivot length (D1 structure)", minval=2, maxval=20, group=groupStructure)
+rangeLookback = input.int(20, "Range lookback (days)", minval=10, maxval=120, group=groupStructure)
+rangeRefLookback = input.int(60, "Range reference lookback (days)", minval=20, maxval=300, group=groupStructure)
+chopAtrMult = input.float(0.6, "Chop around MAs: dist <= ATR *", minval=0.1, maxval=2.0, step=0.05, group=groupStructure)
+donLen = input.int(20, "Donchian length (DCH/DCL)", minval=5, maxval=200, group=groupStructure)
 
-// Table
-showDash     = input.bool(true, "Show dashboard")
-pos          = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"])
-vis          = input.int(25, "Table transparency (0 solid - 90 faint)", minval=0, maxval=90)
+//====================================================
+// SAFETY: This script is designed for SPY 1D
+//====================================================
+isDaily = timeframe.isdaily
+// We won't hard-error; we'll just warn in table.
+tfWarn = isDaily ? "" : "⚠ Use 1D"
 
-//===================== HELPERS =====================
-f_pos(p) => p == "Top Right" ? position.top_right : p == "Top Left" ? position.top_left : p == "Bottom Right" ? position.bottom_right : position.bottom_left
+//====================================================
+// DATA: LEVELS
+//====================================================
+pdh = high[1]
+pdl = low[1]
 
-f_anchorState(price, anchor) =>
-    band = anchor * (anchorMidPct / 100.0)
-    price > anchor + band ? "Above" : price < anchor - band ? "Below" : "Middle"
+// Weekly prior week high/low (completed week)
+pwh = request.security(syminfo.tickerid, "W", high[1], barmerge.gaps_off, barmerge.lookahead_off)
+pwl = request.security(syminfo.tickerid, "W", low[1],  barmerge.gaps_off, barmerge.lookahead_off)
 
-f_rsState(rs, rsMa) =>
-    band = rsMa * (rsMidPct / 100.0)
-    rs > rsMa + band ? "Strength" : rs < rsMa - band ? "Weakness" : "Neutral"
+// Donchian (D1)
+dch = ta.highest(high, donLen)
+dcl = ta.lowest(low, donLen)
 
-f_slope(x, len) => ta.linreg(x, len, 0) - ta.linreg(x, len, 1)
+// MAs (D1)
+ema20 = ta.ema(close, emaLen)
+sma50 = ta.sma(close, sma50Len)
+sma200 = ta.sma(close, sma200Len)
+vwapD = ta.vwap(hlc3)
+vwapState = close > vwapD ? "Above" : close < vwapD ? "Below" : "Around"
 
-f_volState(atrpNow, atrpMa) =>
-    atrpNow > atrpMa ? "Expanding" : atrpNow < atrpMa ? "Contracting" : "Stable"
+// ATR (D1)
+atr = ta.atr(atrLen)
+atrPct = close != 0 ? (atr / close) * 100.0 : na
 
-f_extState(price, ema20, atr) =>
-    atr == 0 ? "---" :
-     math.abs(price - ema20) / atr >= 2.0 ? "Extended" :
-     math.abs(price - ema20) / atr <= 0.75 ? "Reset" :
-     "Balanced"
+atrEnv =     atrPct < atrPctLow ? "Low" :    atrPct >= atrPctVolatile ? "High" :    "Normal"
 
-f_phase(biasTxt, price, ema20, sma200, atrpNow, atrpMa, structureTxt) =>
-    // Simple 1D phase heuristic:
-    // Impulse = aligned with bias and away from anchor; Pullback = counter to anchor but trend intact; Base = chop/neutral.
-    isVolContract = atrpNow < atrpMa
-    bullImpulse = biasTxt == "Bullish" and price > ema20 and ema20 > ema20[1]
-    bearImpulse = biasTxt == "Bearish" and price < ema20 and ema20 < ema20[1]
-    bullPullback = biasTxt == "Bullish" and price < ema20 and price > sma200
-    bearPullback = biasTxt == "Bearish" and price > ema20 and price < sma200
-    baseCond = structureTxt == "Mixed" and isVolContract
-    bullImpulse ? "Impulse" : bearImpulse ? "Impulse" : bullPullback ? "Pullback" : bearPullback ? "Pullback" : baseCond ? "Base" : "Base"
+//====================================================
+// VIX (via symbol)
+//====================================================
+vixClose = request.security(vixSymbol, timeframe.period, close, barmerge.gaps_off, barmerge.lookahead_off)
+vixF = request.security(vixSymbol, timeframe.period, ta.sma(close, vixFast), barmerge.gaps_off, barmerge.lookahead_off)
+vixS = request.security(vixSymbol, timeframe.period, ta.sma(close, vixSlow), barmerge.gaps_off, barmerge.lookahead_off)
 
-f_trendState(biasTxt, price, ema20, sma200) =>
-    // Intact / Weakening / Broken (simple, symmetric)
-    biasTxt == "Bullish" ? (price > ema20 ? "Intact" : price > sma200 ? "Weakening" : "Broken") : biasTxt == "Bearish" ? (price < ema20 ? "Intact" : price < sma200 ? "Weakening" : "Broken") : "Weakening"
+vixLevel =    vixClose < vixLow ? "<20" :    vixClose >= vixHigh ? ">25" :    "20-25"
 
-f_pullbackTxt(phaseTxt, biasTxt, price, sma200) =>
-    phaseTxt != "Pullback" ? "N/A" :
-     (biasTxt == "Bullish" and price > sma200) or (biasTxt == "Bearish" and price < sma200) ? "Within trend" :
-     "Against"
+vixTrend =    vixF > vixS ? "Rising" :    vixF < vixS ? "Falling" :    "Flat"
 
-f_levelPosition(price, hi, lo) =>
-    rng = hi - lo
-    rng == 0 ? "Mid-range" :
-     ((price - lo) / rng) * 100.0 <= nearRangePct ? "Near support" :
-     ((hi - price) / rng) * 100.0 <= nearRangePct ? "Near resistance" :
-     price > hi ? "Range break" :
-     price < lo ? "Range break" :
-     "Mid-range"
+//====================================================
+// QQQ vs 200SMA (risk proxy)
+//====================================================
+qqqClose = request.security(qqqSymbol, timeframe.period, close, barmerge.gaps_off, barmerge.lookahead_off)
+qqqSma200 = request.security(qqqSymbol, timeframe.period, ta.sma(close, 200), barmerge.gaps_off, barmerge.lookahead_off)
 
-//===================== DAILY SERIES (STOCK) =====================
-dClose = request.security(syminfo.tickerid, tf, close)
-dOpen  = request.security(syminfo.tickerid, tf, open)
-dHigh  = request.security(syminfo.tickerid, tf, high)
-dLow   = request.security(syminfo.tickerid, tf, low)
-dVol   = request.security(syminfo.tickerid, tf, volume)
+qqqVs200 =    na(qqqClose) or na(qqqSma200) ? "N/A" :    qqqClose > qqqSma200 ? "Above" :    "Below"
 
-ema20  = request.security(syminfo.tickerid, tf, ta.ema(close, emaFastLen))
-ema21  = request.security(syminfo.tickerid, tf, ta.ema(close, ema21Len))
-ema50  = request.security(syminfo.tickerid, tf, ta.ema(close, ema50Len))
-sma200 = request.security(syminfo.tickerid, tf, ta.sma(close, sma200Len))
+iwmClose = request.security(iwmSymbol, timeframe.period, close, barmerge.gaps_off, barmerge.lookahead_off)
+iwmSma200 = request.security(iwmSymbol, timeframe.period, ta.sma(close, 200), barmerge.gaps_off, barmerge.lookahead_off)
 
-atrD   = request.security(syminfo.tickerid, tf, ta.atr(atrLen))
-atrPct = dClose == 0 ? na : (atrD / dClose) * 100.0
-atrPctMA = request.security(syminfo.tickerid, tf, ta.sma((ta.atr(atrLen) / close) * 100.0, volLookback))
+spyAbove200 = not na(close) and not na(sma200) and close > sma200
+qqqAbove200 = not na(qqqClose) and not na(qqqSma200) and qqqClose > qqqSma200
+iwmAbove200 = not na(iwmClose) and not na(iwmSma200) and iwmClose > iwmSma200
 
-volState = na(atrPct) or na(atrPctMA) ? "---" : f_volState(atrPct, atrPctMA)
+breadthAvail = (not na(sma200) ? 1 : 0) + (not na(qqqSma200) ? 1 : 0) + (not na(iwmSma200) ? 1 : 0)
+breadthAbove = (spyAbove200 ? 1 : 0) + (qqqAbove200 ? 1 : 0) + (iwmAbove200 ? 1 : 0)
+breadth = breadthAvail < 2 ? "N/A" : breadthAbove >= 2 ? "Strong" : breadthAbove == 1 ? "Neutral" : "Weak"
 
-//===================== STRUCTURE (PIVOTS) =====================
-ph = request.security(syminfo.tickerid, tf, ta.pivothigh(high, pivL, pivR))
-pl = request.security(syminfo.tickerid, tf, ta.pivotlow(low, pivL, pivR))
+//====================================================
+// TREND STRENGTH (Above/Below/Chop around MAs)
+//====================================================
+distToMAs = math.min(math.min(math.abs(close - ema20), math.abs(close - sma50)), math.abs(close - sma200))
+trendStrength =    distToMAs <= atr * chopAtrMult ? "Chop around MAs" :    close > ema20 and close > sma50 and close > sma200 ? "Above key MAs" :    close < ema20 and close < sma50 and close < sma200 ? "Below key MAs" :    "Chop around MAs"
 
-lastPH = ta.valuewhen(not na(ph), ph, 0)
-prevPH = ta.valuewhen(not na(ph), ph, 1)
-lastPL = ta.valuewhen(not na(pl), pl, 0)
-prevPL = ta.valuewhen(not na(pl), pl, 1)
+//====================================================
+// STRUCTURE (HH/HL, LL/LH, Mixed, Range) via pivots
+//====================================================
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
 
-isHH = not na(lastPH) and not na(prevPH) and lastPH > prevPH
-isLH = not na(lastPH) and not na(prevPH) and lastPH < prevPH
-isHL = not na(lastPL) and not na(prevPL) and lastPL > prevPL
-isLL = not na(lastPL) and not na(prevPL) and lastPL < prevPL
+var float lastPH = na
+var float prevPH = na
+var float lastPL = na
+var float prevPL = na
 
-structureM1 = (isHH and isHL) ? "HH/HL" : (isLL and isLH) ? "LL/LH" : "Mixed"
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
 
-// Alternative structure methods (for your choice)
-maSlope20 = f_slope(ema20, 10)
-maSlope200 = f_slope(sma200, 10)
-structureM2 = (maSlope20 > 0 and dClose > ema20) ? "HH/HL" : (maSlope20 < 0 and dClose < ema20) ? "LL/LH" : "Mixed"
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
 
-rangeHi = request.security(syminfo.tickerid, tf, ta.highest(high, rangeN))
-rangeLo = request.security(syminfo.tickerid, tf, ta.lowest(low, rangeN))
-midRange = (rangeHi + rangeLo) / 2.0
-structureM3 = dClose > midRange and maSlope200 > 0 ? "HH/HL" : dClose < midRange and maSlope200 < 0 ? "LL/LH" : "Mixed"
+hasTwoHighs = not na(lastPH) and not na(prevPH)
+hasTwoLows  = not na(lastPL) and not na(prevPL)
 
-//===================== MOMENTUM (INTERNAL HELPER) =====================
-rsi14 = request.security(syminfo.tickerid, tf, ta.rsi(close, 14))
-[macdLine, macdSignal, macdHist] = request.security(syminfo.tickerid, tf, ta.macd(close, 12, 26, 9))
+hh = hasTwoHighs and lastPH > prevPH
+lh = hasTwoHighs and lastPH < prevPH
+hl = hasTwoLows and lastPL > prevPL
+ll = hasTwoLows and lastPL < prevPL
 
-momBullScore = (rsi14 > 50 ? 1 : 0) + (macdLine > macdSignal ? 1 : 0) + (ema21 > ema50 ? 1 : 0)
-momBearScore = (rsi14 < 50 ? 1 : 0) + (macdLine < macdSignal ? 1 : 0) + (ema21 < ema50 ? 1 : 0)
-momBull = momBullScore >= 2
-momBear = momBearScore >= 2
+structure =    (hh and hl) ? "HH/HL" :    (lh and ll) ? "LL/LH" :        "Mixed"
 
-//===================== BIAS (3 APPROACHES) =====================
-biasM1 = structureM1 == "HH/HL" and dClose > sma200 ? "Bullish" : structureM1 == "LL/LH" and dClose < sma200 ? "Bearish" : "Neutral"
-biasM2 = (dClose > sma200 and ema50 > sma200) ? "Bullish" : (dClose < sma200 and ema50 < sma200) ? "Bearish" : "Neutral"
-biasM3 = momBull and dClose > sma200 ? "Bullish" : momBear and dClose < sma200 ? "Bearish" : "Neutral"
+rangeHigh = ta.highest(high, rangeLookback)
+rangeLow  = ta.lowest(low, rangeLookback)
+rangeWidthPct = close != 0 ? ((rangeHigh - rangeLow) / close) * 100.0 : na
+isRange = rangeWidthPct < (atrPctVolatile * 1.5) and trendStrength == "Chop around MAs"
+structure := isRange ? "Range" : structure
 
-//===================== 200 SMA FIELD =====================
-sma200State = dClose > sma200 ? "Above" : "Below"
+//====================================================
+// BIAS (auto) from structure + MAs
+//====================================================
+bias =    (structure == "HH/HL" and trendStrength == "Above key MAs") ? "Bullish" :    (structure == "LL/LH" and trendStrength == "Below key MAs") ? "Bearish" :    "Neutral"
 
-//===================== TREND ANCHOR (3 APPROACHES) =====================
-// M1: EMA20 banded
-anchorM1 = f_anchorState(dClose, ema20)
+//====================================================
+// REGIME (Trend Up/Down/Range/Volatile-Unstable)
+//====================================================
+regime =    atrPct >= atrPctVolatile and vixTrend == "Rising" ? "Volatile-Unstable" :    structure == "Range" or trendStrength == "Chop around MAs" ? "Range" :    bias == "Bullish" ? "Trend Up" :    bias == "Bearish" ? "Trend Down" :    "Range"
 
-// M2: Rolling VWAP(20) (volume-weighted typical price)
-rvwap20 = request.security(syminfo.tickerid, tf, math.sum(volume, 20) == 0 ? na : math.sum(hlc3 * volume, 20) / math.sum(volume, 20))
-anchorM2 = na(rvwap20) ? "---" : f_anchorState(dClose, rvwap20)
+//====================================================
+// MOMENTUM CONDITION (Expanding/Stable/Diverging/Exhausted)
+//Simple, robust daily heuristic:
+//- Expanding: breakout strength (close near high) + ATR% rising
+//- Diverging: RSI falling while price rising (or vice versa)
+//- Exhausted: large candle + reversal wick vs direction or RSI extreme
+//====================================================
+rsi = ta.rsi(close, 14)
+rsiSlope = rsi - rsi[5]
+atrSlope = atrPct - atrPct[5]
+atrSlopeFlatThr = 0.05
 
-// M3: EMA21/EMA50 anchor proxy (trend pressure)
-anchorM3 = dClose > ema21 and ema21 > ema50 ? "Above" : dClose < ema21 and ema21 < ema50 ? "Below" : "Middle"
+// close location in candle
+rng = high - low
+closePos = rng != 0 ? (close - low) / rng : 0.5  // 0..1
+wickUp = high - math.max(open, close)
+wickDn = math.min(open, close) - low
 
-//===================== SPY SERIES (FOR RS + ALIGNMENT) =====================
-spyClose = request.security(spySymbol, tf, close)
-spyEma20 = request.security(spySymbol, tf, ta.ema(close, emaFastLen))
-spySma200 = request.security(spySymbol, tf, ta.sma(close, sma200Len))
+bullCandle = close > open
+bearCandle = close < open
 
-// SPY structure/bias (quick, stable approach)
-spyPh = request.security(spySymbol, tf, ta.pivothigh(high, pivL, pivR))
-spyPl = request.security(spySymbol, tf, ta.pivotlow(low, pivL, pivR))
-spyLastPH = ta.valuewhen(not na(spyPh), spyPh, 0)
-spyPrevPH = ta.valuewhen(not na(spyPh), spyPh, 1)
-spyLastPL = ta.valuewhen(not na(spyPl), spyPl, 0)
-spyPrevPL = ta.valuewhen(not na(spyPl), spyPl, 1)
-spyHH = not na(spyLastPH) and not na(spyPrevPH) and spyLastPH > spyPrevPH
-spyLH = not na(spyLastPH) and not na(spyPrevPH) and spyLastPH < spyPrevPH
-spyHL = not na(spyLastPL) and not na(spyPrevPL) and spyLastPL > spyPrevPL
-spyLL = not na(spyLastPL) and not na(spyPrevPL) and spyLastPL < spyPrevPL
-spyStructure = (spyHH and spyHL) ? "HH/HL" : (spyLL and spyLH) ? "LL/LH" : "Mixed"
-spyBias = spyStructure == "HH/HL" and spyClose > spySma200 ? "Bullish" : spyStructure == "LL/LH" and spyClose < spySma200 ? "Bearish" : "Neutral"
+// Divergence-ish proxy
+diverging =    (bias == "Bullish" and rsiSlope < 0 and close > close[5]) or    (bias == "Bearish" and rsiSlope > 0 and close < close[5])
 
-//===================== SPY ALIGNMENT =====================
-// We output 3 alignment variants depending on which bias method you want (choose later)
-f_align(stockBias, marketBias) =>
-    (stockBias == "Neutral" or marketBias == "Neutral") ? "Diverging" :
-     (stockBias == marketBias) ? "Aligned" :
-     "Opposite"
+exhausted =    (bias == "Bullish" and rsi > 70 and wickUp > rng * 0.35) or    (bias == "Bearish" and rsi < 30 and wickDn > rng * 0.35) or    (atrSlope > 0.5 and atrPct >= atrPctVolatile)
 
-alignM1 = f_align(biasM1, spyBias)
-alignM2 = f_align(biasM2, spyBias)
-alignM3 = f_align(biasM3, spyBias)
+expanding =    (bias == "Bullish" and closePos > 0.7 and atrSlope > 0) or    (bias == "Bearish" and closePos < 0.3 and atrSlope > 0)
 
-//===================== RELATIVE vs SPY (RS) =====================
-rs = (spyClose == 0 ? na : dClose / spyClose)
-rsMa50 = ta.sma(rs, 50)
-relativeM1 = na(rs) or na(rsMa50) ? "---" : f_rsState(rs, rsMa50)
+momentum =    exhausted ? "Exhausted" :    diverging ? "Diverging" :    expanding ? "Expanding" :    "Stable"
 
-// Alternative RS state methods
-rsMa20 = ta.sma(rs, 20)
-relativeM2 = na(rs) or na(rsMa20) ? "---" : f_rsState(rs, rsMa20)
-rsRoc20 = ta.roc(rs, 20)
-relativeM3 = na(rsRoc20) ? "---" : (rsRoc20 > 0 ? "Strength" : rsRoc20 < 0 ? "Weakness" : "Neutral")
+//====================================================
+// HELPER DESCRIPTIONS (for readability in table)
+//====================================================
+rangeRefPct = ta.sma(rangeWidthPct, rangeRefLookback)
+rangeState =
+     na(rangeWidthPct) or na(rangeRefPct) ? "N/A" :
+     rangeWidthPct >= rangeRefPct * 1.2 ? "Wider than normal (riskier/choppier)" :
+     rangeWidthPct <= rangeRefPct * 0.8 ? "Narrow vs normal (compression)" :
+     "Around normal range"
 
-// RS trend (dynamics)
-rsSlope20 = f_slope(rsMa20, 10)
-rsSlope50 = f_slope(rsMa50, 10)
-rsTrendM1 = na(rsMa20) ? "---" : (rsSlope20 > 0 ? "Improving" : rsSlope20 < 0 ? "Deteriorating" : "Stable")
-rsTrendM2 = na(rsRoc20) ? "---" : (rsRoc20 > 0 ? "Improving" : rsRoc20 < 0 ? "Deteriorating" : "Stable")
-rsTrendM3 = na(rsMa50) ? "---" : (rsSlope50 > 0 ? "Improving" : rsSlope50 < 0 ? "Deteriorating" : "Stable")
+rsiState =
+     na(rsi) ? "N/A" :
+     rsi >= 70 ? "High (overbought zone)" :
+     rsi <= 30 ? "Low (oversold zone)" :
+     rsi >= 55 ? "Bullish/firm" :
+     rsi <= 45 ? "Bearish/soft" :
+     "Neutral"
 
-//===================== BETA / SENSITIVITY (PROXY, 3 METHODS) =====================
-// Method 1: quick beta estimate via covariance(returns, spy_returns) / var(spy_returns)
-ret = (na(dClose[1]) or dClose[1] == 0) ? na : ta.change(dClose) / dClose[1]
-spyRet = (na(spyClose[1]) or spyClose[1] == 0) ? na : ta.change(spyClose) / spyClose[1]
-retMa = ta.sma(ret, 60)
-spyRetMa = ta.sma(spyRet, 60)
-cov = ta.sma(ret * spyRet, 60) - (retMa * spyRetMa)
-vspy = ta.variance(spyRet, 60)
-betaEst = (na(cov) or na(vspy) or vspy == 0) ? na : cov / vspy
-betaM1 = na(betaEst) ? "---" : (betaEst >= betaHigh ? "High beta" : betaEst <= 0.8 ? "Defensive" : "Neutral")
+atrSlopeState =
+     na(atrSlope) ? "N/A" :
+     atrSlope > atrSlopeFlatThr ? "Rising volatility" :
+     atrSlope < -atrSlopeFlatThr ? "Volatility cooling" :
+     "Volatility stable"
 
-// Method 2: volatility ratio (ATR% stock vs ATR% SPY)
-spyAtr = request.security(spySymbol, tf, ta.atr(atrLen))
-spyAtrPct = spyClose == 0 ? na : (spyAtr / spyClose) * 100.0
-volRatio = (na(atrPct) or na(spyAtrPct) or spyAtrPct == 0) ? na : atrPct / spyAtrPct
-betaM2 = na(volRatio) ? "---" : (volRatio >= 1.25 ? "High beta" : volRatio <= 0.85 ? "Defensive" : "Neutral")
+//====================================================
+// DERIVED SUPPORT / RESISTANCE (from key levels set)
+//====================================================
+float sup = na
+float res = na
 
-// Method 3: correlation-based sensitivity
-corr = ta.correlation(ret, spyRet, 60)
-betaM3 = na(corr) ? "---" : (corr >= 0.7 and atrPct >= spyAtrPct ? "High beta" : corr <= 0.3 ? "Defensive" : "Neutral")
+if not na(pdh)
+    if pdh <= close and (na(sup) or close - pdh < close - sup)
+        sup := pdh
+    if pdh >= close and (na(res) or pdh - close < res - close)
+        res := pdh
+if not na(pdl)
+    if pdl <= close and (na(sup) or close - pdl < close - sup)
+        sup := pdl
+    if pdl >= close and (na(res) or pdl - close < res - close)
+        res := pdl
+if not na(pwh)
+    if pwh <= close and (na(sup) or close - pwh < close - sup)
+        sup := pwh
+    if pwh >= close and (na(res) or pwh - close < res - close)
+        res := pwh
+if not na(pwl)
+    if pwl <= close and (na(sup) or close - pwl < close - sup)
+        sup := pwl
+    if pwl >= close and (na(res) or pwl - close < res - close)
+        res := pwl
+if not na(ema20)
+    if ema20 <= close and (na(sup) or close - ema20 < close - sup)
+        sup := ema20
+    if ema20 >= close and (na(res) or ema20 - close < res - close)
+        res := ema20
+if not na(sma50)
+    if sma50 <= close and (na(sup) or close - sma50 < close - sup)
+        sup := sma50
+    if sma50 >= close and (na(res) or sma50 - close < res - close)
+        res := sma50
+if not na(sma200)
+    if sma200 <= close and (na(sup) or close - sma200 < close - sup)
+        sup := sma200
+    if sma200 >= close and (na(res) or sma200 - close < res - close)
+        res := sma200
+if not na(dch)
+    if dch <= close and (na(sup) or close - dch < close - sup)
+        sup := dch
+    if dch >= close and (na(res) or dch - close < res - close)
+        res := dch
+if not na(dcl)
+    if dcl <= close and (na(sup) or close - dcl < close - sup)
+        sup := dcl
+    if dcl >= close and (na(res) or dcl - close < res - close)
+        res := dcl
 
-//===================== MARKET WIND (AUTO) =====================
-// UI rule you described (uses alignment + beta). We'll compute 3 variants to match align/beta choice.
-f_wind(alignmentTxt, betaTxt) =>
-    alignmentTxt == "Opposite" ? "Headwind" : alignmentTxt == "Aligned" ? "Tailwind" : (alignmentTxt == "Diverging" and betaTxt == "High beta") ? "Headwind" : "Neutral"
+// nearest level to highlight in Key Levels section
+string closestName = ""
+float closestDist = 10e10
 
-windM1 = f_wind(alignM1, betaM1)
-windM2 = f_wind(alignM2, betaM2)
-windM3 = f_wind(alignM3, betaM3)
+if not na(pdh) and math.abs(close - pdh) < closestDist
+    closestDist := math.abs(close - pdh)
+    closestName := "PDH"
+if not na(pdl) and math.abs(close - pdl) < closestDist
+    closestDist := math.abs(close - pdl)
+    closestName := "PDL"
+if not na(pwh) and math.abs(close - pwh) < closestDist
+    closestDist := math.abs(close - pwh)
+    closestName := "PWH"
+if not na(pwl) and math.abs(close - pwl) < closestDist
+    closestDist := math.abs(close - pwl)
+    closestName := "PWL"
+if not na(ema20) and math.abs(close - ema20) < closestDist
+    closestDist := math.abs(close - ema20)
+    closestName := "EMA20"
+if not na(sma50) and math.abs(close - sma50) < closestDist
+    closestDist := math.abs(close - sma50)
+    closestName := "SMA50"
+if not na(sma200) and math.abs(close - sma200) < closestDist
+    closestDist := math.abs(close - sma200)
+    closestName := "SMA200"
+if not na(dch) and math.abs(close - dch) < closestDist
+    closestDist := math.abs(close - dch)
+    closestName := "DCH20"
+if not na(dcl) and math.abs(close - dcl) < closestDist
+    closestDist := math.abs(close - dcl)
+    closestName := "DCL20"
 
-//===================== TREND STATE / PHASE / PULLBACK / EXTENSION =====================
-trendStateM1 = f_trendState(biasM1, dClose, ema20, sma200)
-trendStateM2 = f_trendState(biasM2, dClose, ema20, sma200)
-trendStateM3 = f_trendState(biasM3, dClose, ema20, sma200)
+//====================================================
+// TABLE (fixed: top-right corner) - readable, 1 metric per row
+//====================================================
+var table t = table.new(position.top_right, 2, 31, border_width=1)
 
-phaseM1 = f_phase(biasM1, dClose, ema20, sma200, atrPct, atrPctMA, structureM1)
-phaseM2 = f_phase(biasM2, dClose, ema20, sma200, atrPct, atrPctMA, structureM2)
-phaseM3 = f_phase(biasM3, dClose, ema20, sma200, atrPct, atrPctMA, structureM3)
+f_set(row, k, v, isHeader, valColor) =>
+    leftBg = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
+    rightBg = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
+    txtCol = color.white
+    table.cell(t, 0, row, k, text_size=size.small, text_halign=text.align_left, bgcolor=leftBg, text_color=txtCol)
+    table.cell(t, 1, row, v, text_size=size.small, text_halign=text.align_left, bgcolor=rightBg, text_color=valColor)
 
-pullbackM1 = f_pullbackTxt(phaseM1, biasM1, dClose, sma200)
-pullbackM2 = f_pullbackTxt(phaseM2, biasM2, dClose, sma200)
-pullbackM3 = f_pullbackTxt(phaseM3, biasM3, dClose, sma200)
+f_fmt(x) =>
+    na(x) ? "na" : str.tostring(x, format.mintick)
 
-extM1 = f_extState(dClose, ema20, atrD)
+f_fmt2(x) =>
+    na(x) ? "na" : str.tostring(x, "#.##")
 
-//===================== GAP RISK (PROXY) =====================
-// We can't know catalysts, but we can estimate "gapiness": avg abs gap% over last 20 bars.
-gapPct = dClose[1] == 0 ? na : math.abs(dOpen - dClose[1]) / dClose[1] * 100.0
-gapAvg = ta.sma(gapPct, 20)
-gapRisk = na(gapAvg) ? "---" : (gapAvg <= gapLowPct ? "Low" : gapAvg >= gapHighPct ? "High" : "Medium")
-
-//===================== EVENTS (NOT RELIABLE FROM TV) =====================
-earningsSoon = "---"
-dividendsSoon = "---"
-otherCatalyst = "---"
-
-//===================== LEVEL POSITION + S/R SUGGESTIONS =====================
-// Position within N-day range (proxy)
-lvlPos = f_levelPosition(dClose, rangeHi, rangeLo)
-
-// Suggest S/R from pivots (not perfect, but actionable)
-supportSuggest = not na(lastPL) ? str.tostring(lastPL, format.mintick) : "---"
-resistSuggest  = not na(lastPH) ? str.tostring(lastPH, format.mintick) : "---"
-
-//===================== SUMMARY (MANUAL) =====================
-summaryTxt = "---"
-
-//===================== TABLE =====================
-bg   = color.new(color.black, vis)
-kbg  = color.new(color.silver, vis)
-txt  = color.new(color.white, vis)
-
-var table t = table.new(f_pos(pos), 2, 18, border_width=1, frame_color=color.new(color.white, vis))
-
-f_row(r, k, v) =>
-    table.cell(t, 0, r, k, bgcolor=kbg, text_color=txt, text_halign=text.align_left)
-    table.cell(t, 1, r, v, bgcolor=bg,  text_color=txt, text_halign=text.align_left)
-
-f_pack3(a, b, c) => "M1: " + a + "\nM2: " + b + "\nM3: " + c
-
+// Update table only on last bar to reduce flicker
 if barstate.islast
-    if showDash
-        f_row(0,  "Bias", f_pack3(biasM1, biasM2, biasM3))
-        f_row(1,  "Structure", f_pack3(structureM1, structureM2, structureM3))
-        f_row(2,  "200 SMA", sma200State)
-        f_row(3,  "Trend anchor", "M1 EMA20: " + anchorM1 + "\nM2 RVWAP20: " + anchorM2 + "\nM3 EMA21/50: " + anchorM3)
-
-        f_row(4,  "Market wind (AUTO)", f_pack3(windM1, windM2, windM3))
-        f_row(5,  "SPY alignment", f_pack3(alignM1, alignM2, alignM3))
-        f_row(6,  "Relative vs SPY", "M1 RS/MA50: " + relativeM1 + "\nM2 RS/MA20: " + relativeM2 + "\nM3 RS ROC20: " + relativeM3)
-        f_row(7,  "RS trend", f_pack3(rsTrendM1, rsTrendM2, rsTrendM3))
-        f_row(8,  "Beta / sensitivity", "M1 beta: " + (na(betaEst) ? "---" : str.tostring(betaEst, "#.##")) + " -> " + betaM1 + "\nM2 volRatio: " + (na(volRatio) ? "---" : str.tostring(volRatio, "#.##")) + " -> " + betaM2 + "\nM3 corr: " + (na(corr) ? "---" : str.tostring(corr, "#.##")) + " -> " + betaM3)
-
-        f_row(9,  "Trend state", f_pack3(trendStateM1, trendStateM2, trendStateM3))
-        f_row(10, "Phase", f_pack3(phaseM1, phaseM2, phaseM3))
-        f_row(11, "Pullback", f_pack3(pullbackM1, pullbackM2, pullbackM3))
-
-        f_row(12, "Volatility state", volState)
-        f_row(13, "Extension state", extM1)
-
-        f_row(14, "Gap risk (proxy)", gapRisk)
-
-        f_row(15, "Level position (proxy)", lvlPos)
-        f_row(16, "Support (suggest)", supportSuggest)
-        f_row(17, "Resistance (suggest)", resistSuggest)
+    if not showTable
+        table.clear(t, 0, 0, 1, 30)
     else
-        table.clear(t, 0, 0, 1, 17)
+        white = color.white
+        nearCol = color.new(color.yellow, 0)
+
+        f_set(0, "SPY Gatekeeper (1D)", tfWarn == "" ? "OK" : tfWarn, true, white)
+
+        f_set(1, "Core (used on WWW)", "", true, white)
+        f_set(2, "Regime", regime, false, white)
+        f_set(3, "Bias (auto)", bias, false, white)
+        f_set(4, "Structure", structure, false, white)
+        f_set(5, "Trend Strength", trendStrength, false, white)
+        f_set(6, "VWAP", f_fmt2(vwapD) + " (" + vwapState + ")", false, white)
+        f_set(7, "Momentum (1D)", momentum, false, white)
+        f_set(8, "Support", f_fmt2(sup), false, white)
+        f_set(9, "Resistance", f_fmt2(res), false, white)
+        f_set(10, "Close", f_fmt2(close), false, white)
+        f_set(11, "ATR (14)", f_fmt2(atr), false, white)
+        f_set(12, "VIX", f_fmt2(vixClose) + " (" + vixLevel + ")", false, white)
+        f_set(13, "VIX Trend", vixTrend, false, white)
+        f_set(14, "ATR% Env", atrEnv + " (" + f_fmt2(atrPct) + "%)", false, white)
+        f_set(15, "Breadth", breadth, false, white)
+        f_set(16, "QQQ vs 200SMA", qqqVs200, false, white)
+
+        f_set(17, "Key Levels (Support/Resistance refs)", "", true, white)
+        f_set(18, "PDH", f_fmt2(pdh), false, closestName == "PDH" ? nearCol : white)
+        f_set(19, "PDL", f_fmt2(pdl), false, closestName == "PDL" ? nearCol : white)
+        f_set(20, "PWH", f_fmt2(pwh), false, closestName == "PWH" ? nearCol : white)
+        f_set(21, "PWL", f_fmt2(pwl), false, closestName == "PWL" ? nearCol : white)
+        f_set(22, "EMA20", f_fmt2(ema20), false, closestName == "EMA20" ? nearCol : white)
+        f_set(23, "SMA50", f_fmt2(sma50), false, closestName == "SMA50" ? nearCol : white)
+        f_set(24, "SMA200", f_fmt2(sma200), false, closestName == "SMA200" ? nearCol : white)
+        f_set(25, "DCH20", f_fmt2(dch), false, closestName == "DCH20" ? nearCol : white)
+        f_set(26, "DCL20", f_fmt2(dcl), false, closestName == "DCL20" ? nearCol : white)
+
+        f_set(27, "TV Helpers (not scored on WWW)", "", true, white)
+        f_set(28, "Range context", rangeState, false, white)
+        f_set(29, "RSI(14) context", rsiState, false, white)
+        f_set(30, "ATR% slope(5) context", atrSlopeState, false, white)

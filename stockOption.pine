@@ -1,4 +1,4 @@
-//@version=6
+﻿//@version=6
 indicator("Options Helper", overlay=true, max_labels_count=500)
 
 //===================== INPUTS =====================
@@ -7,7 +7,9 @@ tf              = input.timeframe("D", "Base TF for options suitability (recomme
 spySymbol       = input.symbol("AMEX:SPY", "SPY symbol (for beta proxy)")
 useLogReturns   = input.bool(true, "Use log returns for RV", inline="rv")
 rvLen           = input.int(20, "RV lookback", minval=10, inline="rv")
-ivLookback      = input.int(252, "IV proxy rank lookback (days)", minval=50)
+ivLookback      = input.int(252, "IV proxy rank lookback (bars of selected TF)", minval=50)
+betaLen         = input.int(60, "Beta lookback", minval=20)
+iv1Mult         = input.float(0.8, "IV Proxy1 multiplier", step=0.05)
 
 // Options planning inputs (manual because options-chain not accessible in Pine)
 dte             = input.int(30, "DTE (days to expiration)", minval=1)
@@ -18,7 +20,7 @@ contractType    = input.string("Long Call/Put", "Planned contract type",
 useTargetPrice  = input.bool(false, "Use target price for EM comparison")
 targetPriceIn   = input.float(0.0, "Target price (used when enabled)", step=0.01)
 targetPrice     = useTargetPrice ? targetPriceIn : na
-nearEMPct       = input.float(15.0, "Near-EM band (%)", step=1.0) // within �15% of EM treated as "Near EM"
+nearEMPct       = input.float(15.0, "Near-EM band (%)", step=1.0) // within ±15% of EM treated as "Near EM"
 
 // Room-to-move
 rangeN          = input.int(50, "HTF range lookback for room-to-move", minval=20)
@@ -50,6 +52,11 @@ f_rank(x, len) =>
     hi = ta.highest(x, len)
     hi == lo ? na : (x - lo) / (hi - lo)
 
+f_ret(useLog) =>
+    c0 = close
+    c1 = close[1]
+    na(c0) or na(c1) or c1 == 0 ? na : (useLog ? math.log(c0 / c1) : (c0 - c1) / c1)
+
 // Classification helpers
 f_ivLevelFromRank(r) =>
     if na(r)
@@ -70,7 +77,7 @@ f_ivVsRv(iv, rv) =>
     else if iv > rv * 1.1
         "IV > RV"
     else
-        "IV ? RV"
+        "IV ~ RV"
 
 f_trend3(x) =>
     // simple slope sign using linreg delta
@@ -155,33 +162,34 @@ l = request.security(syminfo.tickerid, tf, low)
 atr = request.security(syminfo.tickerid, tf, ta.atr(atrLen))
 
 // Returns for RV
-ret = request.security(syminfo.tickerid, tf, useLogReturns ? math.log(close / close[1]) : (close - close[1]) / close[1])
+ret = request.security(syminfo.tickerid, tf, f_ret(useLogReturns))
 rv = request.security(syminfo.tickerid, tf, ta.stdev(ret, rvLen) * math.sqrt(252.0) * 100.0) // annualized %
 
 //===================== IV PROXY (3 METHODS) =====================
 // M1: ATR% annualized proxy (very rough)
 atrPct = (na(c) or c == 0 or na(atr)) ? na : (atr / c) * 100.0
-ivProxy1 = na(atrPct) ? na : atrPct * math.sqrt(252.0) // approximate annualization
+ivProxy1 = na(atrPct) ? na : atrPct * math.sqrt(252.0) * iv1Mult // approximate annualization
 
 // M2: Realized vol (RV) itself as proxy baseline
 ivProxy2 = rv
 
 // M3: SPY-based proxy: VIX not always available in Pine; use SPY RV * "beta-ish" sensitivity
 spyC   = request.security(spySymbol, tf, close)
-spyRet = request.security(spySymbol, tf, useLogReturns ? math.log(close / close[1]) : (close - close[1]) / close[1])
+spyRet = request.security(spySymbol, tf, f_ret(useLogReturns))
 spyRv  = request.security(spySymbol, tf, ta.stdev(spyRet, rvLen) * math.sqrt(252.0) * 100.0)
 
-cov = ta.sma(ret * spyRet, 60) - (ta.sma(ret, 60) * ta.sma(spyRet, 60))
-vspy = ta.variance(spyRet, 60)
+cov = ta.sma(ret * spyRet, betaLen) - (ta.sma(ret, betaLen) * ta.sma(spyRet, betaLen))
+vspy = ta.variance(spyRet, betaLen)
 betaEst = (na(cov) or na(vspy) or vspy == 0) ? na : cov / vspy
 betaTxt = na(betaEst) ? "Unknown" : (betaEst >= 1.2 ? "High beta" : betaEst <= 0.8 ? "Defensive" : "Neutral")
+betaSignTxt = na(betaEst) ? "Unknown" : (betaEst < 0 ? "Negative" : "Positive")
 
 ivProxy3 = (na(spyRv) or na(betaEst)) ? na : spyRv * math.max(0.3, math.min(2.0, betaEst))
 
 //===================== IV LEVEL / TREND / IV vs RV =====================
-rank1 = request.security(syminfo.tickerid, tf, f_rank(ivProxy1, ivLookback))
-rank2 = request.security(syminfo.tickerid, tf, f_rank(ivProxy2, ivLookback))
-rank3 = request.security(syminfo.tickerid, tf, f_rank(ivProxy3, ivLookback))
+rank1 = f_rank(ivProxy1, ivLookback)
+rank2 = f_rank(ivProxy2, ivLookback)
+rank3 = f_rank(ivProxy3, ivLookback)
 
 ivLevelM1 = f_ivLevelFromRank(rank1)
 ivLevelM2 = f_ivLevelFromRank(rank2)
@@ -228,10 +236,13 @@ lastPL = ta.valuewhen(not na(pl), pl, 0)
 rangeHi = request.security(syminfo.tickerid, tf, ta.highest(high, rangeN))
 rangeLo = request.security(syminfo.tickerid, tf, ta.lowest(low, rangeN))
 
-nextRes = not na(lastPH) ? lastPH : rangeHi
-nextSup = not na(lastPL) ? lastPL : rangeLo
+rawRes = not na(lastPH) ? lastPH : rangeHi
+rawSup = not na(lastPL) ? lastPL : rangeLo
+nextRes = (not na(rawRes) and rawRes > c) ? rawRes : rangeHi
+nextSup = (not na(rawSup) and rawSup < c) ? rawSup : rangeLo
 
 roomTxt = f_roomTextFromDir(dir, c, nextRes, nextSup, atr)
+catalystInputStatus = "earningsDays=" + str.tostring(earningsDays) + " | eventDays=" + str.tostring(majorEventDays)
 
 //===================== CONTRACT TYPE + DTE OUTPUT =====================
 dteTxt = f_dteBucketText(dte)
@@ -245,7 +256,7 @@ bg   = color.new(color.black, vis)
 kbg  = color.new(color.silver, vis)
 txt  = color.new(color.white, vis)
 
-var table t = table.new(f_pos(pos), 2, 14, border_width=1, frame_color=color.new(color.white, vis))
+var table t = table.new(f_pos(pos), 2, 16, border_width=1, frame_color=color.new(color.white, vis))
 
 f_row(r, k, v) =>
     table.cell(t, 0, r, k, bgcolor=kbg, text_color=txt, text_halign=text.align_left)
@@ -263,11 +274,14 @@ if barstate.islast
                           "\nM2 RV: " + (na(ivProxy2) ? "---" : str.tostring(ivProxy2, "#.##") + "%") +
                           "\nM3 SPY*beta: " + (na(ivProxy3) ? "---" : str.tostring(ivProxy3, "#.##") + "%"))
         f_row(7,  "Beta (proxy)", betaTxt)
-        f_row(8,  "Expected Move vs Target", f_pack3(emVsTargetM1, emVsTargetM2, emVsTargetM3))
-        f_row(9,  "Room to move vs theta", roomTxt)
-        f_row(10, "Catalyst proximity", catalystTxt)
-        f_row(11, "IV crush risk", ivCrushRisk)
-        f_row(12, "Spread quality (options)", spreadQuality)
-        f_row(13, "OI/Volume (options)", oiQuality)
+        f_row(8,  "Beta sign", betaSignTxt)
+        f_row(9,  "Expected Move vs Target (proxy)", f_pack3(emVsTargetM1, emVsTargetM2, emVsTargetM3))
+        f_row(10, "Room to move (ATR proxy)", roomTxt)
+        f_row(11, "Catalyst proximity", catalystTxt)
+        f_row(12, "IV crush risk", ivCrushRisk)
+        f_row(13, "Spread quality (options)", spreadQuality)
+        f_row(14, "OI/Volume (options)", oiQuality)
+        f_row(15, "Catalyst input status", catalystInputStatus)
     else
-        table.clear(t, 0, 0, 1, 13)
+        table.clear(t, 0, 0, 1, 15)
+
