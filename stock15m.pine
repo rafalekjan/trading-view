@@ -1,386 +1,313 @@
 //@version=6
-indicator("Execution & Timing - 15m", overlay=true, max_labels_count=500)
+indicator("Stock 15m - Execution & Timing", overlay=true, max_labels_count=500)
 
-// =====================================================
+//========================
 // Inputs
-// =====================================================
-spySymbol = input.symbol("AMEX:SPY", "SPY symbol (for alignment)")
-tf        = input.timeframe("15", "Execution TF (use 15)")
-showDash  = input.bool(true, "Show dashboard table")
-pos       = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"])
-vis       = input.int(20, "Table transparency (0 solid - 90 faint)", minval=0, maxval=90)
+//========================
+showTable   = input.bool(true, "Show table", group="UI")
+use15mOnly  = input.bool(true, "⚠ Use 15m (warn if other TF)", group="UI")
 
-// Sessions (US equities defaults)
-rthSession     = input.session("0930-1600", "RTH session (exchange time)")
-premarketSess  = input.session("0400-0930", "Premarket session (exchange time)")
-orMinutes      = input.int(30, "Opening Range minutes", minval=15, step=15)
+// 15m logic params
+atrLen      = input.int(14, "ATR length", minval=1, group="15m")
+emaLen      = input.int(20, "EMA length", minval=1, group="15m")
+pivotLen    = input.int(5, "Pivot length (HL/LH)", minval=2, group="15m")
+volMaLen    = input.int(20, "Volume MA length", minval=5, group="15m")
 
-// Structure
-pivL = input.int(3, "Pivot left bars", minval=1)
-pivR = input.int(3, "Pivot right bars", minval=1)
+// 4H context params
+tf4h        = input.timeframe("240", "HTF for context (4H)", group="4H Context")
+piv4hLen    = input.int(5, "4H Pivot length (S/R)", minval=2, group="4H Context")
 
-// Anchors / momentum
-emaFastLen = input.int(20, "EMA20 (micro anchor)", minval=5)
-emaSlowLen = input.int(50, "EMA50 (trend pressure)", minval=10)
+// Thresholds (ATR-based)
+nearAtr     = input.float(0.30, "Near level (ATR)", step=0.05, group="Thresholds")
+midAtr      = input.float(0.80, "Medium distance (ATR)", step=0.05, group="Thresholds")
+extAtr      = input.float(1.50, "Extended (ATR)", step=0.05, group="Thresholds")
+chaseAtr    = input.float(0.60, "Chasing breakout (ATR)", step=0.05, group="Thresholds")
 
-// Volume
-volLen     = input.int(20, "Volume MA length", minval=5)
-impMult    = input.float(1.20, "Impulse vol confirm (x MA)", step=0.05)
-dryMult    = input.float(0.80, "Pullback dries up (x MA)", step=0.05)
-
-// Trigger heuristics
-rangeLen   = input.int(20, "Breakout/Breakdown range lookback", minval=10)
-nearPct    = input.float(0.15, "Near-level band (%)", step=0.05) // for rejection detection
-
-// =====================================================
+//========================
 // Helpers
-// =====================================================
-f_pos(p) => p == "Top Right" ? position.top_right : p == "Top Left" ? position.top_left : p == "Bottom Right" ? position.bottom_right : position.bottom_left
+//========================
+f_str(b) => b ? "Yes" : "No"
+f_fmt(x) => na(x) ? "na" : str.tostring(x, format.mintick)
 
-f_str(v) => na(v) ? "---" : v
+f_sign(x) =>
+    x > 0 ? 1 : x < 0 ? -1 : 0
 
-f_near(price, level) =>
-    level == 0.0 ? false : math.abs(price - level) / level * 100.0 <= nearPct
+f_abs(x) => math.abs(x)
 
-f_anchorState(price, anchor, midBandPct) =>
-    band = anchor * (midBandPct / 100.0)
-    price > anchor + band ? "Above" : price < anchor - band ? "Below" : "Middle"
+//========================
+// Timeframe warning
+//========================
+is15 = timeframe.isminutes and timeframe.multiplier == 15
+tfWarn = use15mOnly and not is15
 
-f_align(stockBias, spyBias) =>
-    (stockBias == "Neutral" or spyBias == "Neutral") ? "Diverging" :
-     (stockBias == spyBias) ? "Aligned" : "Opposite"
+//========================
+// 15m Core Metrics
+//========================
+c   = close
+h   = high
+l   = low
+v   = volume
 
-f_isRTH() =>
-    not na(time(tf, rthSession))
+atr = ta.atr(atrLen)
+ema = ta.ema(c, emaLen)
 
-f_isPremarket() =>
-    not na(time(tf, premarketSess))
+// VWAP (session)
+vwap = ta.vwap(hlc3)
+vwapState =
+     c > vwap ? "Above" :
+     c < vwap ? "Below" : "Middle"
 
-// =====================================================
-// Series (15m base)
-// =====================================================
-c = request.security(syminfo.tickerid, tf, close)
-o = request.security(syminfo.tickerid, tf, open)
-h = request.security(syminfo.tickerid, tf, high)
-l = request.security(syminfo.tickerid, tf, low)
-v = request.security(syminfo.tickerid, tf, volume)
+// Bias (15m) - simple & stable
+bias15 =
+     c > ema and c > vwap ? "Bullish" :
+     c < ema and c < vwap ? "Bearish" : "Neutral"
 
-ema20 = request.security(syminfo.tickerid, tf, ta.ema(close, emaFastLen))
-ema50 = request.security(syminfo.tickerid, tf, ta.ema(close, emaSlowLen))
+// Structure (15m) via last pivot HL/LH progression
+ph = ta.pivothigh(h, pivotLen, pivotLen)
+pl = ta.pivotlow(l, pivotLen, pivotLen)
 
-// VWAP (intraday). If chart doesn't support, you'll see na -> "---"
-vwap = request.security(syminfo.tickerid, tf, ta.vwap(hlc3))
-vwapState = na(vwap) ? "---" : (c > vwap ? "Above" : c < vwap ? "Below" : "Middle")
+var float lastPH = na
+var float lastPL = na
+var float prevPH = na
+var float prevPL = na
 
-// =====================================================
-// SPY context (15m)
-// =====================================================
-spyC    = request.security(spySymbol, tf, close)
-spyVwap = request.security(spySymbol, tf, ta.vwap(hlc3))
-spyVwapState = na(spyVwap) ? "---" : (spyC > spyVwap ? "Above" : "Below")
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
 
-// =====================================================
-// Structure (15m) — pivots
-// =====================================================
-ph = request.security(syminfo.tickerid, tf, ta.pivothigh(high, pivL, pivR))
-pl = request.security(syminfo.tickerid, tf, ta.pivotlow(low, pivL, pivR))
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
 
-lastPH = ta.valuewhen(not na(ph), ph, 0)
-prevPH = ta.valuewhen(not na(ph), ph, 1)
-lastPL = ta.valuewhen(not na(pl), pl, 0)
-prevPL = ta.valuewhen(not na(pl), pl, 1)
+hh = not na(lastPH) and not na(prevPH) and lastPH > prevPH
+hl = not na(lastPL) and not na(prevPL) and lastPL > prevPL
+ll = not na(lastPL) and not na(prevPL) and lastPL < prevPL
+lh = not na(lastPH) and not na(prevPH) and lastPH < prevPH
 
-isHH = not na(lastPH) and not na(prevPH) and lastPH > prevPH
-isLH = not na(lastPH) and not na(prevPH) and lastPH < prevPH
-isHL = not na(lastPL) and not na(prevPL) and lastPL > prevPL
-isLL = not na(lastPL) and not na(prevPL) and lastPL < prevPL
+structure15 =
+     (hh and hl) ? "HH/HL" :
+     (ll and lh) ? "LL/LH" : "Mixed"
 
-structure15 = (isHH and isHL) ? "HH/HL" : (isLL and isLH) ? "LL/LH" : "Mixed"
+//========================
+// 15m Trigger / Liquidity heuristics
+//========================
+// "Level" for micro triggers: use EMA20 + VWAP + last pivot levels (when available)
+microRes = na(lastPH) ? na : lastPH
+microSup = na(lastPL) ? na : lastPL
 
-// Bias (15m) — simple, reactive
-// Bullish if price > EMA20 and EMA20>EMA50; Bearish if price < EMA20 and EMA20<EMA50; else Neutral.
-bias15 = (c > ema20 and ema20 > ema50) ? "Bullish" : (c < ema20 and ema20 < ema50) ? "Bearish" : "Neutral"
+// Breakout / Breakdown detection vs last pivot levels
+breakUp   = not na(microRes) and ta.crossover(c, microRes)
+breakDown = not na(microSup) and ta.crossunder(c, microSup)
 
-// SPY bias proxy (15m) — same method
-spyEma20 = request.security(spySymbol, tf, ta.ema(close, emaFastLen))
-spyEma50 = request.security(spySymbol, tf, ta.ema(close, emaSlowLen))
-spyBias15 = (spyC > spyEma20 and spyEma20 > spyEma50) ? "Bullish" : (spyC < spyEma20 and spyEma20 < spyEma50) ? "Bearish" : "Neutral"
+// "Hold" concept: after break, stays above/below for N bars
+holdBars = 2
+holdUp   = not na(microRes) and c > microRes and ta.lowest(c, holdBars) > microRes
+holdDn   = not na(microSup) and c < microSup and ta.highest(c, holdBars) < microSup
 
-spyAlign15 = f_align(bias15, spyBias15)
+// Reclaim concept: wick below support then close back above (bull) / wick above resistance then close below (bear)
+reclaimBull = not na(microSup) and l < microSup and c > microSup
+reclaimBear = not na(microRes) and h > microRes and c < microRes
 
-// =====================================================
-// Session timing (auto)
-// =====================================================
-isRTH = f_isRTH()
-// Bar counter within RTH each day
-var int rthBarCount = 0
-newDay = ta.change(time("D")) != 0
-if newDay
-    rthBarCount := 0
-if isRTH
-    rthBarCount += 1
+// Failed breakout: cross above then close back below level soon
+failedUp = not na(microRes) and breakUp and c < microRes
+failedDn = not na(microSup) and breakDown and c > microSup
 
-barsInOR = math.max(1, int(orMinutes / 15))
-sessTiming2 = "---"
-if not isRTH
-    sessTiming2 := "---"
-else if rthBarCount <= barsInOR
-    sessTiming2 := "Open (first 30m)"
-else if (not na(time(tf, rthSession)) and na(time(tf, rthSession)[1]))
-    sessTiming2 := "Close"
-else if hour(time) >= 15
-    sessTiming2 := "Power hour"
-else if hour(time) >= 12 and hour(time) < 14
-    sessTiming2 := "Midday"
-else
-    sessTiming2 := "Midday"
-// =====================================================
-// Key intraday levels (auto where possible)
-// =====================================================
-// PDH/PDL
-pdh = request.security(syminfo.tickerid, "D", high[1])
-pdl = request.security(syminfo.tickerid, "D", low[1])
+// Trigger status (single label)
+triggerStatus =
+     (failedUp or failedDn) ? "Failed" :
+     ((breakUp and holdUp) or (breakDown and holdDn) or reclaimBull or reclaimBear) ? "Confirmed" :
+     "No trigger"
 
-// Premarket H/L (computed on 15m using premarket session)
-var float pmH = na
-var float pmL = na
-if newDay
-    pmH := na
-    pmL := na
-if f_isPremarket()
-    pmH := na(pmH) ? h : math.max(pmH, h)
-    pmL := na(pmL) ? l : math.min(pmL, l)
+// Liquidity event
+liquidityEvent =
+     reclaimBull ? "Stop run low" :
+     reclaimBear ? "Stop run high" :
+     (failedUp or failedDn) ? "Failed breakout" :
+     "None"
 
-// Opening Range H/L (first N minutes of RTH)
-var float orH = na
-var float orL = na
-var int orCount = 0
-if newDay
-    orH := na
-    orL := na
-    orCount := 0
-if isRTH
-    if orCount < barsInOR
-        orH := na(orH) ? h : math.max(orH, h)
-        orL := na(orL) ? l : math.min(orL, l)
-        orCount += 1
+// Entry type suggestion (HINT)
+entryTypeHint =
+     (reclaimBull or reclaimBear) ? "Liquidity sweep reclaim" :
+     ((breakUp and holdUp) or (breakDown and holdDn)) ? "Break & hold" :
+     (ta.crossover(c, vwap) or ta.crossunder(c, vwap)) ? "Reclaim level" :
+     (math.abs(c - vwap) <= atr * nearAtr) ? "Pullback to VWAP" :
+     (math.abs(c - ema) <= atr * nearAtr) ? "Pullback to EMA20" :
+     "—"
 
-// Last swing (from pivots)
-lastSwingLow  = lastPL
-lastSwingHigh = lastPH
+// Volume assessment
+volMa = ta.sma(v, volMaLen)
+volRel = volMa > 0 ? v / volMa : na
 
-// =====================================================
-// Volume signals (auto)
-// =====================================================
-volMA = ta.sma(v, volLen)
-impulseVolConfirms = not na(volMA) and v >= volMA * impMult
-
-// Pullback “dries up” heuristic: in pullback against bias, volume < MA * dryMult
-isPullbackBull = bias15 == "Bullish" and c < ema20 and c > ema50
-isPullbackBear = bias15 == "Bearish" and c > ema20 and c < ema50
-pullbackDries = not na(volMA) and v <= volMA * dryMult and (isPullbackBull or isPullbackBear)
-
-// =====================================================
-// Structure breaks (auto)
-// =====================================================
-// If bullish: break = close < last swing low. If bearish: break = close > last swing high.
-string structureBreaksTxt = "---"
-if bias15 == "Bullish" and not na(lastSwingLow)
-    structureBreaksTxt := c < lastSwingLow ? "Yes" : "No"
-else if bias15 == "Bearish" and not na(lastSwingHigh)
-    structureBreaksTxt := c > lastSwingHigh ? "Yes" : "No"
-
-// =====================================================
-// Trigger detection (heuristics)
-// =====================================================
-// Range breakout/breakdown based on last N bars (excluding current bar)
-priorHi = ta.highest(h, rangeLen)[1]
-priorLo = ta.lowest(l, rangeLen)[1]
-
-// Reclaim: cross above VWAP/EMA20 after being below
-crossOverVwap = ta.crossover(c, vwap)
-crossOverEma20 = ta.crossover(c, ema20)
-crossAnyVwap = ta.cross(c, vwap)
-crossAnyEma20 = ta.cross(c, ema20)
-reclaim = (not na(vwap) and crossOverVwap) or crossOverEma20
-breakout = not na(priorHi) and c > priorHi
-breakdown = not na(priorLo) and c < priorLo
-
-// Rejection: price probes level (high/low beyond or into) but closes back away
-// We'll use nearest of: PDH/PDL/ORH/ORL/VWAP/PMH/PML if available
-nearPDH = not na(pdh) and f_near(c, pdh)
-nearPDL = not na(pdl) and f_near(c, pdl)
-nearORH = not na(orH) and f_near(c, orH)
-nearORL = not na(orL) and f_near(c, orL)
-nearVW  = not na(vwap) and f_near(c, vwap)
-nearPMH = not na(pmH) and f_near(c, pmH)
-nearPML = not na(pmL) and f_near(c, pmL)
-
-rejectionUp = (nearPDH or nearORH or nearPMH) and h > c and c < o  // wick up + red close
-rejectionDn = (nearPDL or nearORL or nearPML) and l < c and c > o  // wick down + green close
-rejection = rejectionUp or rejectionDn
-
-// Fade: opposite move vs current bias near a level (very heuristic)
-fade = (bias15 == "Bullish" and rejectionUp) or (bias15 == "Bearish" and rejectionDn)
-
-// Choose trigger type with priority
-string triggerType = "---"
-if breakout
-    triggerType := "Breakout"
-else if breakdown
-    triggerType := "Breakdown"
-else if reclaim
-    triggerType := "Reclaim"
-else if rejection
-    triggerType := "Rejection"
-else if fade
-    triggerType := "Fade"
-
-// Trigger confirmed: basic rule (close beyond level + impulse volume) OR reclaim with follow-through
-triggerConfirmed = (triggerType == "Breakout" and breakout and impulseVolConfirms) or (triggerType == "Breakdown" and breakdown and impulseVolConfirms) or (triggerType == "Reclaim" and reclaim and (impulseVolConfirms or c > ema20)) or (triggerType == "Rejection" and rejection and impulseVolConfirms)
-
-triggerConfirmedTxt = triggerType == "---" ? "---" : (triggerConfirmed ? "Yes" : "No")
-
-// Trigger level suggestion
-float triggerLevel = na
-if triggerType == "Breakout"
-    triggerLevel := priorHi
-else if triggerType == "Breakdown"
-    triggerLevel := priorLo
-else if triggerType == "Reclaim"
-    triggerLevel := na(vwap) ? ema20 : vwap
-else if triggerType == "Rejection"
-    if rejectionUp
-        if not na(pdh) and nearPDH
-            triggerLevel := pdh
-        else if not na(orH) and nearORH
-            triggerLevel := orH
-        else if not na(pmH) and nearPMH
-            triggerLevel := pmH
-    else if rejectionDn
-        if not na(pdl) and nearPDL
-            triggerLevel := pdl
-        else if not na(orL) and nearORL
-            triggerLevel := orL
-        else if not na(pmL) and nearPML
-            triggerLevel := pmL
-
-// Invalidation level suggestion (stop proxy)
-float invalidationLevel = na
-if bias15 == "Bullish"
-    invalidationLevel := lastSwingLow
-else if bias15 == "Bearish"
-    invalidationLevel := lastSwingHigh
-
-// =====================================================
-// Momentum state (auto, heuristic)
-// =====================================================
-// Expanding with move: EMA20 slope agrees with bias + impulse vol confirms
-ema20Slope = ta.linreg(ema20, 10, 0) - ta.linreg(ema20, 10, 1)
-expandingMove = (bias15 == "Bullish" and ema20Slope > 0 and c > ema20) or (bias15 == "Bearish" and ema20Slope < 0 and c < ema20)
-diverging = (bias15 == "Bullish" and c < ema20) or (bias15 == "Bearish" and c > ema20)
-
-// Overextended: distance from EMA20 >= 2 * ATR(14) on 15m
-atr = ta.atr(14)
-overext = atr != 0.0 and math.abs(c - ema20) / atr >= 2.0
-
-// Failed reclaim / turn back down: crossed above VWAP/EMA20 recently but fell back below
-failedReclaim = (crossAnyEma20 and c < ema20) or (not na(vwap) and crossAnyVwap and c < vwap)
-
-string momentumState = "---"
-if overext
-    momentumState := "Overextended"
-else if failedReclaim
-    momentumState := "Failed reclaim / turn back down"
-else if expandingMove
-    momentumState := "Expanding with move"
-else if diverging
-    momentumState := "Diverging"
-
-// =====================================================
-// Retest quality (auto-ish)
-// =====================================================
-// Clean retest: breakout then next bar pulls back to level and closes back in direction
-// Wicky: long wick around level
-// No retest: breakout and continues away
+// Heuristic: "on move" if bar range expands and volume above avg
 rangeNow = h - l
-wickUpPct = rangeNow == 0 ? 0.0 : (h - math.max(o, c)) / rangeNow
-wickDnPct = rangeNow == 0 ? 0.0 : (math.min(o, c) - l) / rangeNow
-wicky = (wickUpPct > 0.45) or (wickDnPct > 0.45)
+rangeMa  = ta.sma(rangeNow, 20)
+isImpulse = rangeMa > 0 and rangeNow > rangeMa * 1.1
 
-bool hasRetest = false
-if triggerType == "Breakout"
-    hasRetest := not na(priorHi) and f_near(l, priorHi)
-else if triggerType == "Breakdown"
-    hasRetest := not na(priorLo) and f_near(h, priorLo)
-else if triggerType == "Reclaim"
-    hasRetest := f_near(l, ema20)
-else if triggerType == "Rejection"
-    hasRetest := true
+volState =
+     (not na(volRel) and volRel >= 1.2 and isImpulse) ? "Increasing on move" :
+     (not na(volRel) and volRel <= 0.9 and not isImpulse) ? "Reduced on pullbacks" :
+     "Weak / no confirm"
 
-string retestQuality = "---"
-if triggerType == "---"
-    retestQuality := "---"
-else if not hasRetest
-    retestQuality := "No retest"
-else if wicky
-    retestQuality := "Wicky"
-else
-    retestQuality := "Clean retest"
+//========================
+// Stop logic suggestion (HINT)
+//========================
+stopLogicHint =
+     bias15 == "Bullish" and not na(lastPL) ? "Below last HL" :
+     bias15 == "Bearish" and not na(lastPH) ? "Above last LH" :
+     (bias15 == "Bullish") ? "Below VWAP" :
+     (bias15 == "Bearish") ? "Above VWAP" :
+     "Structure invalidation"
 
-// =====================================================
-// Micro S/R involved (checkbox-like outputs)
-// =====================================================
-micro_PDH_PDL = (not na(pdh) and f_near(c, pdh)) or (not na(pdl) and f_near(c, pdl)) ? "Yes" : "No"
-micro_ORH_ORL = (not na(orH) and f_near(c, orH)) or (not na(orL) and f_near(c, orL)) ? "Yes" : "No"
-micro_VWAP    = (not na(vwap) and f_near(c, vwap)) ? "Yes" : "No"
-micro_PMHL    = (not na(pmH) and f_near(c, pmH)) or (not na(pmL) and f_near(c, pmL)) ? "Yes" : "No"
-micro_LastSw  = (not na(lastSwingHigh) and f_near(c, lastSwingHigh)) or (not na(lastSwingLow) and f_near(c, lastSwingLow)) ? "Yes" : "No"
+//========================
+// 4H Context: Support/Resistance + Bias4H (simple, stable)
+//========================
+c4 = request.security(syminfo.tickerid, tf4h, close)
+h4 = request.security(syminfo.tickerid, tf4h, high)
+l4 = request.security(syminfo.tickerid, tf4h, low)
 
-// =====================================================
-// Table
-// =====================================================
-bg  = color.new(color.black, vis)
-kbg = color.new(color.silver, vis)
-txt = color.new(color.white, vis)
+ema4 = request.security(syminfo.tickerid, tf4h, ta.ema(close, 20))
+vwap4 = request.security(syminfo.tickerid, tf4h, ta.vwap(hlc3))
 
-var table t = table.new(f_pos(pos), 2, 21, border_width=1, frame_color=color.new(color.white, vis))
+ph4 = request.security(syminfo.tickerid, tf4h, ta.pivothigh(high, piv4hLen, piv4hLen))
+pl4 = request.security(syminfo.tickerid, tf4h, ta.pivotlow(low, piv4hLen, piv4hLen))
 
-f_row(r, k, v_) =>
-    table.cell(t, 0, r, k, bgcolor=kbg, text_color=txt, text_halign=text.align_left)
-    table.cell(t, 1, r, v_, bgcolor=bg, text_color=txt, text_halign=text.align_left)
+var float lastPH4 = na
+var float lastPL4 = na
+if not na(ph4)
+    lastPH4 := ph4
+if not na(pl4)
+    lastPL4 := pl4
 
-fmtLvl(x) => na(x) ? "---" : str.tostring(x, format.mintick)
+support4 = lastPL4
+resist4  = lastPH4
+
+bias4h =
+     c4 > ema4 and c4 > vwap4 ? "Bullish" :
+     c4 < ema4 and c4 < vwap4 ? "Bearish" : "Neutral"
+
+//========================
+// Location vs 4H plan (HINT)
+//========================
+distToSup = not na(support4) ? f_abs(c - support4) : na
+distToRes = not na(resist4)  ? f_abs(c - resist4)  : na
+
+// Determine relevant "planned zone" based on 4H bias
+planLevel =
+     bias4h == "Bullish" ? support4 :
+     bias4h == "Bearish" ? resist4 :
+     // neutral: nearest of both
+     (na(distToSup) ? resist4 : na(distToRes) ? support4 : (distToSup <= distToRes ? support4 : resist4))
+
+distToPlan = not na(planLevel) ? f_abs(c - planLevel) : na
+distAtr    = (not na(distToPlan) and atr > 0) ? distToPlan / atr : na
+
+// "Chasing breakout" if trigger confirmed and price moved far away from plan level
+isChasing =
+     triggerStatus == "Confirmed" and not na(distAtr) and distAtr >= chaseAtr
+
+locationVs4h =
+     na(distAtr) ? "No data" :
+     isChasing ? "Chasing breakout" :
+     distAtr <= nearAtr ? "At planned entry zone" :
+     distAtr <= midAtr  ? "Early" :
+     distAtr >= extAtr  ? "Late / extended" :
+     "Early"
+
+//========================
+// Time of day (simple buckets)
+//========================
+// Uses exchange time via `time` series.
+// You can tweak buckets to your market.
+sessHour = hour(time)
+sessMin  = minute(time)
+
+// For US equities (rough):
+// Open: 09:30-10:30, Midday: 11:30-14:00, Power hour: 15:00-16:00
+// We'll approximate by hour blocks:
+timeOfDay =
+     (sessHour == 9 and sessMin >= 30) or (sessHour == 10 and sessMin < 30) ? "Open" :
+     (sessHour >= 11 and sessHour < 14) ? "Midday" :
+     (sessHour >= 15) ? "Power hour" :
+     "After lunch reclaim"
+
+//========================
+// Suggest Entry/Stop/Target numbers (HINT only)
+//========================
+entryHint = c
+
+// Stop hint: ATR buffer around plan level depending on bias15
+stopBuf = atr * 0.2
+stopHint =
+     bias15 == "Bullish" and not na(support4) ? (support4 - stopBuf) :
+     bias15 == "Bearish" and not na(resist4)  ? (resist4 + stopBuf) :
+     (bias15 == "Bullish") ? (vwap - stopBuf) :
+     (bias15 == "Bearish") ? (vwap + stopBuf) : na
+
+// Target hint: opposite 4H level
+targetHint =
+     bias15 == "Bullish" and not na(resist4)  ? resist4 :
+     bias15 == "Bearish" and not na(support4) ? support4 : na
+
+//========================
+// Table (top-right)
+//========================
+var table t = table.new(position.top_right, 2, 26, frame_color=color.new(color.gray, 70), border_color=color.new(color.gray, 70))
+
+f_row(_r, _k, _v) =>
+    table.cell(t, 0, _r, _k, text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(t, 1, _r, _v, text_color=color.white, bgcolor=color.new(color.black, 0))
 
 if barstate.islast
-    if showDash
-        f_row(0,  "TF", tf)
+    if not showTable
+        table.clear(t)
+    else
+        table.clear(t)
+
+        // Header
+        hdr = "Stock 15m Exec"
+        hdr2 = tfWarn ? "⚠ Use 15m" : syminfo.ticker
+        table.cell(t, 0, 0, hdr, text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(t, 1, 0, hdr2, text_color=color.white, bgcolor=tfWarn ? color.new(color.red, 0) : color.new(color.black, 0))
+
+        // Part 1: AUTO/HINT
         f_row(1,  "Bias (15m)", bias15)
         f_row(2,  "Structure (15m)", structure15)
         f_row(3,  "VWAP (15m)", vwapState)
 
-        f_row(4,  "SPY 15m alignment", spyAlign15)
-        f_row(5,  "SPY VWAP (15m)", spyVwapState)
+        f_row(4,  "Trigger status", triggerStatus)
+        f_row(5,  "Entry type (hint)", entryTypeHint)
+        f_row(6,  "Volume", volState)
+        f_row(7,  "Liquidity event", liquidityEvent)
 
-        f_row(6,  "Structure breaks", structureBreaksTxt)
-        f_row(7,  "Trigger type (15m)", triggerType)
-        f_row(8,  "Trigger confirmed?", triggerConfirmedTxt)
-        f_row(9,  "Trigger level (suggest)", fmtLvl(triggerLevel))
-        f_row(10, "Invalidation (suggest)", fmtLvl(invalidationLevel))
+        f_row(8,  "Stop logic (hint)", stopLogicHint)
+        f_row(9,  "Time of day", timeOfDay)
 
-        f_row(11, "Momentum state (15m)", momentumState)
-        f_row(12, "Retest quality", retestQuality)
-        f_row(13, "Session timing", sessTiming2)
+        // 4H context bridge
+        f_row(10, "Bias 4H (auto)", bias4h)
+        f_row(11, "4H Support", f_fmt(support4))
+        f_row(12, "4H Resistance", f_fmt(resist4))
+        f_row(13, "Location vs 4H", locationVs4h)
 
-        f_row(14, "Volume: impulse confirms", impulseVolConfirms ? "Yes" : "No")
-        f_row(15, "Volume: pullback dries up", pullbackDries ? "Yes" : "No")
+        // Numbers for manual plan fill
+        f_row(14, "Close", f_fmt(c))
+        f_row(15, "ATR(14)", f_fmt(atr))
+        f_row(16, "VWAP", f_fmt(vwap))
+        f_row(17, "EMA20", f_fmt(ema))
 
-        f_row(16, "Micro S/R: PDH/PDL", micro_PDH_PDL)
-        f_row(17, "Micro S/R: ORH/ORL", micro_ORH_ORL)
-        f_row(18, "Micro S/R: VWAP", micro_VWAP)
-        f_row(19, "Micro S/R: Premarket H/L", micro_PMHL)
-        f_row(20, "Micro S/R: Last swing", micro_LastSw)
+        f_row(18, "Last HL (pivot low)", f_fmt(lastPL))
+        f_row(19, "Last LH (pivot high)", f_fmt(lastPH))
 
-    else
-        table.clear(t, 0, 0, 1, 20)
+        f_row(20, "Entry (hint)", f_fmt(entryHint))
+        f_row(21, "Stop (hint)", f_fmt(stopHint))
+        f_row(22, "Target (hint)", f_fmt(targetHint))
 
+        // Extra debug
+        f_row(23, "Dist to plan (ATR)", na(distAtr) ? "na" : str.tostring(distAtr, format.mintick))
+        f_row(24, "Vol rel (xMA)", na(volRel) ? "na" : str.tostring(volRel, format.mintick))
+        f_row(25, "Note", "Fill plan in WWW")
+
+//========================
+// Optional visual markers (kept minimal)
+//========================
+plotchar(showTable and triggerStatus == "Confirmed", title="Trigger Confirmed", char="✔", location=location.top, color=color.new(color.lime, 0), size=size.tiny)
+plotchar(showTable and triggerStatus == "Failed", title="Trigger Failed", char="✖", location=location.top, color=color.new(color.red, 0), size=size.tiny)
