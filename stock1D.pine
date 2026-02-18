@@ -1,16 +1,15 @@
 //@version=6
-indicator("SPY - Gatekeeper 1D", overlay=true, max_labels_count=500)
+indicator("Ticker - Direction & Context 1D", overlay=true, max_labels_count=500)
 
 //====================================================
 // INPUTS
 //====================================================
 groupUI = "UI"
-showTable = input.bool(true, "Show Gatekeeper Table", group=groupUI)
+showTable = input.bool(true, "Show Ticker Table", group=groupUI)
+showNearestSRLines = input.bool(false, "Show nearest R/S lines", group=groupUI)
 
 groupSrc = "Sources"
-vixSymbol = input.symbol("CBOE:VIX", "VIX symbol", group=groupSrc)
-qqqSymbol = input.symbol("NASDAQ:QQQ", "QQQ symbol (risk proxy)", group=groupSrc)
-iwmSymbol = input.symbol("AMEX:IWM", "IWM symbol (breadth proxy)", group=groupSrc)
+spySymbol = input.symbol("AMEX:SPY", "SPY symbol (alignment / RS)", group=groupSrc)
 
 groupMA = "Moving Averages"
 emaLen = input.int(20, "EMA length", minval=1, group=groupMA)
@@ -22,12 +21,6 @@ atrLen = input.int(14, "ATR length", minval=1, group=groupATR)
 atrPctVolatile = input.float(2.0, "ATR% volatile threshold", minval=0.5, maxval=10.0, step=0.1, group=groupATR)
 atrPctLow = input.float(1.0, "ATR% low threshold", minval=0.2, maxval=5.0, step=0.1, group=groupATR)
 
-groupVIX = "VIX thresholds"
-vixLow = input.float(20.0, "Low (<)", minval=10, maxval=40, step=0.5, group=groupVIX)
-vixHigh = input.float(25.0, "High (>=)", minval=10, maxval=60, step=0.5, group=groupVIX)
-vixFast = input.int(5, "VIX fast SMA", minval=1, group=groupVIX)
-vixSlow = input.int(20, "VIX slow SMA", minval=1, group=groupVIX)
-
 groupStructure = "Structure / Regime"
 pivotLen = input.int(5, "Pivot length (D1 structure)", minval=2, maxval=20, group=groupStructure)
 rangeLookback = input.int(20, "Range lookback (days)", minval=10, maxval=120, group=groupStructure)
@@ -35,78 +28,57 @@ rangeRefLookback = input.int(60, "Range reference lookback (days)", minval=20, m
 chopAtrMult = input.float(0.6, "Chop around MAs: dist <= ATR *", minval=0.1, maxval=2.0, step=0.05, group=groupStructure)
 donLen = input.int(20, "Donchian length (DCH/DCL)", minval=5, maxval=200, group=groupStructure)
 
+groupRS = "Relative Strength vs SPY"
+rsMaLen = input.int(20, "RS MA length", minval=5, maxval=200, group=groupRS)
+rsSlopeLen = input.int(5, "RS slope lookback", minval=2, maxval=30, group=groupRS)
+rsFlatThr = input.float(0.001, "RS flat threshold", minval=0.0, maxval=5.0, step=0.001, group=groupRS)
+
 //====================================================
-// SAFETY: This script is designed for SPY 1D
+// SAFETY: designed for 1D
 //====================================================
 isDaily = timeframe.isdaily
-// We won't hard-error; we'll just warn in table.
 tfWarn = isDaily ? "" : "⚠ Use 1D"
 
 //====================================================
-// DATA: LEVELS
+// COMMON HELPERS
+//====================================================
+f_fmt2(x) => na(x) ? "na" : str.tostring(x, "#.##")
+
+//====================================================
+// LEVELS (Ticker)
 //====================================================
 pdh = high[1]
 pdl = low[1]
 
-// Weekly prior week high/low (completed week)
 pwh = request.security(syminfo.tickerid, "W", high[1], barmerge.gaps_off, barmerge.lookahead_off)
 pwl = request.security(syminfo.tickerid, "W", low[1],  barmerge.gaps_off, barmerge.lookahead_off)
 
-// Donchian (D1)
 dch = ta.highest(high, donLen)
 dcl = ta.lowest(low, donLen)
 
-// MAs (D1)
 ema20 = ta.ema(close, emaLen)
 sma50 = ta.sma(close, sma50Len)
 sma200 = ta.sma(close, sma200Len)
+
 vwapD = ta.vwap(hlc3)
 vwapState = close > vwapD ? "Above" : close < vwapD ? "Below" : "Around"
 
-// ATR (D1)
 atr = ta.atr(atrLen)
 atrPct = close != 0 ? (atr / close) * 100.0 : na
-
-atrEnv =     atrPct < atrPctLow ? "Low" :    atrPct >= atrPctVolatile ? "High" :    "Normal"
-
-//====================================================
-// VIX (via symbol)
-//====================================================
-vixClose = request.security(vixSymbol, timeframe.period, close, barmerge.gaps_off, barmerge.lookahead_off)
-vixF = request.security(vixSymbol, timeframe.period, ta.sma(close, vixFast), barmerge.gaps_off, barmerge.lookahead_off)
-vixS = request.security(vixSymbol, timeframe.period, ta.sma(close, vixSlow), barmerge.gaps_off, barmerge.lookahead_off)
-
-vixLevel =    vixClose < vixLow ? "<20" :    vixClose >= vixHigh ? ">25" :    "20-25"
-
-vixTrend =    vixF > vixS ? "Rising" :    vixF < vixS ? "Falling" :    "Flat"
+atrEnv = atrPct < atrPctLow ? "Low" : atrPct >= atrPctVolatile ? "High" : "Normal"
 
 //====================================================
-// QQQ vs 200SMA (risk proxy)
-//====================================================
-qqqClose = request.security(qqqSymbol, timeframe.period, close, barmerge.gaps_off, barmerge.lookahead_off)
-qqqSma200 = request.security(qqqSymbol, timeframe.period, ta.sma(close, 200), barmerge.gaps_off, barmerge.lookahead_off)
-
-qqqVs200 =    na(qqqClose) or na(qqqSma200) ? "N/A" :    qqqClose > qqqSma200 ? "Above" :    "Below"
-
-iwmClose = request.security(iwmSymbol, timeframe.period, close, barmerge.gaps_off, barmerge.lookahead_off)
-iwmSma200 = request.security(iwmSymbol, timeframe.period, ta.sma(close, 200), barmerge.gaps_off, barmerge.lookahead_off)
-
-spyAbove200 = not na(close) and not na(sma200) and close > sma200
-qqqAbove200 = not na(qqqClose) and not na(qqqSma200) and qqqClose > qqqSma200
-iwmAbove200 = not na(iwmClose) and not na(iwmSma200) and iwmClose > iwmSma200
-
-breadthAvail = (not na(sma200) ? 1 : 0) + (not na(qqqSma200) ? 1 : 0) + (not na(iwmSma200) ? 1 : 0)
-breadthAbove = (spyAbove200 ? 1 : 0) + (qqqAbove200 ? 1 : 0) + (iwmAbove200 ? 1 : 0)
-breadth = breadthAvail < 2 ? "N/A" : breadthAbove >= 2 ? "Strong" : breadthAbove == 1 ? "Neutral" : "Weak"
-
-//====================================================
-// TREND STRENGTH (Above/Below/Chop around MAs)
+// TREND STRENGTH (Ticker)
 //====================================================
 distToMAs = math.min(math.min(math.abs(close - ema20), math.abs(close - sma50)), math.abs(close - sma200))
-trendStrength =    distToMAs <= atr * chopAtrMult ? "Chop around MAs" :    close > ema20 and close > sma50 and close > sma200 ? "Above key MAs" :    close < ema20 and close < sma50 and close < sma200 ? "Below key MAs" :    "Chop around MAs"
+trendStrength =
+     distToMAs <= atr * chopAtrMult ? "Chop around MAs" :
+     close > ema20 and close > sma50 and close > sma200 ? "Above key MAs" :
+     close < ema20 and close < sma50 and close < sma200 ? "Below key MAs" :
+     "Chop around MAs"
 
 //====================================================
-// STRUCTURE (HH/HL, LL/LH, Mixed, Range) via pivots
+// STRUCTURE (Ticker) via pivots
 //====================================================
 ph = ta.pivothigh(high, pivotLen, pivotLen)
 pl = ta.pivotlow(low, pivotLen, pivotLen)
@@ -132,7 +104,10 @@ lh = hasTwoHighs and lastPH < prevPH
 hl = hasTwoLows and lastPL > prevPL
 ll = hasTwoLows and lastPL < prevPL
 
-structure =    (hh and hl) ? "HH/HL" :    (lh and ll) ? "LL/LH" :        "Mixed"
+structure =
+     (hh and hl) ? "HH/HL" :
+     (lh and ll) ? "LL/LH" :
+     "Mixed"
 
 rangeHigh = ta.highest(high, rangeLookback)
 rangeLow  = ta.lowest(low, rangeLookback)
@@ -141,59 +116,66 @@ isRange = rangeWidthPct < (atrPctVolatile * 1.5) and trendStrength == "Chop arou
 structure := isRange ? "Range" : structure
 
 //====================================================
-// BIAS (auto) from structure + MAs
+// BIAS (auto) + REGIME (Ticker)
 //====================================================
-bias =    (structure == "HH/HL" and trendStrength == "Above key MAs") ? "Bullish" :    (structure == "LL/LH" and trendStrength == "Below key MAs") ? "Bearish" :    "Neutral"
+bias =
+     (structure == "HH/HL" and trendStrength == "Above key MAs") ? "Bullish" :
+     (structure == "LL/LH" and trendStrength == "Below key MAs") ? "Bearish" :
+     "Neutral"
+
+regime =
+     structure == "Range" or trendStrength == "Chop around MAs" ? "Range" :
+     atrPct >= atrPctVolatile ? "Volatile" :
+     bias == "Bullish" ? "Trend Up" :
+     bias == "Bearish" ? "Trend Down" :
+     "Range"
 
 //====================================================
-// REGIME (Trend Up/Down/Range/Volatile-Unstable)
-//====================================================
-regime =    atrPct >= atrPctVolatile and vixTrend == "Rising" ? "Volatile-Unstable" :    structure == "Range" or trendStrength == "Chop around MAs" ? "Range" :    bias == "Bullish" ? "Trend Up" :    bias == "Bearish" ? "Trend Down" :    "Range"
-
-//====================================================
-// MOMENTUM CONDITION (Expanding/Stable/Diverging/Exhausted)
-//Simple, robust daily heuristic:
-//- Expanding: breakout strength (close near high) + ATR% rising
-//- Diverging: RSI falling while price rising (or vice versa)
-//- Exhausted: large candle + reversal wick vs direction or RSI extreme
+// MOMENTUM (Ticker) – same heuristic as SPY
 //====================================================
 rsi = ta.rsi(close, 14)
 rsiSlope = rsi - rsi[5]
 atrSlope = atrPct - atrPct[5]
 atrSlopeFlatThr = 0.05
 
-// close location in candle
 rng = high - low
-closePos = rng != 0 ? (close - low) / rng : 0.5  // 0..1
+closePos = rng != 0 ? (close - low) / rng : 0.5
 wickUp = high - math.max(open, close)
 wickDn = math.min(open, close) - low
 
-bullCandle = close > open
-bearCandle = close < open
+diverging =
+     (bias == "Bullish" and rsiSlope < 0 and close > close[5]) or
+     (bias == "Bearish" and rsiSlope > 0 and close < close[5])
 
-// Divergence-ish proxy
-diverging =    (bias == "Bullish" and rsiSlope < 0 and close > close[5]) or    (bias == "Bearish" and rsiSlope > 0 and close < close[5])
+exhausted =
+     (bias == "Bullish" and rsi > 70 and wickUp > rng * 0.35) or
+     (bias == "Bearish" and rsi < 30 and wickDn > rng * 0.35) or
+     (atrSlope > 0.5 and atrPct >= atrPctVolatile)
 
-exhausted =    (bias == "Bullish" and rsi > 70 and wickUp > rng * 0.35) or    (bias == "Bearish" and rsi < 30 and wickDn > rng * 0.35) or    (atrSlope > 0.5 and atrPct >= atrPctVolatile)
+expanding =
+     (bias == "Bullish" and closePos > 0.7 and atrSlope > 0) or
+     (bias == "Bearish" and closePos < 0.3 and atrSlope > 0)
 
-expanding =    (bias == "Bullish" and closePos > 0.7 and atrSlope > 0) or    (bias == "Bearish" and closePos < 0.3 and atrSlope > 0)
-
-momentum =    exhausted ? "Exhausted" :    diverging ? "Diverging" :    expanding ? "Expanding" :    "Stable"
+momentum =
+     exhausted ? "Exhausted" :
+     diverging ? "Diverging" :
+     expanding ? "Expanding" :
+     "Stable"
 
 //====================================================
-// HELPER DESCRIPTIONS (for readability in table)
+// HELPERS (Ticker)
 //====================================================
 rangeRefPct = ta.sma(rangeWidthPct, rangeRefLookback)
 rangeState =
      na(rangeWidthPct) or na(rangeRefPct) ? "N/A" :
-     rangeWidthPct >= rangeRefPct * 1.2 ? "Wider than normal (riskier/choppier)" :
-     rangeWidthPct <= rangeRefPct * 0.8 ? "Narrow vs normal (compression)" :
+     rangeWidthPct >= rangeRefPct * 1.2 ? "Wider than normal" :
+     rangeWidthPct <= rangeRefPct * 0.8 ? "Narrow vs normal" :
      "Around normal range"
 
 rsiState =
      na(rsi) ? "N/A" :
-     rsi >= 70 ? "High (overbought zone)" :
-     rsi <= 30 ? "Low (oversold zone)" :
+     rsi >= 70 ? "High" :
+     rsi <= 30 ? "Low" :
      rsi >= 55 ? "Bullish/firm" :
      rsi <= 45 ? "Bearish/soft" :
      "Neutral"
@@ -203,6 +185,93 @@ atrSlopeState =
      atrSlope > atrSlopeFlatThr ? "Rising volatility" :
      atrSlope < -atrSlopeFlatThr ? "Volatility cooling" :
      "Volatility stable"
+
+//====================================================
+// SPY BIAS (for alignment) – computed in SPY context
+// (simplified but consistent: structure+pivots+MAs)
+//====================================================
+f_spyBias() =>
+    e20 = ta.ema(close, emaLen)
+    s50 = ta.sma(close, sma50Len)
+    s200 = ta.sma(close, sma200Len)
+    a = ta.atr(atrLen)
+    d = math.min(math.min(math.abs(close - e20), math.abs(close - s50)), math.abs(close - s200))
+    ts =
+         d <= a * chopAtrMult ? "Chop around MAs" :
+         close > e20 and close > s50 and close > s200 ? "Above key MAs" :
+         close < e20 and close < s50 and close < s200 ? "Below key MAs" :
+         "Chop around MAs"
+
+    _ph = ta.pivothigh(high, pivotLen, pivotLen)
+    _pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+    var float _lastPH = na
+    var float _prevPH = na
+    var float _lastPL = na
+    var float _prevPL = na
+
+    if not na(_ph)
+        _prevPH := _lastPH
+        _lastPH := _ph
+    if not na(_pl)
+        _prevPL := _lastPL
+        _lastPL := _pl
+
+    _hasH = not na(_lastPH) and not na(_prevPH)
+    _hasL = not na(_lastPL) and not na(_prevPL)
+
+    _hh = _hasH and _lastPH > _prevPH
+    _lh = _hasH and _lastPH < _prevPH
+    _hl = _hasL and _lastPL > _prevPL
+    _ll = _hasL and _lastPL < _prevPL
+
+    _struct =
+         (_hh and _hl) ? "HH/HL" :
+         (_lh and _ll) ? "LL/LH" :
+         "Mixed"
+
+    _rangeHigh = ta.highest(high, rangeLookback)
+    _rangeLow  = ta.lowest(low, rangeLookback)
+    _rangeWidthPct = close != 0 ? ((_rangeHigh - _rangeLow) / close) * 100.0 : na
+    _isRange = _rangeWidthPct < (atrPctVolatile * 1.5) and ts == "Chop around MAs"
+    _struct := _isRange ? "Range" : _struct
+
+    _bias =
+         (_struct == "HH/HL" and ts == "Above key MAs") ? "Bullish" :
+         (_struct == "LL/LH" and ts == "Below key MAs") ? "Bearish" :
+         "Neutral"
+
+    _bias
+
+spyBias = request.security(spySymbol, timeframe.period, f_spyBias(), barmerge.gaps_off, barmerge.lookahead_off)
+
+//====================================================
+// ALIGNMENT vs SPY (Aligned / Mixed / Contra)
+//====================================================
+alignment =
+     (bias == "Neutral" or spyBias == "Neutral") ? "Mixed" :
+     (bias == spyBias) ? "Aligned" :
+     "Contra"
+
+//====================================================
+// RS vs SPY (RS value, trend, state)
+//====================================================
+spyClose = request.security(spySymbol, timeframe.period, close, barmerge.gaps_off, barmerge.lookahead_off)
+rs = (not na(spyClose) and spyClose != 0) ? close / spyClose : na
+rsMa = ta.sma(rs, rsMaLen)
+rsSlope = rsMa - rsMa[rsSlopeLen]
+
+rsTrend =
+     na(rsSlope) ? "N/A" :
+     rsSlope > rsFlatThr ? "Rising" :
+     rsSlope < -rsFlatThr ? "Falling" :
+     "Flat"
+
+rsState =
+     na(rs) or na(rsMa) ? "N/A" :
+     (rs > rsMa and rsTrend == "Rising") ? "Strong" :
+     (rs < rsMa and rsTrend == "Falling") ? "Weak" :
+     "Neutral"
 
 //====================================================
 // DERIVED SUPPORT / RESISTANCE (from key levels set)
@@ -256,95 +325,153 @@ if not na(dcl)
     if dcl >= close and (na(res) or dcl - close < res - close)
         res := dcl
 
-// nearest level to highlight in Key Levels section
-string closestName = ""
-float closestDist = 10e10
+// nearest levels for optional plot
+string nearestResName = ""
+float nearestResDist = 10e10
+float nearestResValue = na
+string nearestSupName = ""
+float nearestSupDist = 10e10
+float nearestSupValue = na
 
-if not na(pdh) and math.abs(close - pdh) < closestDist
-    closestDist := math.abs(close - pdh)
-    closestName := "PDH"
-if not na(pdl) and math.abs(close - pdl) < closestDist
-    closestDist := math.abs(close - pdl)
-    closestName := "PDL"
-if not na(pwh) and math.abs(close - pwh) < closestDist
-    closestDist := math.abs(close - pwh)
-    closestName := "PWH"
-if not na(pwl) and math.abs(close - pwl) < closestDist
-    closestDist := math.abs(close - pwl)
-    closestName := "PWL"
-if not na(ema20) and math.abs(close - ema20) < closestDist
-    closestDist := math.abs(close - ema20)
-    closestName := "EMA20"
-if not na(sma50) and math.abs(close - sma50) < closestDist
-    closestDist := math.abs(close - sma50)
-    closestName := "SMA50"
-if not na(sma200) and math.abs(close - sma200) < closestDist
-    closestDist := math.abs(close - sma200)
-    closestName := "SMA200"
-if not na(dch) and math.abs(close - dch) < closestDist
-    closestDist := math.abs(close - dch)
-    closestName := "DCH20"
-if not na(dcl) and math.abs(close - dcl) < closestDist
-    closestDist := math.abs(close - dcl)
-    closestName := "DCL20"
+if not na(pdh)
+    if pdh > close and pdh - close < nearestResDist
+        nearestResDist := pdh - close
+        nearestResName := "PDH"
+        nearestResValue := pdh
+    if pdh < close and close - pdh < nearestSupDist
+        nearestSupDist := close - pdh
+        nearestSupName := "PDH"
+        nearestSupValue := pdh
+if not na(pdl)
+    if pdl > close and pdl - close < nearestResDist
+        nearestResDist := pdl - close
+        nearestResName := "PDL"
+        nearestResValue := pdl
+    if pdl < close and close - pdl < nearestSupDist
+        nearestSupDist := close - pdl
+        nearestSupName := "PDL"
+        nearestSupValue := pdl
+if not na(pwh)
+    if pwh > close and pwh - close < nearestResDist
+        nearestResDist := pwh - close
+        nearestResName := "PWH"
+        nearestResValue := pwh
+    if pwh < close and close - pwh < nearestSupDist
+        nearestSupDist := close - pwh
+        nearestSupName := "PWH"
+        nearestSupValue := pwh
+if not na(pwl)
+    if pwl > close and pwl - close < nearestResDist
+        nearestResDist := pwl - close
+        nearestResName := "PWL"
+        nearestResValue := pwl
+    if pwl < close and close - pwl < nearestSupDist
+        nearestSupDist := close - pwl
+        nearestSupName := "PWL"
+        nearestSupValue := pwl
+if not na(ema20)
+    if ema20 > close and ema20 - close < nearestResDist
+        nearestResDist := ema20 - close
+        nearestResName := "EMA20"
+        nearestResValue := ema20
+    if ema20 < close and close - ema20 < nearestSupDist
+        nearestSupDist := close - ema20
+        nearestSupName := "EMA20"
+        nearestSupValue := ema20
+if not na(sma50)
+    if sma50 > close and sma50 - close < nearestResDist
+        nearestResDist := sma50 - close
+        nearestResName := "SMA50"
+        nearestResValue := sma50
+    if sma50 < close and close - sma50 < nearestSupDist
+        nearestSupDist := close - sma50
+        nearestSupName := "SMA50"
+        nearestSupValue := sma50
+if not na(sma200)
+    if sma200 > close and sma200 - close < nearestResDist
+        nearestResDist := sma200 - close
+        nearestResName := "SMA200"
+        nearestResValue := sma200
+    if sma200 < close and close - sma200 < nearestSupDist
+        nearestSupDist := close - sma200
+        nearestSupName := "SMA200"
+        nearestSupValue := sma200
+if not na(dch)
+    if dch > close and dch - close < nearestResDist
+        nearestResDist := dch - close
+        nearestResName := "DCH20"
+        nearestResValue := dch
+    if dch < close and close - dch < nearestSupDist
+        nearestSupDist := close - dch
+        nearestSupName := "DCH20"
+        nearestSupValue := dch
+if not na(dcl)
+    if dcl > close and dcl - close < nearestResDist
+        nearestResDist := dcl - close
+        nearestResName := "DCL20"
+        nearestResValue := dcl
+    if dcl < close and close - dcl < nearestSupDist
+        nearestSupDist := close - dcl
+        nearestSupName := "DCL20"
+        nearestSupValue := dcl
+
+plot(showNearestSRLines and barstate.islast ? nearestResValue : na, "Nearest Resistance (R)", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_linebr)
+plot(showNearestSRLines and barstate.islast ? nearestSupValue : na, "Nearest Support (S)", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_linebr)
 
 //====================================================
-// TABLE (fixed: top-right corner) - readable, 1 metric per row
+// TABLE (top-right) - 1 metric per row
 //====================================================
-var table t = table.new(position.top_right, 2, 31, border_width=1)
+var table t = table.new(position.top_right, 2, 30, border_width=1)
 
 f_set(row, k, v, isHeader, valColor) =>
-    leftBg = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
+    leftBg  = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
     rightBg = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
-    txtCol = color.white
+    txtCol  = color.white
     table.cell(t, 0, row, k, text_size=size.small, text_halign=text.align_left, bgcolor=leftBg, text_color=txtCol)
     table.cell(t, 1, row, v, text_size=size.small, text_halign=text.align_left, bgcolor=rightBg, text_color=valColor)
 
-f_fmt(x) =>
-    na(x) ? "na" : str.tostring(x, format.mintick)
+f_lvl(name, x) =>
+    suffix = name == nearestResName ? " (R)" : name == nearestSupName ? " (S)" : ""
+    f_fmt2(x) + suffix
 
-f_fmt2(x) =>
-    na(x) ? "na" : str.tostring(x, "#.##")
-
-// Update table only on last bar to reduce flicker
 if barstate.islast
     if not showTable
-        table.clear(t, 0, 0, 1, 30)
+        table.clear(t, 0, 0, 1, 29)
     else
         white = color.white
         nearCol = color.new(color.yellow, 0)
 
-        f_set(0, "SPY Gatekeeper (1D)", tfWarn == "" ? "OK" : tfWarn, true, white)
+        f_set(0, "Ticker 1D Context", tfWarn == "" ? syminfo.ticker : "⚠ " + syminfo.ticker, true, white)
 
-        f_set(1, "Core (used on WWW)", "", true, white)
-        f_set(2, "Regime", regime, false, white)
-        f_set(3, "Bias (auto)", bias, false, white)
-        f_set(4, "Structure", structure, false, white)
-        f_set(5, "Trend Strength", trendStrength, false, white)
-        f_set(6, "VWAP", f_fmt2(vwapD) + " (" + vwapState + ")", false, white)
-        f_set(7, "Momentum (1D)", momentum, false, white)
-        f_set(8, "Support", f_fmt2(sup), false, white)
-        f_set(9, "Resistance", f_fmt2(res), false, white)
+        f_set(1, "Regime", regime, false, white)
+        f_set(2, "Bias (auto)", bias, false, white)
+        f_set(3, "Structure", structure, false, white)
+        f_set(4, "Trend Strength", trendStrength, false, white)
+        f_set(5, "VWAP", f_fmt2(vwapD) + " (" + vwapState + ")", false, white)
+        f_set(6, "Momentum (1D)", momentum, false, white)
+
+        f_set(7, "Alignment vs SPY", alignment + " (SPY: " + spyBias + ")", false, white)
+        f_set(8, "RS state vs SPY", rsState, false, white)
+        f_set(9, "RS trend", rsTrend, false, white)
         f_set(10, "Close", f_fmt2(close), false, white)
         f_set(11, "ATR (14)", f_fmt2(atr), false, white)
-        f_set(12, "VIX", f_fmt2(vixClose) + " (" + vixLevel + ")", false, white)
-        f_set(13, "VIX Trend", vixTrend, false, white)
-        f_set(14, "ATR% Env", atrEnv + " (" + f_fmt2(atrPct) + "%)", false, white)
-        f_set(15, "Breadth", breadth, false, white)
-        f_set(16, "QQQ vs 200SMA", qqqVs200, false, white)
+        f_set(12, "Support", f_fmt2(sup), false, white)
+        f_set(13, "Resistance", f_fmt2(res), false, white)
 
-        f_set(17, "Key Levels (Support/Resistance refs)", "", true, white)
-        f_set(18, "PDH", f_fmt2(pdh), false, closestName == "PDH" ? nearCol : white)
-        f_set(19, "PDL", f_fmt2(pdl), false, closestName == "PDL" ? nearCol : white)
-        f_set(20, "PWH", f_fmt2(pwh), false, closestName == "PWH" ? nearCol : white)
-        f_set(21, "PWL", f_fmt2(pwl), false, closestName == "PWL" ? nearCol : white)
-        f_set(22, "EMA20", f_fmt2(ema20), false, closestName == "EMA20" ? nearCol : white)
-        f_set(23, "SMA50", f_fmt2(sma50), false, closestName == "SMA50" ? nearCol : white)
-        f_set(24, "SMA200", f_fmt2(sma200), false, closestName == "SMA200" ? nearCol : white)
-        f_set(25, "DCH20", f_fmt2(dch), false, closestName == "DCH20" ? nearCol : white)
-        f_set(26, "DCL20", f_fmt2(dcl), false, closestName == "DCL20" ? nearCol : white)
+        f_set(14, "Key Levels", "", true, white)
+        f_set(15, "PDH", f_lvl("PDH", pdh), false, (nearestResName == "PDH" or nearestSupName == "PDH") ? nearCol : white)
+        f_set(16, "PDL", f_lvl("PDL", pdl), false, (nearestResName == "PDL" or nearestSupName == "PDL") ? nearCol : white)
+        f_set(17, "PWH", f_lvl("PWH", pwh), false, (nearestResName == "PWH" or nearestSupName == "PWH") ? nearCol : white)
+        f_set(18, "PWL", f_lvl("PWL", pwl), false, (nearestResName == "PWL" or nearestSupName == "PWL") ? nearCol : white)
+        f_set(19, "EMA20", f_lvl("EMA20", ema20), false, (nearestResName == "EMA20" or nearestSupName == "EMA20") ? nearCol : white)
+        f_set(20, "SMA50", f_lvl("SMA50", sma50), false, (nearestResName == "SMA50" or nearestSupName == "SMA50") ? nearCol : white)
+        f_set(21, "SMA200", f_lvl("SMA200", sma200), false, (nearestResName == "SMA200" or nearestSupName == "SMA200") ? nearCol : white)
+        f_set(22, "DCH20", f_lvl("DCH20", dch), false, (nearestResName == "DCH20" or nearestSupName == "DCH20") ? nearCol : white)
+        f_set(23, "DCL20", f_lvl("DCL20", dcl), false, (nearestResName == "DCL20" or nearestSupName == "DCL20") ? nearCol : white)
 
-        f_set(27, "TV Helpers (not scored on WWW)", "", true, white)
-        f_set(28, "Range context", rangeState, false, white)
-        f_set(29, "RSI(14) context", rsiState, false, white)
-        f_set(30, "ATR% slope(5) context", atrSlopeState, false, white)
+        f_set(24, "Helpers", "", true, white)
+        f_set(25, "Range context", rangeState, false, white)
+        f_set(26, "RSI(14) context", rsiState, false, white)
+        f_set(27, "ATR% slope(5)", atrSlopeState, false, white)
+        f_set(28, "RS value", na(rs) ? "na" : str.tostring(rs, "#.###"), false, white)
+        f_set(29, "ATR% Env", atrEnv + " (" + f_fmt2(atrPct) + "%)", false, white)
