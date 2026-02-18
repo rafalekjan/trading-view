@@ -1,225 +1,498 @@
 //@version=6
-indicator("Structure & Planning - 4h", overlay=true)
+indicator("Stock 4H - Structure", overlay=true, max_labels_count=500)
 
-//===================== INPUTS =====================
-tf4h            = input.timeframe("240", "4H timeframe (fixed)")
-pivL            = input.int(3, "Pivot left", minval=1)
-pivR            = input.int(3, "Pivot right", minval=1)
+//====================================================
+// UI
+//====================================================
+groupUI = "UI"
+showTable          = input.bool(true,  "Show 4H Table", group=groupUI)
+showNearestSRLines = input.bool(false, "Show nearest R/S lines", group=groupUI)
+enforce4H          = input.bool(true,  "Warn if not 4H", group=groupUI)
+hardStopWrongTF    = input.bool(false, "Hard stop if not 4H", group=groupUI)
 
-ema20Len        = input.int(20, "EMA20", minval=5)
-ema50Len        = input.int(50, "EMA50", minval=10)
-sma200Len       = input.int(200, "SMA200", minval=50)
+//====================================================
+// SOURCES
+//====================================================
+groupSrc = "Sources"
+spySymbol = input.symbol("AMEX:SPY", "SPY symbol (Bias 1D benchmark)", group=groupSrc)
 
-atrLen          = input.int(14, "ATR len", minval=5)
-adxLen          = input.int(14, "ADX len", minval=5)
+//====================================================
+// PARAMS
+//====================================================
+groupMA = "Moving Averages"
+emaLen    = input.int(20,  "EMA length",   minval=1, group=groupMA)
+sma50Len  = input.int(50,  "SMA50 length", minval=1, group=groupMA)
+sma200Len = input.int(200, "SMA200 length",minval=1, group=groupMA)
 
-anchorMidPct    = input.float(0.35, "Anchor 'Around' band (%)", step=0.05)  // around EMA20 band
-rangeN          = input.int(40, "4H range lookback", minval=10)
-nearEdgePct     = input.float(20.0, "Near edge if within (%) of range", step=1.0)
+groupATR = "ATR"
+atrLen         = input.int(14, "ATR length", minval=1, group=groupATR)
+atrPctVolatile = input.float(2.0, "ATR% volatile threshold", minval=0.5, maxval=10.0, step=0.1, group=groupATR)
+atrPctLow      = input.float(1.0, "ATR% low threshold",      minval=0.2, maxval=5.0,  step=0.1, group=groupATR)
+roomAtrNear    = input.float(0.30, "Near level if dist <= ATR *", minval=0.10, maxval=2.0, step=0.05, group=groupATR)
 
-nearLvlATR      = input.float(0.5, "Near level (ATR multiple)", step=0.1)  // for key-level proximity
-nearLevelPct    = input.float(1.0, "Near SMA200/swing threshold (%)", step=0.1)
+groupStructure = "Structure / Quality"
+pivotLen    = input.int(5,  "Pivot length (4H)", minval=2, maxval=20, group=groupStructure)
+donLen      = input.int(20, "Donchian length (4H)", minval=5, maxval=200, group=groupStructure)
+rangeLen    = input.int(20, "Range lookback (4H bars)", minval=10, maxval=120, group=groupStructure)
+chopAtrMult = input.float(0.6, "Chop around MAs: dist <= ATR *", minval=0.1, maxval=2.0, step=0.05, group=groupStructure)
+qualLookback= input.int(12, "Trend quality lookback (bars)", minval=6, maxval=40, group=groupStructure)
+overlapThr  = input.float(0.55, "Overlapping threshold (0-1)", minval=0.1, maxval=0.9, step=0.05, group=groupStructure)
 
-showDash        = input.bool(true, "Show dashboard")
-pos             = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"])
-vis             = input.int(20, "Table transparency (0-90)", minval=0, maxval=90)
+groupVWAP = "VWAP"
+useSessionVWAP = input.bool(true, "Use session VWAP (intraday)", group=groupVWAP)
 
-//===================== HELPERS =====================
-f_pos(p) => p == "Top Right" ? position.top_right : p == "Top Left" ? position.top_left : p == "Bottom Right" ? position.bottom_right : position.bottom_left
+//====================================================
+// TIMEFRAME SAFETY
+//====================================================
+is4H = (timeframe.isintraday and timeframe.multiplier == 240) or (timeframe.in_seconds(timeframe.period) == 4 * 60 * 60)
+tfWarn = (enforce4H and not is4H) ? "⚠ Use 4H" : ""
 
-f_anchorState(price, anchor) =>
-    band = anchor * (anchorMidPct / 100.0)
-    price > anchor + band ? "Above anchor" : price < anchor - band ? "Below anchor" : "Around anchor"
+if enforce4H and hardStopWrongTF and not is4H
+    runtime.error("This script is designed for 4H timeframe. Switch chart to 4H.")
 
-f_locRange(price, priorHi, priorLo, hi, lo) =>
-    rng = hi - lo
-    rng == 0 ? "Mid-range" :
-     (not na(priorHi) and price > priorHi) ? "Breaking range (Up)" :
-     (not na(priorLo) and price < priorLo) ? "Breaking range (Down)" :
-     ((price - lo) / rng) * 100.0 <= nearEdgePct ? "Near support" :
-     ((hi - price) / rng) * 100.0 <= nearEdgePct ? "Near resistance" :
-     "Mid-range"
+//====================================================
+// HELPERS
+//====================================================
+f_fmt2(x) => na(x) ? "na" : str.tostring(x, "#.##")
 
-f_locSma200(price, sma200) =>
-    (na(price) or na(sma200) or price == 0) ? "Mid-range" :
-     (math.abs(price - sma200) / price) * 100.0 <= nearLevelPct ? (price > sma200 ? "At support" : "At resistance") : "Mid-range"
+//====================================================
+// 4H LEVELS
+//====================================================
+pdh = high[1]
+pdl = low[1]
 
-f_locSwing(price, swingRes, swingSup) =>
-    (not na(swingSup) and price != 0 and math.abs(price - swingSup) / price * 100.0 <= nearLevelPct) ? "At support" :
-     (not na(swingRes) and price != 0 and math.abs(price - swingRes) / price * 100.0 <= nearLevelPct) ? "At resistance" :
-     (not na(swingRes) and price > swingRes) ? "Breaking range (Up)" :
-     (not na(swingSup) and price < swingSup) ? "Breaking range (Down)" :
-     "Mid-range"
+// Weekly (HTF refs)
+pwh = request.security(syminfo.tickerid, "W", high[1], barmerge.gaps_off, barmerge.lookahead_off)
+pwl = request.security(syminfo.tickerid, "W", low[1],  barmerge.gaps_off, barmerge.lookahead_off)
 
-f_nearLvl(price, lvl, atr) =>
-    (na(lvl) or atr == 0) ? false : math.abs(price - lvl) <= (atr * nearLvlATR)
+// Donchian (4H)
+dch = ta.highest(high, donLen)
+dcl = ta.lowest(low, donLen)
 
-f_pack3(a, b, c) => "M1: " + a + "\nM2: " + b + "\nM3: " + c
+// MAs
+ema20  = ta.ema(close, emaLen)
+sma50  = ta.sma(close, sma50Len)
+sma200 = ta.sma(close, sma200Len)
 
-f_adx(len) =>
-    up = ta.change(high)
-    down = -ta.change(low)
-    plusDM = (up > down and up > 0) ? up : 0.0
-    minusDM = (down > up and down > 0) ? down : 0.0
-    trur = ta.rma(ta.tr(true), len)
-    plus = trur == 0 ? 0.0 : 100.0 * ta.rma(plusDM, len) / trur
-    minus = trur == 0 ? 0.0 : 100.0 * ta.rma(minusDM, len) / trur
-    sumDI = plus + minus
-    dx = sumDI == 0 ? 0.0 : 100.0 * math.abs(plus - minus) / sumDI
-    ta.rma(dx, len)
+// VWAP (session)
+vwap = useSessionVWAP ? ta.vwap(hlc3) : na
+vwapState = not useSessionVWAP ? "N/A" : close > vwap ? "Above" : close < vwap ? "Below" : "Around"
 
-//===================== 4H SERIES =====================
-c4  = request.security(syminfo.tickerid, tf4h, close)
-o4  = request.security(syminfo.tickerid, tf4h, open)
-h4  = request.security(syminfo.tickerid, tf4h, high)
-l4  = request.security(syminfo.tickerid, tf4h, low)
-v4  = request.security(syminfo.tickerid, tf4h, volume)
+// ATR / ATR%
+atr = ta.atr(atrLen)
+atrPct = close != 0 ? (atr / close) * 100.0 : na
+atrEnv = atrPct < atrPctLow ? "Low" : atrPct >= atrPctVolatile ? "High" : "Normal"
 
-ema20_4  = request.security(syminfo.tickerid, tf4h, ta.ema(close, ema20Len))
-ema50_4  = request.security(syminfo.tickerid, tf4h, ta.ema(close, ema50Len))
-sma200_4 = request.security(syminfo.tickerid, tf4h, ta.sma(close, sma200Len))
+//====================================================
+// TREND STRENGTH (same style)
+//====================================================
+distToMAs = math.min(math.min(math.abs(close - ema20), math.abs(close - sma50)), math.abs(close - sma200))
+trendStrength =
+     distToMAs <= atr * chopAtrMult ? "Chop around MAs" :
+     close > ema20 and close > sma50 and close > sma200 ? "Above key MAs" :
+     close < ema20 and close < sma50 and close < sma200 ? "Below key MAs" :
+     "Chop around MAs"
 
-atr4     = request.security(syminfo.tickerid, tf4h, ta.atr(atrLen))
-atrp4    = c4 == 0 ? na : (atr4 / c4) * 100.0
-atrp4ma  = request.security(syminfo.tickerid, tf4h, ta.sma((ta.atr(atrLen) / close) * 100.0, 20))
+//====================================================
+// STRUCTURE (4H) via pivots (HH/HL, LL/LH, Mixed)
+//====================================================
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
 
-adx4     = request.security(syminfo.tickerid, tf4h, f_adx(adxLen))
+var float lastPH = na
+var float prevPH = na
+var float lastPL = na
+var float prevPL = na
 
-rangeHi4 = request.security(syminfo.tickerid, tf4h, ta.highest(high, rangeN))
-rangeLo4 = request.security(syminfo.tickerid, tf4h, ta.lowest(low, rangeN))
-priorHi4 = request.security(syminfo.tickerid, tf4h, ta.highest(high, rangeN)[1])
-priorLo4 = request.security(syminfo.tickerid, tf4h, ta.lowest(low, rangeN)[1])
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
 
-//===================== STRUCTURE (3 METHODS) =====================
-// M1: pivots HH/HL vs LL/LH
-ph4 = request.security(syminfo.tickerid, tf4h, ta.pivothigh(high, pivL, pivR))
-pl4 = request.security(syminfo.tickerid, tf4h, ta.pivotlow(low, pivL, pivR))
-lastPH4 = ta.valuewhen(not na(ph4), ph4, 0)
-prevPH4 = ta.valuewhen(not na(ph4), ph4, 1)
-lastPL4 = ta.valuewhen(not na(pl4), pl4, 0)
-prevPL4 = ta.valuewhen(not na(pl4), pl4, 1)
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
 
-isHH4 = not na(lastPH4) and not na(prevPH4) and lastPH4 > prevPH4
-isLH4 = not na(lastPH4) and not na(prevPH4) and lastPH4 < prevPH4
-isHL4 = not na(lastPL4) and not na(prevPL4) and lastPL4 > prevPL4
-isLL4 = not na(lastPL4) and not na(prevPL4) and lastPL4 < prevPL4
-structureM1 = (isHH4 and isHL4) ? "HH/HL" : (isLL4 and isLH4) ? "LL/LH" : "Mixed"
+hasTwoHighs = not na(lastPH) and not na(prevPH)
+hasTwoLows  = not na(lastPL) and not na(prevPL)
 
-// M2: EMA20 slope + price vs EMA20
-slope20 = request.security(syminfo.tickerid, tf4h, ta.linreg(ta.ema(close, ema20Len), 10, 0) - ta.linreg(ta.ema(close, ema20Len), 10, 1))
-structureM2 = (slope20 > 0 and c4 > ema20_4) ? "HH/HL" : (slope20 < 0 and c4 < ema20_4) ? "LL/LH" : "Mixed"
+hh = hasTwoHighs and lastPH > prevPH
+lh = hasTwoHighs and lastPH < prevPH
+hl = hasTwoLows and lastPL > prevPL
+ll = hasTwoLows and lastPL < prevPL
 
-// M3: EMA20 vs EMA50 + price location
-structureM3 = (ema20_4 > ema50_4 and c4 > ema20_4) ? "HH/HL" : (ema20_4 < ema50_4 and c4 < ema20_4) ? "LL/LH" : "Mixed"
+baseStructure =
+     (hh and hl) ? "HH/HL" :
+     (lh and ll) ? "LL/LH" :
+     "Mixed"
 
-//===================== BIAS (3 METHODS) =====================
-// M1: structureM1 + SMA200 filter
-biasM1 = (structureM1 == "HH/HL" and c4 > sma200_4) ? "Bullish" : (structureM1 == "LL/LH" and c4 < sma200_4) ? "Bearish" : "Neutral"
-// M2: MA alignment
-biasM2 = (c4 > sma200_4 and ema50_4 > sma200_4) ? "Bullish" : (c4 < sma200_4 and ema50_4 < sma200_4) ? "Bearish" : "Neutral"
-// M3: anchor + EMA stack
-biasM3 = (c4 > ema20_4 and ema20_4 > ema50_4) ? "Bullish" : (c4 < ema20_4 and ema20_4 < ema50_4) ? "Bearish" : "Neutral"
+// Range detection (like 1D logic but on 4H)
+rangeHigh = ta.highest(high, rangeLen)
+rangeLow  = ta.lowest(low, rangeLen)
+rangeWidthPct = close != 0 ? ((rangeHigh - rangeLow) / close) * 100.0 : na
+isRange = not na(rangeWidthPct) and rangeWidthPct < (atrPctVolatile * 1.5) and trendStrength == "Chop around MAs"
 
-//===================== ANCHOR STATE (1 METHOD) =====================
-anchorState = (na(c4) or na(ema20_4)) ? "---" : f_anchorState(c4, ema20_4)
+// Compression: shrinking range + chop
+width = rangeHigh - rangeLow
+widthSlope = width - width[rangeLen]
+isCompression = trendStrength == "Chop around MAs" and widthSlope < 0 and width <= atr * 4
 
-//===================== PLANNED SETUP (AUTO HEURISTIC) =====================
-// You will still select manually in UI; this is just a suggestion.
-breakUp = not na(priorHi4) and c4 > priorHi4
-breakDn = not na(priorLo4) and c4 < priorLo4
+// Transition heuristic:
+// - bullish transition: last low higher (HL) while highs not yet HH (Mixed)
+// - bearish transition: last high lower (LH) while lows not yet LL (Mixed)
+transitionBull = baseStructure == "Mixed" and hl and not hh
+transitionBear = baseStructure == "Mixed" and lh and not ll
 
-validSwingRes4 = (not na(lastPH4) and lastPH4 > c4) ? lastPH4 : na
-validSwingSup4 = (not na(lastPL4) and lastPL4 < c4) ? lastPL4 : na
-loc4M1 = f_locRange(c4, priorHi4, priorLo4, rangeHi4, rangeLo4)
-loc4M2 = f_locSma200(c4, sma200_4)
-loc4M3 = f_locSwing(c4, validSwingRes4, validSwingSup4)
+structure =
+     isRange ? "Range" :
+     isCompression ? "Compression" :
+     transitionBull or transitionBear ? "Transition" :
+     baseStructure
 
-pullbackWithinBull = (biasM2 == "Bullish") and (c4 < ema20_4) and (c4 > sma200_4)
-pullbackWithinBear = (biasM2 == "Bearish") and (c4 > ema20_4) and (c4 < sma200_4)
+//====================================================
+// BIAS (auto) + REGIME (priority Range/Chop over Volatile)
+//====================================================
+bias4H =
+     (structure == "HH/HL" and trendStrength == "Above key MAs") ? "Bullish" :
+     (structure == "LL/LH" and trendStrength == "Below key MAs") ? "Bearish" :
+     "Neutral"
 
-setupAuto =
-     breakUp and biasM2 == "Bullish" ? "Breakout continuation" :
-     breakDn and biasM2 == "Bearish" ? "Breakdown continuation" :
-     pullbackWithinBull or pullbackWithinBear ? "Pullback within trend" :
-     (loc4M1 == "Mid-range") ? "Range play" :
-     "Reversal attempt"
+regime4H =
+     (structure == "Range" or trendStrength == "Chop around MAs") ? "Range" :
+     (atrPct >= atrPctVolatile) ? "Volatile" :
+     (bias4H == "Bullish") ? "Trend Up" :
+     (bias4H == "Bearish") ? "Trend Down" :
+     "Range"
 
-//===================== TREND QUALITY (2 METHODS -> show both) =====================
-// M1: ADX-based
-trendQualityM1 =
-     na(adx4) ? "---" :
-     adx4 >= 25 ? "Clean" :
-     adx4 >= 18 ? "Acceptable" :
-     "Choppy"
+//====================================================
+// TREND QUALITY (Clean / Overlapping / Exhausted)
+//====================================================
+// overlap ratio: how often bars overlap previous bar in last qualLookback
+overlapCount = 0
+for i = 1 to qualLookback
+    prevHigh = high[i]
+    prevLow  = low[i]
+    curHigh  = high[i-1]
+    curLow   = low[i-1]
+    isOverlap = not (curLow > prevHigh or curHigh < prevLow)
+    overlapCount += isOverlap ? 1 : 0
 
-// M2: whipsaw proxy (how often price crosses EMA20 in last 20 bars)
-crossCount = request.security(syminfo.tickerid, tf4h, ta.sma(ta.cross(close, ta.ema(close, ema20Len)) ? 1.0 : 0.0, 20) * 20.0)
-trendQualityM2 =
-     na(crossCount) ? "---" :
-     crossCount >= 6 ? "Choppy" :
-     crossCount >= 3 ? "Acceptable" :
-     "Clean"
+overlapRatio = overlapCount / qualLookback
 
-//===================== VOLATILITY PROFILE (1) =====================
-volProfile =
-     (na(atrp4) or na(atrp4ma)) ? "---" :
-     atrp4 > atrp4ma ? "Expanding" :
-     atrp4 < atrp4ma ? "Contracting" :
-     "Stable"
+rsi = ta.rsi(close, 14)
+rng = high - low
+wickUp = high - math.max(open, close)
+wickDn = math.min(open, close) - low
 
-//===================== KEY LEVEL TYPE (SUGGEST) =====================
-// We can suggest whether current price is near these *levels*.
-// Supply/Demand is not reliably computable in a robust way.
-dHigh1 = request.security(syminfo.tickerid, "D", high[1])
-dLow1  = request.security(syminfo.tickerid, "D", low[1])
+exhausted =
+     (bias4H == "Bullish" and rsi > 70 and wickUp > rng * 0.35) or
+     (bias4H == "Bearish" and rsi < 30 and wickDn > rng * 0.35) or
+     (atrPct >= atrPctVolatile and overlapRatio > overlapThr)
 
-wHigh1 = request.security(syminfo.tickerid, "W", high[1])
-wLow1  = request.security(syminfo.tickerid, "W", low[1])
+trendQuality =
+     exhausted ? "Exhausted" :
+     overlapRatio >= overlapThr ? "Overlapping / messy" :
+     "Clean trend"
 
-nearPDH = f_nearLvl(c4, dHigh1, atr4) or f_nearLvl(c4, dLow1, atr4)
-nearWHL = f_nearLvl(c4, wHigh1, atr4) or f_nearLvl(c4, wLow1, atr4)
+//====================================================
+// LIQUIDITY / TRAP (FACTS / HINTS)
+//====================================================
+sweepLookback = pivotLen * 3
+priorSwingHigh = ta.highest(high[1], sweepLookback)
+priorSwingLow  = ta.lowest(low[1],  sweepLookback)
 
-midRange4 = (rangeHi4 + rangeLo4) / 2.0
-nearRangeLvl = f_nearLvl(c4, rangeHi4, atr4) or f_nearLvl(c4, rangeLo4, atr4) or f_nearLvl(c4, midRange4, atr4)
+sweepHigh = high > priorSwingHigh and close < priorSwingHigh
+sweepLow  = low  < priorSwingLow  and close > priorSwingLow
+insideBar = high < high[1] and low > low[1]
 
-ma50 = ema50_4
-ma200 = sma200_4
-nearMajorMA = f_nearLvl(c4, ma50, atr4) or f_nearLvl(c4, ma200, atr4)
+liqHint =
+     sweepLow ? "Sweep of low" :
+     sweepHigh ? "Sweep of high" :
+     insideBar ? "Inside bar compression" :
+     "None"
 
-keyLevelsTxt =
-     "Prior day H/L: " + (nearPDH ? "Yes" : "No") +
-     "\nWeekly H/L: " + (nearWHL ? "Yes" : "No") +
-     "\n4H range level: " + (nearRangeLvl ? "Yes" : "No") +
-     "\nMajor MA (50/200): " + (nearMajorMA ? "Yes" : "No")
+//====================================================
+// AUTO SUPPORT / RESISTANCE from key set
+//====================================================
+float sup = na
+float res = na
 
-//===================== TABLE =====================
-bg   = color.new(color.black, vis)
-kbg  = color.new(color.silver, vis)
-txt  = color.new(color.white, vis)
+if not na(pdh)
+    if pdh <= close and (na(sup) or close - pdh < close - sup)
+        sup := pdh
+    if pdh >= close and (na(res) or pdh - close < res - close)
+        res := pdh
+if not na(pdl)
+    if pdl <= close and (na(sup) or close - pdl < close - sup)
+        sup := pdl
+    if pdl >= close and (na(res) or pdl - close < res - close)
+        res := pdl
+if not na(pwh)
+    if pwh <= close and (na(sup) or close - pwh < close - sup)
+        sup := pwh
+    if pwh >= close and (na(res) or pwh - close < res - close)
+        res := pwh
+if not na(pwl)
+    if pwl <= close and (na(sup) or close - pwl < close - sup)
+        sup := pwl
+    if pwl >= close and (na(res) or pwl - close < res - close)
+        res := pwl
+if not na(ema20)
+    if ema20 <= close and (na(sup) or close - ema20 < close - sup)
+        sup := ema20
+    if ema20 >= close and (na(res) or ema20 - close < res - close)
+        res := ema20
+if not na(sma50)
+    if sma50 <= close and (na(sup) or close - sma50 < close - sup)
+        sup := sma50
+    if sma50 >= close and (na(res) or sma50 - close < res - close)
+        res := sma50
+if not na(sma200)
+    if sma200 <= close and (na(sup) or close - sma200 < close - sup)
+        sup := sma200
+    if sma200 >= close and (na(res) or sma200 - close < res - close)
+        res := sma200
+if not na(dch)
+    if dch <= close and (na(sup) or close - dch < close - sup)
+        sup := dch
+    if dch >= close and (na(res) or dch - close < res - close)
+        res := dch
+if not na(dcl)
+    if dcl <= close and (na(sup) or close - dcl < close - sup)
+        sup := dcl
+    if dcl >= close and (na(res) or dcl - close < res - close)
+        res := dcl
 
-var table t = table.new(f_pos(pos), 2, 12, border_width=1, frame_color=color.new(color.white, vis))
+string nearestResName = ""
+float nearestResDist = 10e10
+float nearestResValue = na
+string nearestSupName = ""
+float nearestSupDist = 10e10
+float nearestSupValue = na
 
-f_row(r, k, v) =>
-    table.cell(t, 0, r, k, bgcolor=kbg, text_color=txt, text_halign=text.align_left)
-    table.cell(t, 1, r, v, bgcolor=bg,  text_color=txt, text_halign=text.align_left)
+if not na(pdh)
+    if pdh > close and pdh - close < nearestResDist
+        nearestResDist := pdh - close
+        nearestResName := "PDH"
+        nearestResValue := pdh
+    if pdh < close and close - pdh < nearestSupDist
+        nearestSupDist := close - pdh
+        nearestSupName := "PDH"
+        nearestSupValue := pdh
+if not na(pdl)
+    if pdl > close and pdl - close < nearestResDist
+        nearestResDist := pdl - close
+        nearestResName := "PDL"
+        nearestResValue := pdl
+    if pdl < close and close - pdl < nearestSupDist
+        nearestSupDist := close - pdl
+        nearestSupName := "PDL"
+        nearestSupValue := pdl
+if not na(pwh)
+    if pwh > close and pwh - close < nearestResDist
+        nearestResDist := pwh - close
+        nearestResName := "PWH"
+        nearestResValue := pwh
+    if pwh < close and close - pwh < nearestSupDist
+        nearestSupDist := close - pwh
+        nearestSupName := "PWH"
+        nearestSupValue := pwh
+if not na(pwl)
+    if pwl > close and pwl - close < nearestResDist
+        nearestResDist := pwl - close
+        nearestResName := "PWL"
+        nearestResValue := pwl
+    if pwl < close and close - pwl < nearestSupDist
+        nearestSupDist := close - pwl
+        nearestSupName := "PWL"
+        nearestSupValue := pwl
+if not na(ema20)
+    if ema20 > close and ema20 - close < nearestResDist
+        nearestResDist := ema20 - close
+        nearestResName := "EMA20"
+        nearestResValue := ema20
+    if ema20 < close and close - ema20 < nearestSupDist
+        nearestSupDist := close - ema20
+        nearestSupName := "EMA20"
+        nearestSupValue := ema20
+if not na(sma50)
+    if sma50 > close and sma50 - close < nearestResDist
+        nearestResDist := sma50 - close
+        nearestResName := "SMA50"
+        nearestResValue := sma50
+    if sma50 < close and close - sma50 < nearestSupDist
+        nearestSupDist := close - sma50
+        nearestSupName := "SMA50"
+        nearestSupValue := sma50
+if not na(sma200)
+    if sma200 > close and sma200 - close < nearestResDist
+        nearestResDist := sma200 - close
+        nearestResName := "SMA200"
+        nearestResValue := sma200
+    if sma200 < close and close - sma200 < nearestSupDist
+        nearestSupDist := close - sma200
+        nearestSupName := "SMA200"
+        nearestSupValue := sma200
+if not na(dch)
+    if dch > close and dch - close < nearestResDist
+        nearestResDist := dch - close
+        nearestResName := "DCH20"
+        nearestResValue := dch
+    if dch < close and close - dch < nearestSupDist
+        nearestSupDist := close - dch
+        nearestSupName := "DCH20"
+        nearestSupValue := dch
+if not na(dcl)
+    if dcl > close and dcl - close < nearestResDist
+        nearestResDist := dcl - close
+        nearestResName := "DCL20"
+        nearestResValue := dcl
+    if dcl < close and close - dcl < nearestSupDist
+        nearestSupDist := close - dcl
+        nearestSupName := "DCL20"
+        nearestSupValue := dcl
+
+plot(showNearestSRLines and barstate.islast ? nearestResValue : na, "Nearest Resistance", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_linebr)
+plot(showNearestSRLines and barstate.islast ? nearestSupValue : na, "Nearest Support", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_linebr)
+
+// Auto derived support/resistance (same toggle as nearest lines)
+plot(showNearestSRLines and barstate.islast ? res : na, "Resistance (auto)", color=color.new(color.red, 0), linewidth=2, style=plot.style_linebr)
+plot(showNearestSRLines and barstate.islast ? sup : na, "Support (auto)", color=color.new(color.lime, 0), linewidth=2, style=plot.style_linebr)
+
+//====================================================
+// LOCATION (suggested) – based on distance to levels in ATR
+//====================================================
+distSupAtr = (not na(sup) and atr != 0) ? math.abs(close - sup) / atr : na
+distResAtr = (not na(res) and atr != 0) ? math.abs(res - close) / atr : na
+distPwhAtr = (not na(pwh) and atr != 0) ? math.abs(pwh - close) / atr : na
+distPwlAtr = (not na(pwl) and atr != 0) ? math.abs(close - pwl) / atr : na
+
+near4hSupport = not na(distSupAtr) and distSupAtr <= roomAtrNear
+near4hRes     = not na(distResAtr) and distResAtr <= roomAtrNear
+nearHTF       = (not na(distPwhAtr) and distPwhAtr <= roomAtrNear * 1.6) or (not na(distPwlAtr) and distPwlAtr <= roomAtrNear * 1.6)
+
+locationHint =
+     near4hSupport ? "At 4H support" :
+     near4hRes ? "At 4H resistance" :
+     nearHTF ? "At HTF level (1D)" :
+     "Middle of structure"
+
+//====================================================
+// BIAS 1D (auto) + 4H Bias vs 1D (suggested)
+//====================================================
+f_biasAuto() =>
+    e20 = ta.ema(close, emaLen)
+    s50 = ta.sma(close, sma50Len)
+    s200 = ta.sma(close, sma200Len)
+    a = ta.atr(atrLen)
+
+    d = math.min(math.min(math.abs(close - e20), math.abs(close - s50)), math.abs(close - s200))
+    ts =
+         d <= a * chopAtrMult ? "Chop around MAs" :
+         close > e20 and close > s50 and close > s200 ? "Above key MAs" :
+         close < e20 and close < s50 and close < s200 ? "Below key MAs" :
+         "Chop around MAs"
+
+    _ph = ta.pivothigh(high, pivotLen, pivotLen)
+    _pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+    var float _lastPH = na
+    var float _prevPH = na
+    var float _lastPL = na
+    var float _prevPL = na
+    if not na(_ph)
+        _prevPH := _lastPH
+        _lastPH := _ph
+    if not na(_pl)
+        _prevPL := _lastPL
+        _lastPL := _pl
+
+    _hasH = not na(_lastPH) and not na(_prevPH)
+    _hasL = not na(_lastPL) and not na(_prevPL)
+    _hh = _hasH and _lastPH > _prevPH
+    _lh = _hasH and _lastPH < _prevPH
+    _hl = _hasL and _lastPL > _prevPL
+    _ll = _hasL and _lastPL < _prevPL
+
+    _struct = (_hh and _hl) ? "HH/HL" : (_lh and _ll) ? "LL/LH" : "Mixed"
+
+    _rangeHigh = ta.highest(high, 20)
+    _rangeLow  = ta.lowest(low, 20)
+    _rangeWidthPct = close != 0 ? ((_rangeHigh - _rangeLow) / close) * 100.0 : na
+    _isRange = not na(_rangeWidthPct) and _rangeWidthPct < (atrPctVolatile * 1.5) and ts == "Chop around MAs"
+    _struct := _isRange ? "Range" : _struct
+
+    _bias =
+         (_struct == "HH/HL" and ts == "Above key MAs") ? "Bullish" :
+         (_struct == "LL/LH" and ts == "Below key MAs") ? "Bearish" :
+         "Neutral"
+    _bias
+
+bias1D = request.security(syminfo.tickerid, "D", f_biasAuto(), barmerge.gaps_off, barmerge.lookahead_off)
+
+biasVs1D =
+     (bias1D == "Neutral" or bias4H == "Neutral") ? "Neutral" :
+     (bias1D == bias4H) ? "In direction of 1D" :
+     "Counter-trend"
+
+//====================================================
+// TABLE (top-right) – Part 1 facts/hints only (no plan fields)
+//====================================================
+var table t = table.new(position.top_right, 2, 34, border_width=1)
+
+f_set(row, k, v, isHeader, valColor) =>
+    leftBg  = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
+    rightBg = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
+    txtCol  = color.white
+    table.cell(t, 0, row, k, text_size=size.small, text_halign=text.align_left, bgcolor=leftBg, text_color=txtCol)
+    table.cell(t, 1, row, v, text_size=size.small, text_halign=text.align_left, bgcolor=rightBg, text_color=valColor)
+
+f_lvl(name, x) =>
+    suffix = name == nearestResName ? " (R)" : name == nearestSupName ? " (S)" : ""
+    f_fmt2(x) + suffix
 
 if barstate.islast
-    if showDash
-        f_row(0,  "Bias", f_pack3(biasM1, biasM2, biasM3))
-        f_row(1,  "Structure", f_pack3(structureM1, structureM2, structureM3))
-        f_row(2,  "Anchor state (EMA20)", anchorState)
-        f_row(3,  "Location", f_pack3(loc4M1, loc4M2, loc4M3))
-        f_row(4,  "Key level type (suggest)", keyLevelsTxt)
-        f_row(5,  "Planned setup (auto)", setupAuto)
-        f_row(6,  "Trend quality", "M1 ADX: " + trendQualityM1 + "\nM2 Crosses: " + trendQualityM2)
-        f_row(7,  "Volatility profile", volProfile)
-
-        // Useful numeric context (optional)
-        f_row(8,  "ATR(4H)", na(atr4) ? "---" : str.tostring(atr4, format.mintick))
-        f_row(9,  "ADX(4H)", na(adx4) ? "---" : str.tostring(adx4, "#.0"))
-        f_row(10, "Range hi/lo", (na(rangeHi4) or na(rangeLo4)) ? "---" : (str.tostring(rangeHi4, format.mintick) + " / " + str.tostring(rangeLo4, format.mintick)))
-        supportLvl4 = not na(validSwingSup4) ? validSwingSup4 : ((not na(rangeLo4) and rangeLo4 < c4) ? rangeLo4 : na)
-        resistLvl4  = not na(validSwingRes4) ? validSwingRes4 : ((not na(rangeHi4) and rangeHi4 > c4) ? rangeHi4 : na)
-        f_row(11, "Pivot S/R (suggest)", "S: " + (na(supportLvl4) ? "---" : str.tostring(supportLvl4, format.mintick)) + "\nR: " + (na(resistLvl4) ? "---" : str.tostring(resistLvl4, format.mintick)))
+    if not showTable
+        table.clear(t, 0, 0, 1, 33)
     else
-        table.clear(t, 0, 0, 1, 11)
+        white   = color.white
+        nearCol = color.new(color.yellow, 0)
+
+        f_set(0, "Stock 4H - Part 1", tfWarn == "" ? syminfo.ticker : "⚠ " + syminfo.ticker, true, white)
+
+        f_set(1, "4H Bias vs 1D", biasVs1D, false, white)
+        f_set(2, "Bias 1D", bias1D, false, white)
+        f_set(3, "Bias 4H", bias4H, false, white)
+
+        f_set(4, "4H Structure", structure, false, white)
+        f_set(5, "Trend Strength", trendStrength, false, white)
+        f_set(6, "Trend Quality", trendQuality, false, white)
+        f_set(7, "Regime", regime4H, false, white)
+        f_set(8, "VWAP", useSessionVWAP ? (f_fmt2(vwap) + " (" + vwapState + ")") : "N/A", false, white)
+
+        f_set(9, "Location", locationHint, false, white)
+        f_set(10, "Liquidity", liqHint, false, white)
+        f_set(11, "Close", f_fmt2(close), false, white)
+        f_set(12, "ATR(14)", f_fmt2(atr), false, white)
+        f_set(13, "Support", f_fmt2(sup), false, white)
+        f_set(14, "Resistance", f_fmt2(res), false, white)
+        f_set(15, "PWH / PWL", f_fmt2(pwh) + " / " + f_fmt2(pwl), false, white)
+
+        f_set(16, "Key Levels", "", true, white)
+        f_set(17, "PDH",   f_lvl("PDH", pdh), false, (nearestResName == "PDH" or nearestSupName == "PDH") ? nearCol : white)
+        f_set(18, "PDL",   f_lvl("PDL", pdl), false, (nearestResName == "PDL" or nearestSupName == "PDL") ? nearCol : white)
+        f_set(19, "PWH",   f_lvl("PWH", pwh), false, (nearestResName == "PWH" or nearestSupName == "PWH") ? nearCol : white)
+        f_set(20, "PWL",   f_lvl("PWL", pwl), false, (nearestResName == "PWL" or nearestSupName == "PWL") ? nearCol : white)
+        f_set(21, "EMA20", f_lvl("EMA20", ema20), false, (nearestResName == "EMA20" or nearestSupName == "EMA20") ? nearCol : white)
+        f_set(22, "SMA50", f_lvl("SMA50", sma50), false, (nearestResName == "SMA50" or nearestSupName == "SMA50") ? nearCol : white)
+        f_set(23, "SMA200",f_lvl("SMA200", sma200), false, (nearestResName == "SMA200" or nearestSupName == "SMA200") ? nearCol : white)
+        f_set(24, "DCH20", f_lvl("DCH20", dch), false, (nearestResName == "DCH20" or nearestSupName == "DCH20") ? nearCol : white)
+        f_set(25, "DCL20", f_lvl("DCL20", dcl), false, (nearestResName == "DCL20" or nearestSupName == "DCL20") ? nearCol : white)
+
+        f_set(26, "Helpers", "", true, white)
+        f_set(27, "ATR% Env", atrEnv + " (" + f_fmt2(atrPct) + "%)", false, white)
+        f_set(28, "Sweep High?", sweepHigh ? "Yes" : "No", false, white)
+        f_set(29, "Sweep Low?", sweepLow ? "Yes" : "No", false, white)
+        f_set(30, "Inside Bar?", insideBar ? "Yes" : "No", false, white)
+        f_set(31, "Nearest R", nearestResName + " @ " + f_fmt2(nearestResValue), false, white)
+        f_set(32, "Nearest S", nearestSupName + " @ " + f_fmt2(nearestSupValue), false, white)
+        f_set(33, "", "", false, white)
