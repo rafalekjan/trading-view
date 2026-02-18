@@ -6,6 +6,7 @@ indicator("SPY - Gatekeeper 1D", overlay=true, max_labels_count=500)
 //====================================================
 groupUI = "UI"
 showTable = input.bool(true, "Show Gatekeeper Table", group=groupUI)
+showNearestSRLines = input.bool(false, "Show nearest R/S lines", group=groupUI)
 
 groupSrc = "Sources"
 vixSymbol = input.symbol("CBOE:VIX", "VIX symbol", group=groupSrc)
@@ -256,37 +257,97 @@ if not na(dcl)
     if dcl >= close and (na(res) or dcl - close < res - close)
         res := dcl
 
-// nearest level to highlight in Key Levels section
-string closestName = ""
-float closestDist = 10e10
+// nearest levels to highlight in Key Levels section:
+// - nearest resistance above current price -> (R)
+// - nearest support below current price    -> (S)
+string nearestResName = ""
+float nearestResDist = 10e10
+float nearestResValue = na
+string nearestSupName = ""
+float nearestSupDist = 10e10
+float nearestSupValue = na
 
-if not na(pdh) and math.abs(close - pdh) < closestDist
-    closestDist := math.abs(close - pdh)
-    closestName := "PDH"
-if not na(pdl) and math.abs(close - pdl) < closestDist
-    closestDist := math.abs(close - pdl)
-    closestName := "PDL"
-if not na(pwh) and math.abs(close - pwh) < closestDist
-    closestDist := math.abs(close - pwh)
-    closestName := "PWH"
-if not na(pwl) and math.abs(close - pwl) < closestDist
-    closestDist := math.abs(close - pwl)
-    closestName := "PWL"
-if not na(ema20) and math.abs(close - ema20) < closestDist
-    closestDist := math.abs(close - ema20)
-    closestName := "EMA20"
-if not na(sma50) and math.abs(close - sma50) < closestDist
-    closestDist := math.abs(close - sma50)
-    closestName := "SMA50"
-if not na(sma200) and math.abs(close - sma200) < closestDist
-    closestDist := math.abs(close - sma200)
-    closestName := "SMA200"
-if not na(dch) and math.abs(close - dch) < closestDist
-    closestDist := math.abs(close - dch)
-    closestName := "DCH20"
-if not na(dcl) and math.abs(close - dcl) < closestDist
-    closestDist := math.abs(close - dcl)
-    closestName := "DCL20"
+if not na(pdh)
+    if pdh > close and pdh - close < nearestResDist
+        nearestResDist := pdh - close
+        nearestResName := "PDH"
+        nearestResValue := pdh
+    if pdh < close and close - pdh < nearestSupDist
+        nearestSupDist := close - pdh
+        nearestSupName := "PDH"
+        nearestSupValue := pdh
+if not na(pdl)
+    if pdl > close and pdl - close < nearestResDist
+        nearestResDist := pdl - close
+        nearestResName := "PDL"
+        nearestResValue := pdl
+    if pdl < close and close - pdl < nearestSupDist
+        nearestSupDist := close - pdl
+        nearestSupName := "PDL"
+        nearestSupValue := pdl
+if not na(pwh)
+    if pwh > close and pwh - close < nearestResDist
+        nearestResDist := pwh - close
+        nearestResName := "PWH"
+        nearestResValue := pwh
+    if pwh < close and close - pwh < nearestSupDist
+        nearestSupDist := close - pwh
+        nearestSupName := "PWH"
+        nearestSupValue := pwh
+if not na(pwl)
+    if pwl > close and pwl - close < nearestResDist
+        nearestResDist := pwl - close
+        nearestResName := "PWL"
+        nearestResValue := pwl
+    if pwl < close and close - pwl < nearestSupDist
+        nearestSupDist := close - pwl
+        nearestSupName := "PWL"
+        nearestSupValue := pwl
+if not na(ema20)
+    if ema20 > close and ema20 - close < nearestResDist
+        nearestResDist := ema20 - close
+        nearestResName := "EMA20"
+        nearestResValue := ema20
+    if ema20 < close and close - ema20 < nearestSupDist
+        nearestSupDist := close - ema20
+        nearestSupName := "EMA20"
+        nearestSupValue := ema20
+if not na(sma50)
+    if sma50 > close and sma50 - close < nearestResDist
+        nearestResDist := sma50 - close
+        nearestResName := "SMA50"
+        nearestResValue := sma50
+    if sma50 < close and close - sma50 < nearestSupDist
+        nearestSupDist := close - sma50
+        nearestSupName := "SMA50"
+        nearestSupValue := sma50
+if not na(sma200)
+    if sma200 > close and sma200 - close < nearestResDist
+        nearestResDist := sma200 - close
+        nearestResName := "SMA200"
+        nearestResValue := sma200
+    if sma200 < close and close - sma200 < nearestSupDist
+        nearestSupDist := close - sma200
+        nearestSupName := "SMA200"
+        nearestSupValue := sma200
+if not na(dch)
+    if dch > close and dch - close < nearestResDist
+        nearestResDist := dch - close
+        nearestResName := "DCH20"
+        nearestResValue := dch
+    if dch < close and close - dch < nearestSupDist
+        nearestSupDist := close - dch
+        nearestSupName := "DCH20"
+        nearestSupValue := dch
+if not na(dcl)
+    if dcl > close and dcl - close < nearestResDist
+        nearestResDist := dcl - close
+        nearestResName := "DCL20"
+        nearestResValue := dcl
+    if dcl < close and close - dcl < nearestSupDist
+        nearestSupDist := close - dcl
+        nearestSupName := "DCL20"
+        nearestSupValue := dcl
 
 //====================================================
 // TABLE (fixed: top-right corner) - readable, 1 metric per row
@@ -306,45 +367,50 @@ f_fmt(x) =>
 f_fmt2(x) =>
     na(x) ? "na" : str.tostring(x, "#.##")
 
+f_lvl(name, x) =>
+    suffix = name == nearestResName ? " (R)" : name == nearestSupName ? " (S)" : ""
+    f_fmt2(x) + suffix
+
+plot(showNearestSRLines and barstate.islast ? nearestResValue : na, "Nearest Resistance (R)", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_linebr)
+plot(showNearestSRLines and barstate.islast ? nearestSupValue : na, "Nearest Support (S)", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_linebr)
+
 // Update table only on last bar to reduce flicker
 if barstate.islast
     if not showTable
-        table.clear(t, 0, 0, 1, 30)
+        table.clear(t, 0, 0, 1, 29)
     else
         white = color.white
         nearCol = color.new(color.yellow, 0)
 
-        f_set(0, "SPY Gatekeeper (1D)", tfWarn == "" ? "OK" : tfWarn, true, white)
+        f_set(0, "SPY Gatekeeper", tfWarn == "" ? "OK" : tfWarn, true, white)
+        f_set(1, "Regime", regime, false, white)
+        f_set(2, "Bias (auto)", bias, false, white)
+        f_set(3, "Structure", structure, false, white)
+        f_set(4, "Trend Strength", trendStrength, false, white)
+        f_set(5, "VWAP", f_fmt2(vwapD) + " (" + vwapState + ")", false, white)
+        f_set(6, "Momentum (1D)", momentum, false, white)
+        f_set(7, "Support", f_fmt2(sup), false, white)
+        f_set(8, "Resistance", f_fmt2(res), false, white)
+        f_set(9, "Close", f_fmt2(close), false, white)
+        f_set(10, "ATR (14)", f_fmt2(atr), false, white)
+        f_set(11, "VIX", f_fmt2(vixClose) + " (" + vixLevel + ")", false, white)
+        f_set(12, "VIX Trend", vixTrend, false, white)
+        f_set(13, "ATR% Env", atrEnv + " (" + f_fmt2(atrPct) + "%)", false, white)
+        f_set(14, "Breadth", breadth, false, white)
+        f_set(15, "QQQ vs 200SMA", qqqVs200, false, white)
 
-        f_set(1, "Core (used on WWW)", "", true, white)
-        f_set(2, "Regime", regime, false, white)
-        f_set(3, "Bias (auto)", bias, false, white)
-        f_set(4, "Structure", structure, false, white)
-        f_set(5, "Trend Strength", trendStrength, false, white)
-        f_set(6, "VWAP", f_fmt2(vwapD) + " (" + vwapState + ")", false, white)
-        f_set(7, "Momentum (1D)", momentum, false, white)
-        f_set(8, "Support", f_fmt2(sup), false, white)
-        f_set(9, "Resistance", f_fmt2(res), false, white)
-        f_set(10, "Close", f_fmt2(close), false, white)
-        f_set(11, "ATR (14)", f_fmt2(atr), false, white)
-        f_set(12, "VIX", f_fmt2(vixClose) + " (" + vixLevel + ")", false, white)
-        f_set(13, "VIX Trend", vixTrend, false, white)
-        f_set(14, "ATR% Env", atrEnv + " (" + f_fmt2(atrPct) + "%)", false, white)
-        f_set(15, "Breadth", breadth, false, white)
-        f_set(16, "QQQ vs 200SMA", qqqVs200, false, white)
+        f_set(16, "Key Levels", "", true, white)
+        f_set(17, "PDH", f_lvl("PDH", pdh), false, (nearestResName == "PDH" or nearestSupName == "PDH") ? nearCol : white)
+        f_set(18, "PDL", f_lvl("PDL", pdl), false, (nearestResName == "PDL" or nearestSupName == "PDL") ? nearCol : white)
+        f_set(19, "PWH", f_lvl("PWH", pwh), false, (nearestResName == "PWH" or nearestSupName == "PWH") ? nearCol : white)
+        f_set(20, "PWL", f_lvl("PWL", pwl), false, (nearestResName == "PWL" or nearestSupName == "PWL") ? nearCol : white)
+        f_set(21, "EMA20", f_lvl("EMA20", ema20), false, (nearestResName == "EMA20" or nearestSupName == "EMA20") ? nearCol : white)
+        f_set(22, "SMA50", f_lvl("SMA50", sma50), false, (nearestResName == "SMA50" or nearestSupName == "SMA50") ? nearCol : white)
+        f_set(23, "SMA200", f_lvl("SMA200", sma200), false, (nearestResName == "SMA200" or nearestSupName == "SMA200") ? nearCol : white)
+        f_set(24, "DCH20", f_lvl("DCH20", dch), false, (nearestResName == "DCH20" or nearestSupName == "DCH20") ? nearCol : white)
+        f_set(25, "DCL20", f_lvl("DCL20", dcl), false, (nearestResName == "DCL20" or nearestSupName == "DCL20") ? nearCol : white)
 
-        f_set(17, "Key Levels (Support/Resistance refs)", "", true, white)
-        f_set(18, "PDH", f_fmt2(pdh), false, closestName == "PDH" ? nearCol : white)
-        f_set(19, "PDL", f_fmt2(pdl), false, closestName == "PDL" ? nearCol : white)
-        f_set(20, "PWH", f_fmt2(pwh), false, closestName == "PWH" ? nearCol : white)
-        f_set(21, "PWL", f_fmt2(pwl), false, closestName == "PWL" ? nearCol : white)
-        f_set(22, "EMA20", f_fmt2(ema20), false, closestName == "EMA20" ? nearCol : white)
-        f_set(23, "SMA50", f_fmt2(sma50), false, closestName == "SMA50" ? nearCol : white)
-        f_set(24, "SMA200", f_fmt2(sma200), false, closestName == "SMA200" ? nearCol : white)
-        f_set(25, "DCH20", f_fmt2(dch), false, closestName == "DCH20" ? nearCol : white)
-        f_set(26, "DCL20", f_fmt2(dcl), false, closestName == "DCL20" ? nearCol : white)
-
-        f_set(27, "TV Helpers (not scored on WWW)", "", true, white)
-        f_set(28, "Range context", rangeState, false, white)
-        f_set(29, "RSI(14) context", rsiState, false, white)
-        f_set(30, "ATR% slope(5) context", atrSlopeState, false, white)
+        f_set(26, "Helpers", "", true, white)
+        f_set(27, "Range context", rangeState, false, white)
+        f_set(28, "RSI(14) context", rsiState, false, white)
+        f_set(29, "ATR% slope(5) context", atrSlopeState, false, white)
