@@ -22,6 +22,7 @@ groupATR = "ATR"
 atrLen = input.int(14, "ATR length", minval=1, group=groupATR)
 atrPctVolatile = input.float(2.0, "ATR% volatile threshold", minval=0.5, maxval=10.0, step=0.1, group=groupATR)
 atrPctLow = input.float(1.0, "ATR% low threshold", minval=0.2, maxval=5.0, step=0.1, group=groupATR)
+srMinAtr = input.float(0.30, "Min dist for auto S/R (ATR)", minval=0.05, maxval=3.0, step=0.05, group=groupATR)
 
 groupStructure = "Structure / Regime"
 pivotLen = input.int(5, "Pivot length (D1 structure)", minval=2, maxval=20, group=groupStructure)
@@ -288,51 +289,41 @@ rsState =
 float sup = na
 float res = na
 
-if not na(pdh)
-    if pdh <= close and (na(sup) or close - pdh < close - sup)
-        sup := pdh
-    if pdh >= close and (na(res) or pdh - close < res - close)
-        res := pdh
-if not na(pdl)
-    if pdl <= close and (na(sup) or close - pdl < close - sup)
-        sup := pdl
-    if pdl >= close and (na(res) or pdl - close < res - close)
-        res := pdl
-if not na(pwh)
-    if pwh <= close and (na(sup) or close - pwh < close - sup)
-        sup := pwh
-    if pwh >= close and (na(res) or pwh - close < res - close)
-        res := pwh
-if not na(pwl)
-    if pwl <= close and (na(sup) or close - pwl < close - sup)
-        sup := pwl
-    if pwl >= close and (na(res) or pwl - close < res - close)
-        res := pwl
-if not na(ema20)
-    if ema20 <= close and (na(sup) or close - ema20 < close - sup)
-        sup := ema20
-    if ema20 >= close and (na(res) or ema20 - close < res - close)
-        res := ema20
-if not na(sma50)
-    if sma50 <= close and (na(sup) or close - sma50 < close - sup)
-        sup := sma50
-    if sma50 >= close and (na(res) or sma50 - close < res - close)
-        res := sma50
-if not na(sma200)
-    if sma200 <= close and (na(sup) or close - sma200 < close - sup)
-        sup := sma200
-    if sma200 >= close and (na(res) or sma200 - close < res - close)
-        res := sma200
-if not na(dch)
-    if dch <= close and (na(sup) or close - dch < close - sup)
-        sup := dch
-    if dch >= close and (na(res) or dch - close < res - close)
-        res := dch
-if not na(dcl)
-    if dcl <= close and (na(sup) or close - dcl < close - sup)
-        sup := dcl
-    if dcl >= close and (na(res) or dcl - close < res - close)
-        res := dcl
+minDistAbs = atr > 0 ? atr * srMinAtr : na
+majorCount = 9
+majorLevels = array.new_float()
+array.push(majorLevels, lastPH)
+array.push(majorLevels, lastPL)
+array.push(majorLevels, pwh)
+array.push(majorLevels, pwl)
+array.push(majorLevels, sma200)
+array.push(majorLevels, dch)
+array.push(majorLevels, dcl)
+array.push(majorLevels, rangeHigh)
+array.push(majorLevels, rangeLow)
+
+for i = 0 to majorCount - 1
+    lv = array.get(majorLevels, i)
+    if not na(lv)
+        farEnough = na(minDistAbs) or math.abs(close - lv) >= minDistAbs
+        if farEnough
+            if lv <= close and (na(sup) or close - lv < close - sup)
+                sup := lv
+            if lv >= close and (na(res) or lv - close < res - close)
+                res := lv
+
+if na(sup) or na(res)
+    for i = 0 to majorCount - 1
+        lv = array.get(majorLevels, i)
+        if not na(lv)
+            if na(sup) and lv <= close
+                sup := lv
+            if not na(sup) and lv <= close and close - lv < close - sup
+                sup := lv
+            if na(res) and lv >= close
+                res := lv
+            if not na(res) and lv >= close and lv - close < res - close
+                res := lv
 
 // nearest levels for optional plot
 string nearestResName = ""
@@ -423,6 +414,16 @@ if not na(dcl)
         nearestSupDist := close - dcl
         nearestSupName := "DCL20"
         nearestSupValue := dcl
+if not na(lastPH)
+    if lastPH > close and lastPH - close < nearestResDist
+        nearestResDist := lastPH - close
+        nearestResName := "MajorSwingHigh"
+        nearestResValue := lastPH
+if not na(lastPL)
+    if lastPL < close and close - lastPL < nearestSupDist
+        nearestSupDist := close - lastPL
+        nearestSupName := "MajorSwingLow"
+        nearestSupValue := lastPL
 
 plot(showNearestSRLines and barstate.islast ? nearestResValue : na, "Nearest Resistance (R)", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_linebr)
 plot(showNearestSRLines and barstate.islast ? nearestSupValue : na, "Nearest Support (S)", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_linebr)
@@ -430,7 +431,7 @@ plot(showNearestSRLines and barstate.islast ? nearestSupValue : na, "Nearest Sup
 //====================================================
 // TABLE (top-right) - 1 metric per row
 //====================================================
-var table t = table.new(position.top_right, 2, 30, border_width=1)
+var table t = table.new(position.top_right, 2, 32, border_width=1)
 
 f_set(row, k, v, isHeader, valColor) =>
     leftBg  = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
@@ -439,13 +440,18 @@ f_set(row, k, v, isHeader, valColor) =>
     table.cell(t, 0, row, k, text_size=size.small, text_halign=text.align_left, bgcolor=leftBg, text_color=txtCol)
     table.cell(t, 1, row, v, text_size=size.small, text_halign=text.align_left, bgcolor=rightBg, text_color=valColor)
 
+f_isNearestVal(x, y) =>
+    not na(x) and not na(y) and math.abs(x - y) <= syminfo.mintick * 0.5
+
 f_lvl(name, x) =>
-    suffix = name == nearestResName ? " (R)" : name == nearestSupName ? " (S)" : ""
+    isRes = name == nearestResName or f_isNearestVal(x, nearestResValue)
+    isSup = name == nearestSupName or f_isNearestVal(x, nearestSupValue)
+    suffix = isRes ? " (R)" : isSup ? " (S)" : ""
     f_fmt2(x) + suffix
 
 if barstate.islast
     if not showTable
-        table.clear(t, 0, 0, 1, 29)
+        table.clear(t, 0, 0, 1, 31)
     else
         white = color.white
         nearCol = color.new(color.yellow, 0)
@@ -468,19 +474,68 @@ if barstate.islast
         f_set(13, "Resistance", f_fmt2(res), false, white)
 
         f_set(14, "Key Levels", "", true, white)
-        f_set(15, "PDH", f_lvl("PDH", pdh), false, (nearestResName == "PDH" or nearestSupName == "PDH") ? nearCol : white)
-        f_set(16, "PDL", f_lvl("PDL", pdl), false, (nearestResName == "PDL" or nearestSupName == "PDL") ? nearCol : white)
-        f_set(17, "PWH", f_lvl("PWH", pwh), false, (nearestResName == "PWH" or nearestSupName == "PWH") ? nearCol : white)
-        f_set(18, "PWL", f_lvl("PWL", pwl), false, (nearestResName == "PWL" or nearestSupName == "PWL") ? nearCol : white)
-        f_set(19, "EMA20", f_lvl("EMA20", ema20), false, (nearestResName == "EMA20" or nearestSupName == "EMA20") ? nearCol : white)
-        f_set(20, "SMA50", f_lvl("SMA50", sma50), false, (nearestResName == "SMA50" or nearestSupName == "SMA50") ? nearCol : white)
-        f_set(21, "SMA200", f_lvl("SMA200", sma200), false, (nearestResName == "SMA200" or nearestSupName == "SMA200") ? nearCol : white)
-        f_set(22, "DCH20", f_lvl("DCH20", dch), false, (nearestResName == "DCH20" or nearestSupName == "DCH20") ? nearCol : white)
-        f_set(23, "DCL20", f_lvl("DCL20", dcl), false, (nearestResName == "DCL20" or nearestSupName == "DCL20") ? nearCol : white)
+        levelNames = array.new_string()
+        levelVals = array.new_float()
+        if not na(lastPH)
+            array.push(levelNames, "MajorSwingHigh")
+            array.push(levelVals, lastPH)
+        if not na(lastPL)
+            array.push(levelNames, "MajorSwingLow")
+            array.push(levelVals, lastPL)
+        if not na(pdh)
+            array.push(levelNames, "PDH")
+            array.push(levelVals, pdh)
+        if not na(pdl)
+            array.push(levelNames, "PDL")
+            array.push(levelVals, pdl)
+        if not na(pwh)
+            array.push(levelNames, "PWH")
+            array.push(levelVals, pwh)
+        if not na(pwl)
+            array.push(levelNames, "PWL")
+            array.push(levelVals, pwl)
+        if not na(ema20)
+            array.push(levelNames, "EMA20")
+            array.push(levelVals, ema20)
+        if not na(sma50)
+            array.push(levelNames, "SMA50")
+            array.push(levelVals, sma50)
+        if not na(sma200)
+            array.push(levelNames, "SMA200")
+            array.push(levelVals, sma200)
+        if not na(dch)
+            array.push(levelNames, "DCH20")
+            array.push(levelVals, dch)
+        if not na(dcl)
+            array.push(levelNames, "DCL20")
+            array.push(levelVals, dcl)
 
-        f_set(24, "Helpers", "", true, white)
-        f_set(25, "Range context", rangeState, false, white)
-        f_set(26, "RSI(14) context", rsiState, false, white)
-        f_set(27, "ATR% slope(5)", atrSlopeState, false, white)
-        f_set(28, "RS value", na(rs) ? "na" : str.tostring(rs, "#.###"), false, white)
-        f_set(29, "ATR% Env", atrEnv + " (" + f_fmt2(atrPct) + "%)", false, white)
+        for pass = 0 to 10
+            for j = 0 to 9
+                if j + 1 < array.size(levelVals)
+                    v1 = array.get(levelVals, j)
+                    v2 = array.get(levelVals, j + 1)
+                    if v1 < v2
+                        n1 = array.get(levelNames, j)
+                        n2 = array.get(levelNames, j + 1)
+                        array.set(levelVals, j, v2)
+                        array.set(levelVals, j + 1, v1)
+                        array.set(levelNames, j, n2)
+                        array.set(levelNames, j + 1, n1)
+
+        for i = 0 to 10
+            row = 15 + i
+            if i < array.size(levelVals)
+                n = array.get(levelNames, i)
+                v = array.get(levelVals, i)
+                c = (nearestResName == n or nearestSupName == n or f_isNearestVal(v, nearestResValue) or f_isNearestVal(v, nearestSupValue)) ? nearCol : white
+                f_set(row, n, f_lvl(n, v), false, c)
+            else
+                f_set(row, "", "", false, white)
+
+        f_set(26, "Helpers", "", true, white)
+        f_set(27, "Range context", rangeState, false, white)
+        f_set(28, "RSI(14) context", rsiState, false, white)
+        f_set(29, "ATR% slope(5)", atrSlopeState, false, white)
+        f_set(30, "RS value", na(rs) ? "na" : str.tostring(rs, "#.###"), false, white)
+        f_set(31, "ATR% Env", atrEnv + " (" + f_fmt2(atrPct) + "%)", false, white)
