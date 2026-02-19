@@ -1,11 +1,12 @@
-//@version=6
-indicator("Stock 15m - Execution & Timing", overlay=true, max_labels_count=500)
+﻿//@version=6
+indicator("Ticker - Execution & Timing 15m", overlay=true, max_labels_count=500)
 
 //========================
 // Inputs
 //========================
 showTable   = input.bool(true, "Show table", group="UI")
-use15mOnly  = input.bool(true, "⚠ Use 15m (warn if other TF)", group="UI")
+use15mOnly  = input.bool(true, "Use 15m (warn if other TF)", group="UI")
+hardStopWrongTF = input.bool(false, "Hard stop if not 15m", group="UI")
 
 // 15m logic params
 atrLen      = input.int(14, "ATR length", minval=1, group="15m")
@@ -37,8 +38,11 @@ f_abs(x) => math.abs(x)
 //========================
 // Timeframe warning
 //========================
-is15 = timeframe.isminutes and timeframe.multiplier == 15
+is15 = (timeframe.isintraday and timeframe.multiplier == 15) or (timeframe.in_seconds(timeframe.period) == 15 * 60)
 tfWarn = use15mOnly and not is15
+
+if use15mOnly and hardStopWrongTF and not is15
+    runtime.error("This script is designed for 15m timeframe. Switch chart to 15m.")
 
 //========================
 // 15m Core Metrics
@@ -96,26 +100,30 @@ microRes = na(lastPH) ? na : lastPH
 microSup = na(lastPL) ? na : lastPL
 
 // Breakout / Breakdown detection vs last pivot levels
-breakUp   = not na(microRes) and ta.crossover(c, microRes)
-breakDown = not na(microSup) and ta.crossunder(c, microSup)
+crossUpPivot = ta.crossover(c, microRes)
+crossDnPivot = ta.crossunder(c, microSup)
+breakUp   = not na(microRes) and crossUpPivot
+breakDown = not na(microSup) and crossDnPivot
 
 // "Hold" concept: after break, stays above/below for N bars
 holdBars = 2
 holdUp   = not na(microRes) and c > microRes and ta.lowest(c, holdBars) > microRes
 holdDn   = not na(microSup) and c < microSup and ta.highest(c, holdBars) < microSup
+confirmUp = not na(microRes) and ta.barssince(breakUp) <= holdBars and c > microRes
+confirmDn = not na(microSup) and ta.barssince(breakDown) <= holdBars and c < microSup
 
 // Reclaim concept: wick below support then close back above (bull) / wick above resistance then close below (bear)
 reclaimBull = not na(microSup) and l < microSup and c > microSup
 reclaimBear = not na(microRes) and h > microRes and c < microRes
 
 // Failed breakout: cross above then close back below level soon
-failedUp = not na(microRes) and breakUp and c < microRes
-failedDn = not na(microSup) and breakDown and c > microSup
+failedUp = not na(microRes) and ta.barssince(breakUp) <= 2 and c < microRes
+failedDn = not na(microSup) and ta.barssince(breakDown) <= 2 and c > microSup
 
 // Trigger status (single label)
 triggerStatus =
      (failedUp or failedDn) ? "Failed" :
-     ((breakUp and holdUp) or (breakDown and holdDn) or reclaimBull or reclaimBear) ? "Confirmed" :
+     (confirmUp or confirmDn or reclaimBull or reclaimBear) ? "Confirmed" :
      "No trigger"
 
 // Liquidity event
@@ -126,13 +134,15 @@ liquidityEvent =
      "None"
 
 // Entry type suggestion (HINT)
+crossUpVwap = ta.crossover(c, vwap)
+crossDnVwap = ta.crossunder(c, vwap)
 entryTypeHint =
      (reclaimBull or reclaimBear) ? "Liquidity sweep reclaim" :
-     ((breakUp and holdUp) or (breakDown and holdDn)) ? "Break & hold" :
-     (ta.crossover(c, vwap) or ta.crossunder(c, vwap)) ? "Reclaim level" :
+     (confirmUp or confirmDn) ? "Break & hold" :
+     (crossUpVwap or crossDnVwap) ? "Reclaim level" :
      (math.abs(c - vwap) <= atr * nearAtr) ? "Pullback to VWAP" :
      (math.abs(c - ema) <= atr * nearAtr) ? "Pullback to EMA20" :
-     "—"
+     "-"
 
 // Volume assessment
 volMa = ta.sma(v, volMaLen)
@@ -161,15 +171,15 @@ stopLogicHint =
 //========================
 // 4H Context: Support/Resistance + Bias4H (simple, stable)
 //========================
-c4 = request.security(syminfo.tickerid, tf4h, close)
-h4 = request.security(syminfo.tickerid, tf4h, high)
-l4 = request.security(syminfo.tickerid, tf4h, low)
+c4 = request.security(syminfo.tickerid, tf4h, close, barmerge.gaps_off, barmerge.lookahead_off)
+h4 = request.security(syminfo.tickerid, tf4h, high, barmerge.gaps_off, barmerge.lookahead_off)
+l4 = request.security(syminfo.tickerid, tf4h, low, barmerge.gaps_off, barmerge.lookahead_off)
 
-ema4 = request.security(syminfo.tickerid, tf4h, ta.ema(close, 20))
-vwap4 = request.security(syminfo.tickerid, tf4h, ta.vwap(hlc3))
+ema4 = request.security(syminfo.tickerid, tf4h, ta.ema(close, 20), barmerge.gaps_off, barmerge.lookahead_off)
+vwap4 = request.security(syminfo.tickerid, tf4h, ta.vwap(hlc3), barmerge.gaps_off, barmerge.lookahead_off)
 
-ph4 = request.security(syminfo.tickerid, tf4h, ta.pivothigh(high, piv4hLen, piv4hLen))
-pl4 = request.security(syminfo.tickerid, tf4h, ta.pivotlow(low, piv4hLen, piv4hLen))
+ph4 = request.security(syminfo.tickerid, tf4h, ta.pivothigh(high, piv4hLen, piv4hLen), barmerge.gaps_off, barmerge.lookahead_off)
+pl4 = request.security(syminfo.tickerid, tf4h, ta.pivotlow(low, piv4hLen, piv4hLen), barmerge.gaps_off, barmerge.lookahead_off)
 
 var float lastPH4 = na
 var float lastPL4 = na
@@ -251,63 +261,57 @@ targetHint =
 //========================
 // Table (top-right)
 //========================
-var table t = table.new(position.top_right, 2, 26, frame_color=color.new(color.gray, 70), border_color=color.new(color.gray, 70))
+var table t = table.new(position.top_right, 2, 26, border_width=1)
 
-f_row(_r, _k, _v) =>
-    table.cell(t, 0, _r, _k, text_color=color.white, bgcolor=color.new(color.black, 0))
-    table.cell(t, 1, _r, _v, text_color=color.white, bgcolor=color.new(color.black, 0))
+f_set(row, k, v, isHeader, valColor) =>
+    leftBg  = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
+    rightBg = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
+    txtCol  = color.white
+    table.cell(t, 0, row, k, text_size=size.small, text_halign=text.align_left, bgcolor=leftBg, text_color=txtCol)
+    table.cell(t, 1, row, v, text_size=size.small, text_halign=text.align_left, bgcolor=rightBg, text_color=valColor)
 
 if barstate.islast
     if not showTable
-        table.clear(t)
+        table.clear(t, 0, 0, 1, 25)
     else
-        table.clear(t)
+        table.clear(t, 0, 0, 1, 25)
+        white = color.white
+        warnCol = tfWarn ? color.new(color.red, 0) : white
 
-        // Header
-        hdr = "Stock 15m Exec"
-        hdr2 = tfWarn ? "⚠ Use 15m" : syminfo.ticker
-        table.cell(t, 0, 0, hdr, text_color=color.white, bgcolor=color.new(color.black, 0))
-        table.cell(t, 1, 0, hdr2, text_color=color.white, bgcolor=tfWarn ? color.new(color.red, 0) : color.new(color.black, 0))
+        f_set(0, "Stock 15m Exec", tfWarn ? "WARN: Use 15m" : syminfo.ticker, true, warnCol)
 
-        // Part 1: AUTO/HINT
-        f_row(1,  "Bias (15m)", bias15)
-        f_row(2,  "Structure (15m)", structure15)
-        f_row(3,  "VWAP (15m)", vwapState)
+        f_set(1, "Bias", bias15, false, white)
+        f_set(2, "Structure", structure15, false, white)
+        f_set(3, "VWAP", vwapState, false, white)
+        f_set(4, "Location vs 4H", locationVs4h, false, white)
+        f_set(5, "Entry type", entryTypeHint, false, white)
+        f_set(6, "Trigger status", triggerStatus, false, white)
+        f_set(7, "Volume", volState, false, white)
+        f_set(8, "Stop logic", stopLogicHint, false, white)
+        f_set(9, "Time of day", timeOfDay, false, white)
+        f_set(10, "Liquidity event", liquidityEvent, false, white)
+        f_set(11, "Entry", f_fmt(entryHint), false, white)
+        f_set(12, "Stop", f_fmt(stopHint), false, white)
+        f_set(13, "Target", f_fmt(targetHint), false, white)
 
-        f_row(4,  "Trigger status", triggerStatus)
-        f_row(5,  "Entry type (hint)", entryTypeHint)
-        f_row(6,  "Volume", volState)
-        f_row(7,  "Liquidity event", liquidityEvent)
+        f_set(14, "4H Context", "", true, white)
+        f_set(15, "Bias 4H", bias4h, false, white)
+        f_set(16, "4H Support", f_fmt(support4), false, white)
+        f_set(17, "4H Resistance", f_fmt(resist4), false, white)
 
-        f_row(8,  "Stop logic (hint)", stopLogicHint)
-        f_row(9,  "Time of day", timeOfDay)
+        f_set(18, "Levels", "", true, white)
+        f_set(19, "Close", f_fmt(c), false, white)
+        f_set(20, "ATR(14)", f_fmt(atr), false, white)
+        f_set(21, "VWAP", f_fmt(vwap), false, white)
+        f_set(22, "EMA20", f_fmt(ema), false, white)
+        f_set(23, "Last HL", f_fmt(lastPL), false, white)
+        f_set(24, "Last LH", f_fmt(lastPH), false, white)
 
-        // 4H context bridge
-        f_row(10, "Bias 4H (auto)", bias4h)
-        f_row(11, "4H Support", f_fmt(support4))
-        f_row(12, "4H Resistance", f_fmt(resist4))
-        f_row(13, "Location vs 4H", locationVs4h)
-
-        // Numbers for manual plan fill
-        f_row(14, "Close", f_fmt(c))
-        f_row(15, "ATR(14)", f_fmt(atr))
-        f_row(16, "VWAP", f_fmt(vwap))
-        f_row(17, "EMA20", f_fmt(ema))
-
-        f_row(18, "Last HL (pivot low)", f_fmt(lastPL))
-        f_row(19, "Last LH (pivot high)", f_fmt(lastPH))
-
-        f_row(20, "Entry (hint)", f_fmt(entryHint))
-        f_row(21, "Stop (hint)", f_fmt(stopHint))
-        f_row(22, "Target (hint)", f_fmt(targetHint))
-
-        // Extra debug
-        f_row(23, "Dist to plan (ATR)", na(distAtr) ? "na" : str.tostring(distAtr, format.mintick))
-        f_row(24, "Vol rel (xMA)", na(volRel) ? "na" : str.tostring(volRel, format.mintick))
-        f_row(25, "Note", "Fill plan in WWW")
+        f_set(25, "Vol rel (xMA)", na(volRel) ? "na" : str.tostring(volRel, format.mintick), false, white)
 
 //========================
 // Optional visual markers (kept minimal)
 //========================
-plotchar(showTable and triggerStatus == "Confirmed", title="Trigger Confirmed", char="✔", location=location.top, color=color.new(color.lime, 0), size=size.tiny)
-plotchar(showTable and triggerStatus == "Failed", title="Trigger Failed", char="✖", location=location.top, color=color.new(color.red, 0), size=size.tiny)
+plotchar(showTable and triggerStatus == "Confirmed", title="Trigger Confirmed", char="C", location=location.top, color=color.new(color.lime, 0), size=size.tiny)
+plotchar(showTable and triggerStatus == "Failed", title="Trigger Failed", char="F", location=location.top, color=color.new(color.red, 0), size=size.tiny)
+

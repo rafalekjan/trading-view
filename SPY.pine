@@ -7,6 +7,8 @@ indicator("SPY - Gatekeeper 1D", overlay=true, max_labels_count=500)
 groupUI = "UI"
 showTable = input.bool(true, "Show Gatekeeper Table", group=groupUI)
 showNearestSRLines = input.bool(false, "Show nearest R/S lines", group=groupUI)
+enforce1D = input.bool(true, "Warn if not 1D", group=groupUI)
+hardStopWrongTF = input.bool(false, "Hard stop if not 1D", group=groupUI)
 
 groupSrc = "Sources"
 vixSymbol = input.symbol("CBOE:VIX", "VIX symbol", group=groupSrc)
@@ -40,8 +42,14 @@ donLen = input.int(20, "Donchian length (DCH/DCL)", minval=5, maxval=200, group=
 // SAFETY: This script is designed for SPY 1D
 //====================================================
 isDaily = timeframe.isdaily
-// We won't hard-error; we'll just warn in table.
-tfWarn = isDaily ? "" : "⚠ Use 1D"
+isSpyTicker = syminfo.ticker == "SPY"
+tfWarn =
+     (enforce1D and not isDaily and not isSpyTicker) ? "WARN: Use SPY on 1D" :
+     (enforce1D and not isDaily) ? "WARN: Use 1D" :
+     (enforce1D and not isSpyTicker) ? "WARN: Use SPY" :
+     ""
+if enforce1D and hardStopWrongTF and (not isDaily or not isSpyTicker)
+    runtime.error("This script is designed for SPY on 1D timeframe. Switch chart to SPY 1D.")
 
 //====================================================
 // DATA: LEVELS
@@ -257,6 +265,37 @@ if not na(dcl)
     if dcl >= close and (na(res) or dcl - close < res - close)
         res := dcl
 
+nearAtrMult = 0.30
+atSupport = not na(sup) and atr > 0 and math.abs(close - sup) <= atr * nearAtrMult
+atResistance = not na(res) and atr > 0 and math.abs(close - res) <= atr * nearAtrMult
+breakoutAttempt = not na(res) and close > res and close[1] <= res
+breakdownAttempt = not na(sup) and close < sup and close[1] >= sup
+postBreakRetest = (not na(res) and close > res and low <= res) or (not na(sup) and close < sup and high >= sup)
+
+location =
+     breakoutAttempt ? "Breakout Attempt" :
+     breakdownAttempt ? "Breakdown Attempt" :
+     postBreakRetest ? "Post-break Retest" :
+     atSupport ? "At Support" :
+     atResistance ? "At Resistance" :
+     "Middle of Range"
+
+supportStatus =
+     na(sup) ? "Not tested" :
+     (close[1] < sup and close > sup) ? "Reclaimed" :
+     (close < sup) ? "Broken" :
+     (low <= sup and close >= sup and close > open) ? "Rejecting" :
+     (low <= sup and close >= sup) ? "Holding" :
+     "Not tested"
+
+resistanceStatus =
+     na(res) ? "Not tested" :
+     (close[1] > res and close < res) ? "Reclaimed" :
+     (close > res) ? "Broken" :
+     (high >= res and close <= res and close < open) ? "Rejecting" :
+     (high >= res and close <= res) ? "Holding" :
+     "Not tested"
+
 // nearest levels to highlight in Key Levels section:
 // - nearest resistance above current price -> (R)
 // - nearest support below current price    -> (S)
@@ -352,7 +391,7 @@ if not na(dcl)
 //====================================================
 // TABLE (fixed: top-right corner) - readable, 1 metric per row
 //====================================================
-var table t = table.new(position.top_right, 2, 31, border_width=1)
+var table t = table.new(position.top_right, 2, 34, border_width=1)
 
 f_set(row, k, v, isHeader, valColor) =>
     leftBg = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
@@ -377,7 +416,7 @@ plot(showNearestSRLines and barstate.islast ? nearestSupValue : na, "Nearest Sup
 // Update table only on last bar to reduce flicker
 if barstate.islast
     if not showTable
-        table.clear(t, 0, 0, 1, 29)
+        table.clear(t, 0, 0, 1, 33)
     else
         white = color.white
         nearCol = color.new(color.yellow, 0)
@@ -389,28 +428,32 @@ if barstate.islast
         f_set(4, "Trend Strength", trendStrength, false, white)
         f_set(5, "VWAP", f_fmt2(vwapD) + " (" + vwapState + ")", false, white)
         f_set(6, "Momentum (1D)", momentum, false, white)
-        f_set(7, "Support", f_fmt2(sup), false, white)
-        f_set(8, "Resistance", f_fmt2(res), false, white)
-        f_set(9, "Close", f_fmt2(close), false, white)
-        f_set(10, "ATR (14)", f_fmt2(atr), false, white)
-        f_set(11, "VIX", f_fmt2(vixClose) + " (" + vixLevel + ")", false, white)
-        f_set(12, "VIX Trend", vixTrend, false, white)
-        f_set(13, "ATR% Env", atrEnv + " (" + f_fmt2(atrPct) + "%)", false, white)
-        f_set(14, "Breadth", breadth, false, white)
-        f_set(15, "QQQ vs 200SMA", qqqVs200, false, white)
+        f_set(7, "Close", f_fmt2(close), false, white)
+        f_set(8, "ATR (14)", f_fmt2(atr), false, white)
+        f_set(9, "Support", f_fmt2(sup), false, white)
+        f_set(10, "Resistance", f_fmt2(res), false, white)
+        f_set(11, "Location", location, false, white)
+        f_set(12, "Support status", supportStatus, false, white)
+        f_set(13, "Resistance status", resistanceStatus, false, white)
+        f_set(14, "VIX", f_fmt2(vixClose) + " (" + vixLevel + ")", false, white)
+        f_set(15, "VIX Trend", vixTrend, false, white)
+        f_set(16, "ATR% Env", atrEnv + " (" + f_fmt2(atrPct) + "%)", false, white)
+        f_set(17, "Breadth", breadth, false, white)
+        f_set(18, "QQQ vs 200SMA", qqqVs200, false, white)
 
-        f_set(16, "Key Levels", "", true, white)
-        f_set(17, "PDH", f_lvl("PDH", pdh), false, (nearestResName == "PDH" or nearestSupName == "PDH") ? nearCol : white)
-        f_set(18, "PDL", f_lvl("PDL", pdl), false, (nearestResName == "PDL" or nearestSupName == "PDL") ? nearCol : white)
-        f_set(19, "PWH", f_lvl("PWH", pwh), false, (nearestResName == "PWH" or nearestSupName == "PWH") ? nearCol : white)
-        f_set(20, "PWL", f_lvl("PWL", pwl), false, (nearestResName == "PWL" or nearestSupName == "PWL") ? nearCol : white)
-        f_set(21, "EMA20", f_lvl("EMA20", ema20), false, (nearestResName == "EMA20" or nearestSupName == "EMA20") ? nearCol : white)
-        f_set(22, "SMA50", f_lvl("SMA50", sma50), false, (nearestResName == "SMA50" or nearestSupName == "SMA50") ? nearCol : white)
-        f_set(23, "SMA200", f_lvl("SMA200", sma200), false, (nearestResName == "SMA200" or nearestSupName == "SMA200") ? nearCol : white)
-        f_set(24, "DCH20", f_lvl("DCH20", dch), false, (nearestResName == "DCH20" or nearestSupName == "DCH20") ? nearCol : white)
-        f_set(25, "DCL20", f_lvl("DCL20", dcl), false, (nearestResName == "DCL20" or nearestSupName == "DCL20") ? nearCol : white)
+        f_set(19, "Key Levels", "", true, white)
+        f_set(20, "PDH", f_lvl("PDH", pdh), false, (nearestResName == "PDH" or nearestSupName == "PDH") ? nearCol : white)
+        f_set(21, "PDL", f_lvl("PDL", pdl), false, (nearestResName == "PDL" or nearestSupName == "PDL") ? nearCol : white)
+        f_set(22, "PWH", f_lvl("PWH", pwh), false, (nearestResName == "PWH" or nearestSupName == "PWH") ? nearCol : white)
+        f_set(23, "PWL", f_lvl("PWL", pwl), false, (nearestResName == "PWL" or nearestSupName == "PWL") ? nearCol : white)
+        f_set(24, "EMA20", f_lvl("EMA20", ema20), false, (nearestResName == "EMA20" or nearestSupName == "EMA20") ? nearCol : white)
+        f_set(25, "SMA50", f_lvl("SMA50", sma50), false, (nearestResName == "SMA50" or nearestSupName == "SMA50") ? nearCol : white)
+        f_set(26, "SMA200", f_lvl("SMA200", sma200), false, (nearestResName == "SMA200" or nearestSupName == "SMA200") ? nearCol : white)
+        f_set(27, "DCH20", f_lvl("DCH20", dch), false, (nearestResName == "DCH20" or nearestSupName == "DCH20") ? nearCol : white)
+        f_set(28, "DCL20", f_lvl("DCL20", dcl), false, (nearestResName == "DCL20" or nearestSupName == "DCL20") ? nearCol : white)
 
-        f_set(26, "Helpers", "", true, white)
-        f_set(27, "Range context", rangeState, false, white)
-        f_set(28, "RSI(14) context", rsiState, false, white)
-        f_set(29, "ATR% slope(5) context", atrSlopeState, false, white)
+        f_set(29, "Helpers", "", true, white)
+        f_set(30, "Range context", rangeState, false, white)
+        f_set(31, "RSI(14) context", rsiState, false, white)
+        f_set(32, "ATR% slope(5) context", atrSlopeState, false, white)
+        f_set(33, "", "", false, white)

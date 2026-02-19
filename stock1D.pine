@@ -7,6 +7,8 @@ indicator("Ticker - Direction & Context 1D", overlay=true, max_labels_count=500)
 groupUI = "UI"
 showTable = input.bool(true, "Show Ticker Table", group=groupUI)
 showNearestSRLines = input.bool(false, "Show nearest R/S lines", group=groupUI)
+enforce1D = input.bool(true, "Warn if not 1D", group=groupUI)
+hardStopWrongTF = input.bool(false, "Hard stop if not 1D", group=groupUI)
 
 groupSrc = "Sources"
 spySymbol = input.symbol("AMEX:SPY", "SPY symbol (alignment / RS)", group=groupSrc)
@@ -37,7 +39,14 @@ rsFlatThr = input.float(0.001, "RS flat threshold", minval=0.0, maxval=5.0, step
 // SAFETY: designed for 1D
 //====================================================
 isDaily = timeframe.isdaily
-tfWarn = isDaily ? "" : "⚠ Use 1D"
+isSpyTicker = syminfo.ticker == "SPY"
+tfWarn =
+     (enforce1D and not isDaily and isSpyTicker) ? "WARN: Use non-SPY on 1D" :
+     (enforce1D and not isDaily) ? "WARN: Use 1D" :
+     (enforce1D and isSpyTicker) ? "WARN: Use non-SPY ticker" :
+     ""
+if enforce1D and hardStopWrongTF and (not isDaily or isSpyTicker)
+    runtime.error("This script is designed for non-SPY tickers on 1D timeframe.")
 
 //====================================================
 // COMMON HELPERS

@@ -1,5 +1,5 @@
 //@version=6
-indicator("Stock 4H - Structure", overlay=true, max_labels_count=500)
+indicator("Ticker - Structure 4H", overlay=true, max_labels_count=500)
 
 //====================================================
 // UI
@@ -437,7 +437,7 @@ biasVs1D =
 //====================================================
 // TABLE (top-right) – Part 1 facts/hints only (no plan fields)
 //====================================================
-var table t = table.new(position.top_right, 2, 34, border_width=1)
+var table t = table.new(position.top_right, 2, 31, border_width=1)
 
 f_set(row, k, v, isHeader, valColor) =>
     leftBg  = isHeader ? color.new(color.blue, 80) : color.new(color.black, 0)
@@ -452,7 +452,7 @@ f_lvl(name, x) =>
 
 if barstate.islast
     if not showTable
-        table.clear(t, 0, 0, 1, 33)
+        table.clear(t, 0, 0, 1, 30)
     else
         white   = color.white
         nearCol = color.new(color.yellow, 0)
@@ -493,6 +493,3 @@ if barstate.islast
         f_set(28, "Sweep High?", sweepHigh ? "Yes" : "No", false, white)
         f_set(29, "Sweep Low?", sweepLow ? "Yes" : "No", false, white)
         f_set(30, "Inside Bar?", insideBar ? "Yes" : "No", false, white)
-        f_set(31, "Nearest R", nearestResName + " @ " + f_fmt2(nearestResValue), false, white)
-        f_set(32, "Nearest S", nearestSupName + " @ " + f_fmt2(nearestSupValue), false, white)
-        f_set(33, "", "", false, white)
