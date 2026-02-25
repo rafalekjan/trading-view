@@ -23,9 +23,15 @@ rewardLookback = input.int(20, "Reward lookback", minval=5, group=groupCore)
 groupProxy = "Proxy Thresholds (for automating Blueprint checks)"
 nearAtrMult = input.float(0.75, "Near key level (xATR)", minval=0.1, step=0.05, group=groupProxy)
 extendAtrMult = input.float(2.0, "Extended from EMA20 (xATR)", minval=0.5, step=0.1, group=groupProxy)
-volSpikeMult = input.float(1.30, "Volatility elevated (ATR x baseline)", minval=1.0, step=0.05, group=groupProxy)
+volEnterMult = input.float(1.30, "Volatility enter (ATR x baseline)", minval=1.0, step=0.05, group=groupProxy)
+volExitMult = input.float(1.15, "Volatility exit (ATR x baseline)", minval=1.0, step=0.05, group=groupProxy)
 maFlatAtrMult = input.float(0.08, "MA50 flatness (ATR x)", minval=0.01, step=0.01, group=groupProxy)
-chopCrossMin = input.int(3, "Chop cross count threshold", minval=1, group=groupProxy)
+chopCrossMinRate = input.float(0.20, "Chop cross rate threshold", minval=0.01, maxval=1.0, step=0.01, group=groupProxy)
+erMin = input.float(0.30, "Trend strength min (ER)", minval=0.01, maxval=1.0, step=0.01, group=groupProxy)
+useConfirmedSecurity = input.bool(false, "Use confirmed security data (less realtime flicker)", group=groupProxy)
+// Ensure hysteresis order even if user sets invalid values in inputs.
+volEnterEff = math.max(volEnterMult, volExitMult + 0.01)
+volExitEff = math.min(volExitMult, volEnterEff - 0.01)
 
 f_b2i(bool b) =>
     b ? 1 : 0
@@ -57,6 +63,23 @@ f_down_struct(int len) =>
 
 f_cross_count(float src, float ma, int len) =>
     math.sum(ta.cross(src, ma) ? 1.0 : 0.0, len)
+
+f_sma_slope_norm(int maLen, int slopeLen) =>
+    ma = ta.sma(close, maLen)
+    close != 0 ? ((ma - ma[slopeLen]) / slopeLen) / close : 0.0
+
+f_er(series float src, int len) =>
+    ch = math.abs(src - src[len])
+    vol = math.sum(math.abs(src - src[1]), len)
+    vol == 0.0 ? 0.0 : ch / vol
+
+f_sec_f(string sym, string tf, series float expr) =>
+    secExpr = useConfirmedSecurity ? (barstate.isconfirmed ? expr : expr[1]) : expr
+    request.security(sym, tf, secExpr, barmerge.gaps_off, barmerge.lookahead_off)
+
+f_sec_b(string sym, string tf, series bool expr) =>
+    secExpr = useConfirmedSecurity ? (barstate.isconfirmed ? expr : expr[1]) : expr
+    request.security(sym, tf, secExpr, barmerge.gaps_off, barmerge.lookahead_off)
 
 f_add_row(table t, int row, string item, string status, bool pass, bool manual) =>
     color statusBg = manual ? color.new(color.gray, 80) : pass ? color.new(color.green, 82) : color.new(color.red, 82)
@@ -104,11 +127,25 @@ llPrev = ta.lowest(low[structLen], structLen)
 upStruct = hh > hhPrev and ll > llPrev
 downStruct = hh < hhPrev and ll < llPrev
 
-maSlope50 = sma50 - sma50[slopeBars]
+maSlope50Norm = close != 0 ? ((sma50 - sma50[slopeBars]) / slopeBars) / close : 0.0
 crossCount = int(f_cross_count(close, ema20, structLen))
-localChop = ((not upStruct and not downStruct) and crossCount >= chopCrossMin) or (math.abs(maSlope50) <= atr * maFlatAtrMult and crossCount >= chopCrossMin)
-localVolatile = atr > atrBase * volSpikeMult
-localRegime = localChop ? "CHOP" : localVolatile ? "VOLATILE" : (upStruct or downStruct) ? "TREND" : "RANGE"
+localUp = upStruct == true
+localDown = downStruct == true
+localEr = nz(f_er(close, structLen), 0.0)
+localSlope = nz(maSlope50Norm, 0.0)
+localCross = nz(float(crossCount), 0.0)
+localCrossRate = structLen > 0 ? localCross / float(structLen) : 0.0
+localAtrBaseNorm = (not na(atrBase) and close != 0.0) ? atrBase / close : 0.0
+localFlat = localAtrBaseNorm > 0.0 ? math.abs(localSlope) <= localAtrBaseNorm * maFlatAtrMult : false
+localCrossy = localCrossRate >= chopCrossMinRate
+localTrendStrong = (localUp or localDown) and localEr >= erMin
+localChop = not localTrendStrong and localCrossy and localFlat
+localEnterVol = (not na(atr) and not na(atrBase)) and (atr > atrBase * volEnterEff)
+localExitVol = (not na(atr) and not na(atrBase)) and (atr < atrBase * volExitEff)
+var bool localVolatileState = false
+localVolatileState := localVolatileState ? not (localExitVol == true) : (localEnterVol == true)
+localVolatile = localVolatileState
+localRegime = localChop ? "CHOP" : (not localTrendStrong and localVolatile) ? "VOLATILE" : localTrendStrong ? "TREND" : "RANGE"
 
 pH = ta.pivothigh(high, pivotLen, pivotLen)
 pL = ta.pivotlow(low, pivotLen, pivotLen)
@@ -121,27 +158,28 @@ nearKeyLevel = hasKeyLevels and nearDist <= atr * nearAtrMult
 notExtended = atr > 0 ? math.abs(close - ema20) <= atr * extendAtrMult : false
 
 // ---------- SPY calculations (same TF) ----------
-spyClose = request.security("SPY", timeframe.period, close)
-spyEma20 = request.security("SPY", timeframe.period, ta.ema(close, maFastLen))
-spySma50 = request.security("SPY", timeframe.period, ta.sma(close, maMidLen))
-spySma200 = request.security("SPY", timeframe.period, ta.sma(close, maLongLen))
-spyRsi = request.security("SPY", timeframe.period, ta.rsi(close, rsiLen))
-spyMacdHist = request.security("SPY", timeframe.period, f_macd_hist(close, macdFast, macdSlow, macdSignalLen))
-spyAtr = request.security("SPY", timeframe.period, ta.atr(atrLen))
-spyAtrBase = request.security("SPY", timeframe.period, ta.sma(ta.atr(atrLen), volLen))
+spyClose = f_sec_f("SPY", timeframe.period, close)
+spyEma20 = f_sec_f("SPY", timeframe.period, ta.ema(close, maFastLen))
+spySma50 = f_sec_f("SPY", timeframe.period, ta.sma(close, maMidLen))
+spySma200 = f_sec_f("SPY", timeframe.period, ta.sma(close, maLongLen))
+spyRsi = f_sec_f("SPY", timeframe.period, ta.rsi(close, rsiLen))
+spyMacdHist = f_sec_f("SPY", timeframe.period, f_macd_hist(close, macdFast, macdSlow, macdSignalLen))
+spyAtr = f_sec_f("SPY", timeframe.period, ta.atr(atrLen))
+spyAtrBase = f_sec_f("SPY", timeframe.period, ta.sma(ta.atr(atrLen), volLen))
 
-spyUpStruct = request.security("SPY", timeframe.period, f_up_struct(structLen))
-spyDownStruct = request.security("SPY", timeframe.period, f_down_struct(structLen))
-spySlope50 = request.security("SPY", timeframe.period, ta.sma(close, maMidLen) - ta.sma(close, maMidLen)[slopeBars])
-spyCrossCount = int(request.security("SPY", timeframe.period, f_cross_count(close, ta.ema(close, maFastLen), structLen)))
+spyUpStruct = f_sec_b("SPY", timeframe.period, f_up_struct(structLen))
+spyDownStruct = f_sec_b("SPY", timeframe.period, f_down_struct(structLen))
+spySlope50Norm = f_sec_f("SPY", timeframe.period, f_sma_slope_norm(maMidLen, slopeBars))
+spyCrossCount = int(f_sec_f("SPY", timeframe.period, f_cross_count(close, ta.ema(close, maFastLen), structLen)))
+spyEr = f_sec_f("SPY", timeframe.period, f_er(close, structLen))
 
 // ---------- Daily alignment for 4H/1H execution layers ----------
-dClose = request.security(syminfo.tickerid, "D", close)
-dEma20 = request.security(syminfo.tickerid, "D", ta.ema(close, maFastLen))
-dSma50 = request.security(syminfo.tickerid, "D", ta.sma(close, maMidLen))
-dSma200 = request.security(syminfo.tickerid, "D", ta.sma(close, maLongLen))
-dUpStruct = request.security(syminfo.tickerid, "D", f_up_struct(structLen))
-dDownStruct = request.security(syminfo.tickerid, "D", f_down_struct(structLen))
+dClose = f_sec_f(syminfo.tickerid, "D", close)
+dEma20 = f_sec_f(syminfo.tickerid, "D", ta.ema(close, maFastLen))
+dSma50 = f_sec_f(syminfo.tickerid, "D", ta.sma(close, maMidLen))
+dSma200 = f_sec_f(syminfo.tickerid, "D", ta.sma(close, maLongLen))
+dUpStruct = f_sec_b(syminfo.tickerid, "D", f_up_struct(structLen))
+dDownStruct = f_sec_b(syminfo.tickerid, "D", f_down_struct(structLen))
 dailyBull = dClose > dSma200 and dEma20 > dSma50 and dUpStruct
 dailyBear = dClose < dSma200 and dEma20 < dSma50 and dDownStruct
 
@@ -156,20 +194,36 @@ marketAtr = ctxSpy1D ? atr : spyAtr
 marketAtrBase = ctxSpy1D ? atrBase : spyAtrBase
 marketUp = ctxSpy1D ? upStruct : spyUpStruct
 marketDown = ctxSpy1D ? downStruct : spyDownStruct
-marketSlope = ctxSpy1D ? maSlope50 : spySlope50
+marketSlopeNorm = ctxSpy1D ? maSlope50Norm : spySlope50Norm
 marketCross = ctxSpy1D ? crossCount : spyCrossCount
+marketEr = ctxSpy1D ? localEr : spyEr
 
-marketChop = ((not marketUp and not marketDown) and marketCross >= chopCrossMin) or (math.abs(marketSlope) <= marketAtr * maFlatAtrMult and marketCross >= chopCrossMin)
-marketVolatile = marketAtr > marketAtrBase * volSpikeMult
-marketRegime = marketChop ? "CHOP" : marketVolatile ? "VOLATILE" : (marketUp or marketDown) ? "TREND" : "RANGE"
-marketDirection = marketUp ? "BULLISH" : marketDown ? "BEARISH" : "RANGE"
+mUp = marketUp == true
+mDown = marketDown == true
+mEr = nz(marketEr, 0.0)
+mSlope = nz(marketSlopeNorm, 0.0)
+mCross = nz(float(marketCross), 0.0)
+marketCrossRate = structLen > 0 ? mCross / float(structLen) : 0.0
+marketAtrBaseNorm = (not na(marketAtrBase) and not na(marketClose) and marketClose != 0.0) ? marketAtrBase / marketClose : 0.0
+marketFlat = marketAtrBaseNorm > 0.0 ? math.abs(mSlope) <= marketAtrBaseNorm * maFlatAtrMult : false
+marketCrossy = marketCrossRate >= chopCrossMinRate
+trendStrong = (mUp or mDown) and (mEr >= erMin)
+marketChop = not trendStrong and marketCrossy and marketFlat
+marketEnterVol = (not na(marketAtr) and not na(marketAtrBase)) and (marketAtr > marketAtrBase * volEnterEff)
+marketExitVol = (not na(marketAtr) and not na(marketAtrBase)) and (marketAtr < marketAtrBase * volExitEff)
+var bool marketVolatileState = false
+marketVolatileState := marketVolatileState ? not (marketExitVol == true) : (marketEnterVol == true)
+marketVolatile = marketVolatileState
+marketRegime = marketChop ? "CHOP" : (not trendStrong and marketVolatile) ? "VOLATILE" : trendStrong ? "TREND" : "RANGE"
+marketDirection = trendStrong ? (mUp ? "BULLISH" : "BEARISH") : "RANGE"
+marketRegimeTxt = marketVolatile and marketRegime != "VOLATILE" ? marketRegime + " + VOL" : marketRegime
 
 marketMaBull = marketEma20 > marketSma50 and marketSma50 > marketSma200
 marketMaBear = marketEma20 < marketSma50 and marketSma50 < marketSma200
 marketMAAligned = marketMaBull or marketMaBear
 
-marketMomentum = (marketUp and marketRsi >= 50 and marketMacdHist >= 0) or (marketDown and marketRsi <= 50 and marketMacdHist <= 0)
-marketSupportive = (marketUp or marketDown) and marketRegime != "CHOP" and marketRegime != "RANGE"
+marketMomentum = (mUp and not na(marketRsi) and not na(marketMacdHist) and marketRsi >= 50 and marketMacdHist >= 0) or (mDown and not na(marketRsi) and not na(marketMacdHist) and marketRsi <= 50 and marketMacdHist <= 0)
+marketSupportive = marketRegime == "TREND"
 
 // ---------- Stock Behavior block ----------
 spyRet = spyClose / spyClose[rsLookback] - 1.0
@@ -192,8 +246,8 @@ locationPass = nearKeyLevel and notExtended
 extAtr = atr > 0 ? math.abs(close - ema20) / atr : na
 
 // ---------- Risk Definition + Reward Justification ----------
-thesisBullBase = ctxSpy1D ? marketUp : (marketUp and (relStrong or (rsDelta >= 0 and close > sma50)))
-thesisBearBase = ctxSpy1D ? marketDown : (marketDown and (relWeak or (rsDelta <= 0 and close < sma50)))
+thesisBullBase = ctxSpy1D ? mUp : (mUp and (relStrong or (rsDelta >= 0 and close > sma50)))
+thesisBearBase = ctxSpy1D ? mDown : (mDown and (relWeak or (rsDelta <= 0 and close < sma50)))
 thesisBull = (ctxStock4H or ctxStock1H) ? (thesisBullBase and dailyBull) : thesisBullBase
 thesisBear = (ctxStock4H or ctxStock1H) ? (thesisBearBase and dailyBear) : thesisBearBase
 thesisDir = thesisBull ? "BULLISH THESIS" : thesisBear ? "BEARISH THESIS" : "NO CLEAR THESIS"
@@ -223,10 +277,10 @@ rrAccept = not na(rr) and rr >= 2
 rrStrong = not na(rr) and rr >= 3
 
 // ---------- Scoring ----------
-marketScore = f_b2i(marketUp or marketDown) * 5 + f_b2i(marketSupportive) * 5 + f_b2i(marketMAAligned) * 5 + f_b2i(marketMomentum) * 5
+marketScore = f_b2i(mUp or mDown) * 5 + f_b2i(marketSupportive) * 5 + f_b2i(marketMAAligned) * 5 + f_b2i(marketMomentum) * 5
 
 behaviorScoreStock = f_b2i(relClear) * 5 + f_b2i(cleanStructure) * 5 + f_b2i(volumeHealthy) * 5 + f_b2i(hasKeyLevels) * 5
-behaviorScoreSpy = f_b2i(cleanStructure) * 5 + f_b2i(volumeHealthy) * 5 + f_b2i(hasKeyLevels) * 5 + f_b2i(localRegime != "CHOP") * 5
+behaviorScoreSpy = f_b2i(cleanStructure) * 5 + f_b2i(volumeHealthy) * 5 + f_b2i(hasKeyLevels) * 5 + f_b2i(localRegime != "CHOP" and not localVolatile) * 5
 behaviorScore = ctxSpy1D ? behaviorScoreSpy : behaviorScoreStock
 behaviorScore := (ctxStock4H or ctxStock1H) ? behaviorScore - (f_b2i(not mtfAligned) * 5) : behaviorScore
 behaviorScore := math.max(0, math.min(20, behaviorScore))
@@ -247,11 +301,11 @@ passCount = f_b2i(filterMarket) + f_b2i(filterBehavior) + f_b2i(filterLocation) 
 grade = "D"
 if riskDefined
     grade := passCount == 5 ? "A" : passCount >= 4 ? "B" : passCount >= 3 ? "C" : "D"
-if marketRegime == "CHOP" or marketRegime == "RANGE"
+if marketRegime == "CHOP" or marketRegime == "RANGE" or marketVolatile
     grade := grade == "A" ? "B" : grade
 
 sizeDecision = f_size_from_grade(grade)
-if marketRegime == "CHOP" or marketRegime == "VOLATILE" or marketRegime == "RANGE"
+if marketRegime == "CHOP" or marketRegime == "RANGE" or marketVolatile
     sizeDecision := f_reduce_size(sizeDecision)
 if grade == "D"
     sizeDecision := "NO TRADE"
@@ -276,9 +330,9 @@ if barstate.islast
             // Market Alignment
             f_add_header(t, row, "Market Alignment", "")
             row += 1
-            f_add_row(t, row, "Market regime", marketRegime, marketSupportive, false)
+            f_add_row(t, row, "Market regime", marketRegimeTxt, marketSupportive, false)
             row += 1
-            f_add_row(t, row, "Market direction", marketDirection, marketUp or marketDown, false)
+            f_add_row(t, row, "Market direction", marketDirection, mUp or mDown, false)
             row += 1
             f_add_row(t, row, "MA 20/50/200 alignment", marketMaBull ? "BULL STACK" : marketMaBear ? "BEAR STACK" : "MIXED", marketMAAligned, false)
             row += 1
