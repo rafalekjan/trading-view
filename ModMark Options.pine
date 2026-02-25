@@ -1,0 +1,359 @@
+//@version=6
+indicator("ModMark Blueprint Context Reader", overlay=true)
+
+// This script is a direct checklist/scoring framework implementation from ModMark Blueprint.
+// It is not a buy/sell signal script.
+
+groupCore = "Core (Blueprint)"
+maFastLen = input.int(20, "EMA fast (20)", minval=1, group=groupCore)
+maMidLen = input.int(50, "SMA mid (50)", minval=1, group=groupCore)
+maLongLen = input.int(200, "SMA long (200)", minval=1, group=groupCore)
+rsiLen = input.int(14, "RSI length (TV default)", minval=2, group=groupCore)
+atrLen = input.int(14, "ATR length (TV default)", minval=1, group=groupCore)
+macdFast = input.int(12, "MACD fast (TV default)", minval=1, group=groupCore)
+macdSlow = input.int(26, "MACD slow (TV default)", minval=1, group=groupCore)
+macdSignalLen = input.int(9, "MACD signal (TV default)", minval=1, group=groupCore)
+structLen = input.int(10, "Structure window", minval=3, group=groupCore)
+pivotLen = input.int(5, "Pivot window", minval=2, group=groupCore)
+slopeBars = input.int(5, "Slope bars", minval=1, group=groupCore)
+volLen = input.int(20, "Volume/ATR baseline", minval=5, group=groupCore)
+rsLookback = input.int(20, "RS lookback", minval=5, group=groupCore)
+rewardLookback = input.int(20, "Reward lookback", minval=5, group=groupCore)
+
+groupProxy = "Proxy Thresholds (for automating Blueprint checks)"
+nearAtrMult = input.float(0.75, "Near key level (xATR)", minval=0.1, step=0.05, group=groupProxy)
+extendAtrMult = input.float(2.0, "Extended from EMA20 (xATR)", minval=0.5, step=0.1, group=groupProxy)
+volSpikeMult = input.float(1.30, "Volatility elevated (ATR x baseline)", minval=1.0, step=0.05, group=groupProxy)
+maFlatAtrMult = input.float(0.08, "MA50 flatness (ATR x)", minval=0.01, step=0.01, group=groupProxy)
+chopCrossMin = input.int(3, "Chop cross count threshold", minval=1, group=groupProxy)
+
+f_b2i(bool b) =>
+    b ? 1 : 0
+
+f_size_from_grade(string grade) =>
+    grade == "A" ? "FULL" : grade == "B" ? "HALF" : grade == "C" ? "LIGHT" : "NO TRADE"
+
+f_reduce_size(string s) =>
+    s == "FULL" ? "HALF" : s == "HALF" ? "LIGHT" : s == "LIGHT" ? "NO TRADE" : "NO TRADE"
+
+f_macd_hist(float src, int fastLen, int slowLen, int signalLen) =>
+    [_, _, h] = ta.macd(src, fastLen, slowLen, signalLen)
+    h
+
+// Avoid short-circuit warnings by computing highest/lowest components first.
+f_up_struct(int len) =>
+    hNow = ta.highest(high, len)
+    hPrev = ta.highest(high[len], len)
+    lNow = ta.lowest(low, len)
+    lPrev = ta.lowest(low[len], len)
+    hNow > hPrev and lNow > lPrev
+
+f_down_struct(int len) =>
+    hNow = ta.highest(high, len)
+    hPrev = ta.highest(high[len], len)
+    lNow = ta.lowest(low, len)
+    lPrev = ta.lowest(low[len], len)
+    hNow < hPrev and lNow < lPrev
+
+f_cross_count(float src, float ma, int len) =>
+    math.sum(ta.cross(src, ma) ? 1.0 : 0.0, len)
+
+f_add_row(table t, int row, string item, string status, bool pass, bool manual) =>
+    color statusBg = manual ? color.new(color.gray, 80) : pass ? color.new(color.green, 82) : color.new(color.red, 82)
+    table.cell(t, 0, row, item, text_color=color.white, text_halign=text.align_left, bgcolor=color.new(color.black, 0))
+    table.cell(t, 1, row, status, text_color=color.white, text_halign=text.align_left, bgcolor=statusBg)
+
+f_add_header(table t, int row, string left, string mid) =>
+    color hb = color.new(color.blue, 75)
+    table.cell(t, 0, row, left, text_color=color.white, text_halign=text.align_left, bgcolor=hb)
+    table.cell(t, 1, row, mid, text_color=color.white, text_halign=text.align_left, bgcolor=hb)
+
+// ---------- Context detection ----------
+sym = str.upper(syminfo.ticker)
+isSPY = sym == "SPY"
+
+tfSec = timeframe.in_seconds()
+is1D = timeframe.isdaily or tfSec == 86400
+is4H = timeframe.isintraday and tfSec == 14400
+is1H = timeframe.isintraday and tfSec == 3600
+isSupportedTf = is1D or is4H or is1H
+
+ctxSpy1D = isSPY and is1D
+ctxStock1D = not isSPY and is1D
+ctxStock4H = not isSPY and is4H
+ctxStock1H = not isSPY and is1H
+ctxSupported = ctxSpy1D or ctxStock1D or ctxStock4H or ctxStock1H
+
+ctxLabel = ctxSpy1D ? "SPY 1D" : ctxStock1D ? "STOCK 1D" : ctxStock4H ? "STOCK 4H" : ctxStock1H ? "STOCK 1H" : "UNSUPPORTED"
+
+// ---------- Local symbol calculations ----------
+ema20 = ta.ema(close, maFastLen)
+sma50 = ta.sma(close, maMidLen)
+sma200 = ta.sma(close, maLongLen)
+rsi = ta.rsi(close, rsiLen)
+[macdLine, macdSignal, macdHist] = ta.macd(close, macdFast, macdSlow, macdSignalLen)
+atr = ta.atr(atrLen)
+atrBase = ta.sma(atr, volLen)
+volBase = ta.sma(volume, volLen)
+vwapSession = ta.vwap(hlc3)
+
+hh = ta.highest(high, structLen)
+hhPrev = ta.highest(high[structLen], structLen)
+ll = ta.lowest(low, structLen)
+llPrev = ta.lowest(low[structLen], structLen)
+upStruct = hh > hhPrev and ll > llPrev
+downStruct = hh < hhPrev and ll < llPrev
+
+maSlope50 = sma50 - sma50[slopeBars]
+crossCount = int(f_cross_count(close, ema20, structLen))
+localChop = ((not upStruct and not downStruct) and crossCount >= chopCrossMin) or (math.abs(maSlope50) <= atr * maFlatAtrMult and crossCount >= chopCrossMin)
+localVolatile = atr > atrBase * volSpikeMult
+localRegime = localChop ? "CHOP" : localVolatile ? "VOLATILE" : (upStruct or downStruct) ? "TREND" : "RANGE"
+
+pH = ta.pivothigh(high, pivotLen, pivotLen)
+pL = ta.pivotlow(low, pivotLen, pivotLen)
+pivotHigh = ta.valuewhen(not na(pH), pH, 0)
+pivotLow = ta.valuewhen(not na(pL), pL, 0)
+hasKeyLevels = not na(pivotHigh) and not na(pivotLow)
+
+nearDist = hasKeyLevels ? math.min(math.abs(close - pivotHigh), math.abs(close - pivotLow)) : na
+nearKeyLevel = hasKeyLevels and nearDist <= atr * nearAtrMult
+notExtended = atr > 0 ? math.abs(close - ema20) <= atr * extendAtrMult : false
+
+// ---------- SPY calculations (same TF) ----------
+spyClose = request.security("SPY", timeframe.period, close)
+spyEma20 = request.security("SPY", timeframe.period, ta.ema(close, maFastLen))
+spySma50 = request.security("SPY", timeframe.period, ta.sma(close, maMidLen))
+spySma200 = request.security("SPY", timeframe.period, ta.sma(close, maLongLen))
+spyRsi = request.security("SPY", timeframe.period, ta.rsi(close, rsiLen))
+spyMacdHist = request.security("SPY", timeframe.period, f_macd_hist(close, macdFast, macdSlow, macdSignalLen))
+spyAtr = request.security("SPY", timeframe.period, ta.atr(atrLen))
+spyAtrBase = request.security("SPY", timeframe.period, ta.sma(ta.atr(atrLen), volLen))
+
+spyUpStruct = request.security("SPY", timeframe.period, f_up_struct(structLen))
+spyDownStruct = request.security("SPY", timeframe.period, f_down_struct(structLen))
+spySlope50 = request.security("SPY", timeframe.period, ta.sma(close, maMidLen) - ta.sma(close, maMidLen)[slopeBars])
+spyCrossCount = int(request.security("SPY", timeframe.period, f_cross_count(close, ta.ema(close, maFastLen), structLen)))
+
+// ---------- Daily alignment for 4H/1H execution layers ----------
+dClose = request.security(syminfo.tickerid, "D", close)
+dEma20 = request.security(syminfo.tickerid, "D", ta.ema(close, maFastLen))
+dSma50 = request.security(syminfo.tickerid, "D", ta.sma(close, maMidLen))
+dSma200 = request.security(syminfo.tickerid, "D", ta.sma(close, maLongLen))
+dUpStruct = request.security(syminfo.tickerid, "D", f_up_struct(structLen))
+dDownStruct = request.security(syminfo.tickerid, "D", f_down_struct(structLen))
+dailyBull = dClose > dSma200 and dEma20 > dSma50 and dUpStruct
+dailyBear = dClose < dSma200 and dEma20 < dSma50 and dDownStruct
+
+// ---------- Market Alignment block ----------
+marketClose = ctxSpy1D ? close : spyClose
+marketEma20 = ctxSpy1D ? ema20 : spyEma20
+marketSma50 = ctxSpy1D ? sma50 : spySma50
+marketSma200 = ctxSpy1D ? sma200 : spySma200
+marketRsi = ctxSpy1D ? rsi : spyRsi
+marketMacdHist = ctxSpy1D ? macdHist : spyMacdHist
+marketAtr = ctxSpy1D ? atr : spyAtr
+marketAtrBase = ctxSpy1D ? atrBase : spyAtrBase
+marketUp = ctxSpy1D ? upStruct : spyUpStruct
+marketDown = ctxSpy1D ? downStruct : spyDownStruct
+marketSlope = ctxSpy1D ? maSlope50 : spySlope50
+marketCross = ctxSpy1D ? crossCount : spyCrossCount
+
+marketChop = ((not marketUp and not marketDown) and marketCross >= chopCrossMin) or (math.abs(marketSlope) <= marketAtr * maFlatAtrMult and marketCross >= chopCrossMin)
+marketVolatile = marketAtr > marketAtrBase * volSpikeMult
+marketRegime = marketChop ? "CHOP" : marketVolatile ? "VOLATILE" : (marketUp or marketDown) ? "TREND" : "RANGE"
+marketDirection = marketUp ? "BULLISH" : marketDown ? "BEARISH" : "RANGE"
+
+marketMaBull = marketEma20 > marketSma50 and marketSma50 > marketSma200
+marketMaBear = marketEma20 < marketSma50 and marketSma50 < marketSma200
+marketMAAligned = marketMaBull or marketMaBear
+
+marketMomentum = (marketUp and marketRsi >= 50 and marketMacdHist >= 0) or (marketDown and marketRsi <= 50 and marketMacdHist <= 0)
+marketSupportive = (marketUp or marketDown) and marketRegime != "CHOP" and marketRegime != "RANGE"
+
+// ---------- Stock Behavior block ----------
+spyRet = spyClose / spyClose[rsLookback] - 1.0
+stockRet = close / close[rsLookback] - 1.0
+rsDelta = stockRet - spyRet
+rsRatio = close / spyClose
+rsSlope = ta.linreg(rsRatio, rsLookback, 0) - ta.linreg(rsRatio, rsLookback, 1)
+relStrong = rsDelta > 0 and rsSlope > 0
+relWeak = rsDelta < 0 and rsSlope < 0
+relClear = relStrong or relWeak
+rsState = relStrong ? "STRONGER" : relWeak ? "WEAKER" : "NEUTRAL"
+
+cleanStructure = (upStruct or downStruct) and not localChop
+volumeHealthy = volume >= volBase
+
+mtfAligned = (upStruct and dailyBull) or (downStruct and dailyBear)
+
+// ---------- Location block ----------
+locationPass = nearKeyLevel and notExtended
+extAtr = atr > 0 ? math.abs(close - ema20) / atr : na
+
+// ---------- Risk Definition + Reward Justification ----------
+thesisBullBase = ctxSpy1D ? marketUp : (marketUp and (relStrong or (rsDelta >= 0 and close > sma50)))
+thesisBearBase = ctxSpy1D ? marketDown : (marketDown and (relWeak or (rsDelta <= 0 and close < sma50)))
+thesisBull = (ctxStock4H or ctxStock1H) ? (thesisBullBase and dailyBull) : thesisBullBase
+thesisBear = (ctxStock4H or ctxStock1H) ? (thesisBearBase and dailyBear) : thesisBearBase
+thesisDir = thesisBull ? "BULLISH THESIS" : thesisBear ? "BEARISH THESIS" : "NO CLEAR THESIS"
+
+swingHigh = ta.highest(high, rewardLookback)
+swingLow = ta.lowest(low, rewardLookback)
+
+longInvalid = hasKeyLevels ? pivotLow : na
+shortInvalid = hasKeyLevels ? pivotHigh : na
+longTarget = hasKeyLevels ? math.max(pivotHigh, swingHigh) : swingHigh
+shortTarget = hasKeyLevels ? math.min(pivotLow, swingLow) : swingLow
+
+longRisk = thesisBull and not na(longInvalid) and longInvalid < close ? close - longInvalid : na
+shortRisk = thesisBear and not na(shortInvalid) and shortInvalid > close ? shortInvalid - close : na
+riskDist = thesisBull ? longRisk : thesisBear ? shortRisk : na
+invalidation = thesisBull ? longInvalid : thesisBear ? shortInvalid : na
+
+longReward = thesisBull ? longTarget - close : na
+shortReward = thesisBear ? close - shortTarget : na
+rewardDist = thesisBull ? longReward : thesisBear ? shortReward : na
+targetLvl = thesisBull ? longTarget : thesisBear ? shortTarget : na
+
+riskDefined = not na(riskDist) and riskDist > syminfo.mintick * 5
+rewardDefined = not na(rewardDist) and rewardDist > 0
+rr = riskDefined and rewardDefined ? rewardDist / riskDist : na
+rrAccept = not na(rr) and rr >= 2
+rrStrong = not na(rr) and rr >= 3
+
+// ---------- Scoring ----------
+marketScore = f_b2i(marketUp or marketDown) * 5 + f_b2i(marketSupportive) * 5 + f_b2i(marketMAAligned) * 5 + f_b2i(marketMomentum) * 5
+
+behaviorScoreStock = f_b2i(relClear) * 5 + f_b2i(cleanStructure) * 5 + f_b2i(volumeHealthy) * 5 + f_b2i(hasKeyLevels) * 5
+behaviorScoreSpy = f_b2i(cleanStructure) * 5 + f_b2i(volumeHealthy) * 5 + f_b2i(hasKeyLevels) * 5 + f_b2i(localRegime != "CHOP") * 5
+behaviorScore = ctxSpy1D ? behaviorScoreSpy : behaviorScoreStock
+behaviorScore := (ctxStock4H or ctxStock1H) ? behaviorScore - (f_b2i(not mtfAligned) * 5) : behaviorScore
+behaviorScore := math.max(0, math.min(20, behaviorScore))
+
+locationScore = f_b2i(nearKeyLevel) * 10 + f_b2i(notExtended) * 10
+riskScore = f_b2i(riskDefined) * 10 + f_b2i(riskDefined and hasKeyLevels) * 10
+rewardScore = f_b2i(rrAccept) * 10 + f_b2i(rrStrong) * 10
+score = marketScore + behaviorScore + locationScore + riskScore + rewardScore
+
+filterMarket = marketSupportive
+filterBehavior = ctxSpy1D ? (cleanStructure and volumeHealthy and hasKeyLevels) : (relClear and cleanStructure and volumeHealthy and hasKeyLevels)
+filterBehavior := (ctxStock4H or ctxStock1H) ? (filterBehavior and mtfAligned) : filterBehavior
+filterLocation = locationPass
+filterRisk = riskDefined
+filterReward = rrAccept
+passCount = f_b2i(filterMarket) + f_b2i(filterBehavior) + f_b2i(filterLocation) + f_b2i(filterRisk) + f_b2i(filterReward)
+
+grade = "D"
+if riskDefined
+    grade := passCount == 5 ? "A" : passCount >= 4 ? "B" : passCount >= 3 ? "C" : "D"
+if marketRegime == "CHOP" or marketRegime == "RANGE"
+    grade := grade == "A" ? "B" : grade
+
+sizeDecision = f_size_from_grade(grade)
+if marketRegime == "CHOP" or marketRegime == "VOLATILE" or marketRegime == "RANGE"
+    sizeDecision := f_reduce_size(sizeDecision)
+if grade == "D"
+    sizeDecision := "NO TRADE"
+
+gradeColor = grade == "A" ? color.new(color.green, 70) : grade == "B" ? color.new(color.teal, 70) : grade == "C" ? color.new(color.orange, 70) : color.new(color.red, 70)
+sizeColor = sizeDecision == "FULL" ? color.new(color.green, 70) : sizeDecision == "HALF" ? color.new(color.teal, 70) : sizeDecision == "LIGHT" ? color.new(color.orange, 70) : color.new(color.red, 70)
+
+// ---------- Table ----------
+var int MAX_ROWS = 56
+var table t = table.new(position.top_right, 2, MAX_ROWS, border_width=0, frame_color=color.new(color.white, 100))
+
+if barstate.islast
+    table.clear(t, 0, 0, 1, MAX_ROWS - 1)
+    if isSupportedTf
+        int row = 0
+        if not ctxSupported
+            f_add_row(t, row, "Context", "Unsupported symbol/TF combination", false, true)
+            row += 1
+            f_add_row(t, row, "Allowed", "SPY 1D | STOCK 1D | STOCK 4H | STOCK 1H", true, true)
+            row += 1
+        else
+            // Market Alignment
+            f_add_header(t, row, "Market Alignment", "")
+            row += 1
+            f_add_row(t, row, "Market regime", marketRegime, marketSupportive, false)
+            row += 1
+            f_add_row(t, row, "Market direction", marketDirection, marketUp or marketDown, false)
+            row += 1
+            f_add_row(t, row, "MA 20/50/200 alignment", marketMaBull ? "BULL STACK" : marketMaBear ? "BEAR STACK" : "MIXED", marketMAAligned, false)
+            row += 1
+            f_add_row(t, row, "RSI + MACD confirmation", marketMomentum ? "ALIGNED" : "MIXED", marketMomentum, false)
+            row += 1
+
+            // Stock Behavior / Structure
+            f_add_header(t, row, "Stock Behavior", "")
+            row += 1
+            if not ctxSpy1D
+                rsTxt = rsState + " (" + str.tostring(rsDelta * 100, "#.##") + "%)"
+                f_add_row(t, row, "Relative strength vs SPY", rsTxt, relClear, false)
+                row += 1
+            f_add_row(t, row, "Price structure", upStruct ? "HH/HL" : downStruct ? "LH/LL" : "RANGE/CHOP", cleanStructure, false)
+            row += 1
+            f_add_row(t, row, "Volume behavior", volumeHealthy ? "ABOVE BASELINE" : "BELOW BASELINE", volumeHealthy, false)
+            row += 1
+            levelTxt = hasKeyLevels ? "S:" + str.tostring(pivotLow, format.mintick) + " R:" + str.tostring(pivotHigh, format.mintick) : "NO CLEAR PIVOT LEVELS"
+            f_add_row(t, row, "Key levels / structure points", levelTxt, hasKeyLevels, false)
+            row += 1
+            if ctxStock4H or ctxStock1H
+                f_add_row(t, row, "Daily alignment (MTF)", mtfAligned ? "ALIGNED" : "NOT ALIGNED", mtfAligned, false)
+                row += 1
+            if ctxStock1H
+                vwapTxt = close > vwapSession ? "ABOVE VWAP" : close < vwapSession ? "BELOW VWAP" : "AT VWAP"
+                vwapPass = thesisBull ? close >= vwapSession : thesisBear ? close <= vwapSession : false
+                f_add_row(t, row, "VWAP context (secondary)", vwapTxt, vwapPass, false)
+                row += 1
+
+            // Location
+            f_add_header(t, row, "Location", "")
+            row += 1
+            f_add_row(t, row, "Location near key level", nearKeyLevel ? "NEAR LEVEL" : "MID-RANGE", nearKeyLevel, false)
+            row += 1
+            extTxt = not na(extAtr) ? str.tostring(extAtr, "#.##") + "x ATR from EMA20" : "N/A"
+            f_add_row(t, row, "Not extended", notExtended ? "YES (" + extTxt + ")" : "EXTENDED (" + extTxt + ")", notExtended, false)
+            row += 1
+
+            // Risk Definition
+            f_add_header(t, row, "Risk Definition", "")
+            row += 1
+            f_add_row(t, row, "Thesis direction", thesisDir, thesisBull or thesisBear, false)
+            row += 1
+            riskTxt = riskDefined ? "Stop@" + str.tostring(invalidation, format.mintick) + " | Risk " + str.tostring(riskDist, format.mintick) : "UNDEFINED"
+            f_add_row(t, row, "Risk definition / invalidation", riskTxt, riskDefined, false)
+            row += 1
+
+            // Reward Justification
+            f_add_header(t, row, "Reward Justification", "")
+            row += 1
+            rrTxt = not na(rr) ? "1:" + str.tostring(rr, "#.##") + " (Target " + str.tostring(targetLvl, format.mintick) + ")" : "N/A"
+            f_add_row(t, row, "Reward justification (R:R)", rrTxt, rrAccept, false)
+            row += 1
+
+            // Block + final outputs
+            f_add_header(t, row, "Scoring Block", "Value")
+            row += 1
+            f_add_row(t, row, "Market Alignment", str.tostring(marketScore) + "/20", marketScore >= 15, false)
+            row += 1
+            f_add_row(t, row, "Stock Behavior", str.tostring(behaviorScore) + "/20", behaviorScore >= 15, false)
+            row += 1
+            f_add_row(t, row, "Location", str.tostring(locationScore) + "/20", locationScore >= 10, false)
+            row += 1
+            f_add_row(t, row, "Risk Definition", str.tostring(riskScore) + "/20", riskScore >= 10, false)
+            row += 1
+            f_add_row(t, row, "Reward Justification", str.tostring(rewardScore) + "/20", rewardScore >= 10, false)
+            row += 1
+
+            table.cell(t, 0, row, "TOTAL SCORE", text_color=color.white, bgcolor=color.new(color.navy, 65), text_halign=text.align_left)
+            table.cell(t, 1, row, str.tostring(score) + "/100", text_color=color.white, bgcolor=color.new(color.navy, 65), text_halign=text.align_left)
+            row += 1
+
+            table.cell(t, 0, row, "GRADE (A/B/C/D)", text_color=color.white, bgcolor=gradeColor, text_halign=text.align_left)
+            table.cell(t, 1, row, grade, text_color=color.white, bgcolor=gradeColor, text_halign=text.align_left)
+            row += 1
+
+            table.cell(t, 0, row, "SIZE DECISION", text_color=color.white, bgcolor=sizeColor, text_halign=text.align_left)
+            table.cell(t, 1, row, sizeDecision, text_color=color.white, bgcolor=sizeColor, text_halign=text.align_left)
