@@ -28,13 +28,42 @@ volExitMult = input.float(1.15, "Volatility exit (ATR x baseline)", minval=1.0, 
 maFlatAtrMult = input.float(0.08, "MA50 flatness (ATR x)", minval=0.01, step=0.01, group=groupProxy)
 chopCrossMinRate = input.float(0.20, "Chop cross rate threshold", minval=0.01, maxval=1.0, step=0.01, group=groupProxy)
 erMin = input.float(0.30, "Trend strength min (ER)", minval=0.01, maxval=1.0, step=0.01, group=groupProxy)
+erExitMult = input.float(0.90, "Trend strength exit mult", minval=0.1, maxval=1.0, step=0.01, group=groupProxy)
+maStackEnterAtr = input.float(0.10, "MA stack enter (x ATRBase)", minval=0.01, step=0.01, group=groupProxy)
+maStackExitMult = input.float(0.60, "MA stack exit mult", minval=0.05, maxval=0.99, step=0.01, group=groupProxy)
+maPriceEnterAtr = input.float(0.10, "MA stack price enter band (x ATRBase)", minval=0.01, step=0.01, group=groupProxy)
+maPriceExitMult = input.float(0.60, "MA stack price exit mult", minval=0.05, maxval=0.99, step=0.01, group=groupProxy)
+maCrossThrAtr = input.float(0.04, "MA mixed cross threshold (x ATRBase)", minval=0.005, step=0.005, group=groupProxy)
+rsiEnterBand = input.float(2.0, "RSI enter band (+/- around 50)", minval=0.1, step=0.1, group=groupProxy)
+rsiExitMult = input.float(0.60, "RSI exit mult", minval=0.05, maxval=0.99, step=0.01, group=groupProxy)
+macdEnterAtr = input.float(0.10, "MACD hist enter (x ATRBase)", minval=0.01, step=0.01, group=groupProxy)
+macdExitMult = input.float(0.60, "MACD hist exit mult", minval=0.05, maxval=0.99, step=0.01, group=groupProxy)
+minMarketScore1D = input.float(13.0, "Min market score 1D", minval=0.0, maxval=20.0, step=0.5, group=groupProxy)
+minMarketScore4H = input.float(11.5, "Min market score 4H", minval=0.0, maxval=20.0, step=0.5, group=groupProxy)
+minMarketScore1H = input.float(10.5, "Min market score 1H", minval=0.0, maxval=20.0, step=0.5, group=groupProxy)
+showMarketDebug = input.bool(false, "Show market debug row", group=groupProxy)
 useConfirmedSecurity = input.bool(false, "Use confirmed security data (less realtime flicker)", group=groupProxy)
 // Ensure hysteresis order even if user sets invalid values in inputs.
 volEnterEff = math.max(volEnterMult, volExitMult + 0.01)
 volExitEff = math.min(volExitMult, volEnterEff - 0.01)
+erEnterEff = erMin
+erExitEff = math.min(erMin * erExitMult, erEnterEff - 0.001)
+maStackEnterEff = maStackEnterAtr
+maStackExitEff = math.min(maStackEnterAtr * maStackExitMult, maStackEnterEff - 0.001)
+// Keep MIXED/CROSS text classification tighter than stack-exit logic.
+maCrossThrEff = math.min(maCrossThrAtr, maStackExitEff)
+maPriceEnterEff = maPriceEnterAtr
+maPriceExitEff = math.min(maPriceEnterAtr * maPriceExitMult, maPriceEnterEff - 0.001)
+rsiEnterEff = rsiEnterBand
+rsiExitEff = math.min(rsiEnterBand * rsiExitMult, rsiEnterEff - 0.1)
+macdEnterEff = macdEnterAtr
+macdExitEff = math.min(macdEnterAtr * macdExitMult, macdEnterEff - 0.001)
 
 f_b2i(bool b) =>
     b ? 1 : 0
+
+f_clamp01(float x) =>
+    math.max(0.0, math.min(1.0, x))
 
 f_size_from_grade(string grade) =>
     grade == "A" ? "FULL" : grade == "B" ? "HALF" : grade == "C" ? "LIGHT" : "NO TRADE"
@@ -43,7 +72,7 @@ f_reduce_size(string s) =>
     s == "FULL" ? "HALF" : s == "HALF" ? "LIGHT" : s == "LIGHT" ? "NO TRADE" : "NO TRADE"
 
 f_macd_hist(float src, int fastLen, int slowLen, int signalLen) =>
-    [_, _, h] = ta.macd(src, fastLen, slowLen, signalLen)
+    [macdLineTmp, signalLineTmp, h] = ta.macd(src, fastLen, slowLen, signalLen)
     h
 
 // Avoid short-circuit warnings by computing highest/lowest components first.
@@ -74,12 +103,10 @@ f_er(series float src, int len) =>
     vol == 0.0 ? 0.0 : ch / vol
 
 f_sec_f(string sym, string tf, series float expr) =>
-    secExpr = useConfirmedSecurity ? (barstate.isconfirmed ? expr : expr[1]) : expr
-    request.security(sym, tf, secExpr, barmerge.gaps_off, barmerge.lookahead_off)
+    request.security(sym, tf, useConfirmedSecurity ? (barstate.isconfirmed ? expr : expr[1]) : expr, barmerge.gaps_off, barmerge.lookahead_off)
 
 f_sec_b(string sym, string tf, series bool expr) =>
-    secExpr = useConfirmedSecurity ? (barstate.isconfirmed ? expr : expr[1]) : expr
-    request.security(sym, tf, secExpr, barmerge.gaps_off, barmerge.lookahead_off)
+    request.security(sym, tf, useConfirmedSecurity ? (barstate.isconfirmed ? expr : expr[1]) : expr, barmerge.gaps_off, barmerge.lookahead_off)
 
 f_add_row(table t, int row, string item, string status, bool pass, bool manual) =>
     color statusBg = manual ? color.new(color.gray, 80) : pass ? color.new(color.green, 82) : color.new(color.red, 82)
@@ -94,6 +121,8 @@ f_add_header(table t, int row, string left, string mid) =>
 // ---------- Context detection ----------
 sym = str.upper(syminfo.ticker)
 isSPY = sym == "SPY"
+isQQQ = sym == "QQQ"
+isBenchmark = isSPY or isQQQ
 
 tfSec = timeframe.in_seconds()
 is1D = timeframe.isdaily or tfSec == 86400
@@ -101,13 +130,14 @@ is4H = timeframe.isintraday and tfSec == 14400
 is1H = timeframe.isintraday and tfSec == 3600
 isSupportedTf = is1D or is4H or is1H
 
-ctxSpy1D = isSPY and is1D
-ctxStock1D = not isSPY and is1D
-ctxStock4H = not isSPY and is4H
-ctxStock1H = not isSPY and is1H
+// Keep ctxSpy1D name for backward compatibility with downstream logic.
+ctxSpy1D = isBenchmark and is1D
+ctxStock1D = not isBenchmark and is1D
+ctxStock4H = not isBenchmark and is4H
+ctxStock1H = not isBenchmark and is1H
 ctxSupported = ctxSpy1D or ctxStock1D or ctxStock4H or ctxStock1H
 
-ctxLabel = ctxSpy1D ? "SPY 1D" : ctxStock1D ? "STOCK 1D" : ctxStock4H ? "STOCK 4H" : ctxStock1H ? "STOCK 1H" : "UNSUPPORTED"
+ctxLabel = ctxSpy1D ? (isSPY ? "SPY 1D" : "QQQ 1D") : ctxStock1D ? "STOCK 1D" : ctxStock4H ? "STOCK 4H" : ctxStock1H ? "STOCK 1H" : "UNSUPPORTED"
 
 // ---------- Local symbol calculations ----------
 ema20 = ta.ema(close, maFastLen)
@@ -207,7 +237,12 @@ marketCrossRate = structLen > 0 ? mCross / float(structLen) : 0.0
 marketAtrBaseNorm = (not na(marketAtrBase) and not na(marketClose) and marketClose != 0.0) ? marketAtrBase / marketClose : 0.0
 marketFlat = marketAtrBaseNorm > 0.0 ? math.abs(mSlope) <= marketAtrBaseNorm * maFlatAtrMult : false
 marketCrossy = marketCrossRate >= chopCrossMinRate
-trendStrong = (mUp or mDown) and (mEr >= erMin)
+hasStruct = mUp or mDown
+enterTrend = hasStruct and (mEr >= erEnterEff)
+exitTrend = (not hasStruct) or (mEr < erExitEff)
+var bool trendStrongState = false
+trendStrongState := trendStrongState ? not (exitTrend == true) : (enterTrend == true)
+trendStrong = trendStrongState
 marketChop = not trendStrong and marketCrossy and marketFlat
 marketEnterVol = (not na(marketAtr) and not na(marketAtrBase)) and (marketAtr > marketAtrBase * volEnterEff)
 marketExitVol = (not na(marketAtr) and not na(marketAtrBase)) and (marketAtr < marketAtrBase * volExitEff)
@@ -215,14 +250,136 @@ var bool marketVolatileState = false
 marketVolatileState := marketVolatileState ? not (marketExitVol == true) : (marketEnterVol == true)
 marketVolatile = marketVolatileState
 marketRegime = marketChop ? "CHOP" : (not trendStrong and marketVolatile) ? "VOLATILE" : trendStrong ? "TREND" : "RANGE"
-marketDirection = trendStrong ? (mUp ? "BULLISH" : "BEARISH") : "RANGE"
+dirWeak = hasStruct and not trendStrong
+// Macro bias from MA order only.
+maOrderReady = not na(marketEma20) and not na(marketSma50) and not na(marketSma200)
+macroBull = maOrderReady and marketEma20 > marketSma50 and marketSma50 > marketSma200
+macroBear = maOrderReady and marketEma20 < marketSma50 and marketSma50 < marketSma200
+
+// Micro-structure vs macro-bias conflict (only when direction is WEAK).
+pullback = dirWeak and macroBull and mDown
+rally = dirWeak and macroBear and mUp
+
+marketDirection = trendStrong ? (mUp ? "BULLISH" : "BEARISH") : pullback ? "BULLISH (PULLBACK)" : rally ? "BEARISH (RALLY)" : dirWeak ? (mUp ? "BULLISH (WEAK)" : "BEARISH (WEAK)") : "RANGE"
 marketRegimeTxt = marketVolatile and marketRegime != "VOLATILE" ? marketRegime + " + VOL" : marketRegime
 
-marketMaBull = marketEma20 > marketSma50 and marketSma50 > marketSma200
-marketMaBear = marketEma20 < marketSma50 and marketSma50 < marketSma200
-marketMAAligned = marketMaBull or marketMaBear
+// ----- MA stack (strong/weak) with hysteresis -----
+maReady = not na(marketClose) and not na(marketEma20) and not na(marketSma50) and not na(marketSma200) and not na(marketAtrBase) and marketAtrBase != 0.0
+bullOrder = maReady and marketEma20 > marketSma50 and marketSma50 > marketSma200
+bearOrder = maReady and marketEma20 < marketSma50 and marketSma50 < marketSma200
 
-marketMomentum = (mUp and not na(marketRsi) and not na(marketMacdHist) and marketRsi >= 50 and marketMacdHist >= 0) or (mDown and not na(marketRsi) and not na(marketMacdHist) and marketRsi <= 50 and marketMacdHist <= 0)
+// ATRBase-normalized separations (x ATRBase)
+sep2050 = maReady ? (marketEma20 - marketSma50) / marketAtrBase : 0.0
+sep50200 = maReady ? (marketSma50 - marketSma200) / marketAtrBase : 0.0
+stackStrength = bullOrder ? math.min(sep2050, sep50200) : bearOrder ? math.min(-sep2050, -sep50200) : 0.0
+strengthTxt = str.tostring(stackStrength, "#.##") + "x"
+
+// Price-vs-EMA20 sanity check with ATRBase bands + hysteresis.
+priceBandEnter = maReady ? maPriceEnterEff * marketAtrBase : 0.0
+priceBandExit = maReady ? maPriceExitEff * marketAtrBase : 0.0
+bullPriceEnter = maReady and marketClose > marketEma20 + priceBandEnter
+bullPriceExit = maReady and marketClose < marketEma20 - priceBandExit
+bearPriceEnter = maReady and marketClose < marketEma20 - priceBandEnter
+bearPriceExit = maReady and marketClose > marketEma20 + priceBandExit
+
+enterBullStack = bullOrder and sep2050 >= maStackEnterEff and sep50200 >= maStackEnterEff and bullPriceEnter
+exitBullStack = (not bullOrder) or na(marketClose) or (sep2050 <= maStackExitEff) or (sep50200 <= maStackExitEff) or bullPriceExit
+enterBearStack = bearOrder and (-sep2050 >= maStackEnterEff) and (-sep50200 >= maStackEnterEff) and bearPriceEnter
+exitBearStack = (not bearOrder) or na(marketClose) or (-sep2050 <= maStackExitEff) or (-sep50200 <= maStackExitEff) or bearPriceExit
+
+var bool bullStackState = false
+var bool bearStackState = false
+bullStackState := bullStackState ? not (exitBullStack == true) : (enterBullStack == true)
+bearStackState := bearStackState ? not (exitBearStack == true) : (enterBearStack == true)
+
+// Enforce exclusivity
+if bullStackState
+    bearStackState := false
+if bearStackState
+    bullStackState := false
+
+marketMaBullStrong = bullStackState
+marketMaBearStrong = bearStackState
+marketMaBullWeak = bullOrder and not marketMaBullStrong
+marketMaBearWeak = bearOrder and not marketMaBearStrong
+marketMAAlignedStrong = marketMaBullStrong or marketMaBearStrong
+marketMAAlignedWeak = marketMaBullWeak or marketMaBearWeak
+maStrengthNorm = maStackEnterEff > 0.0 ? f_clamp01(stackStrength / maStackEnterEff) : 0.0
+marketMAAlignScore = 5.0 * maStrengthNorm
+
+// ----- MIXED breakdown (based on sep signs + near-zero threshold) -----
+crossThr = maCrossThrEff
+cross2050 = maReady and math.abs(sep2050) <= crossThr
+cross50200 = maReady and math.abs(sep50200) <= crossThr
+compressed = cross2050 and cross50200
+eps = crossThr * 0.20
+cross2050Side = math.abs(sep2050) <= eps ? "20~=50" : (sep2050 > 0 ? "20>50" : "20<50")
+cross50200Side = math.abs(sep50200) <= eps ? "50~=200" : (sep50200 > 0 ? "50>200" : "50<200")
+
+tightness = maReady ? math.min(math.abs(sep2050), math.abs(sep50200)) : na
+tightTxt = not na(tightness) ? str.tostring(tightness, "#.##") + "x" : "na"
+
+mixTag = not maReady ? "N/A" : compressed ? "COMPRESSED" : cross2050 ? "20~50 CROSS (" + cross2050Side + ")" : cross50200 ? "50~200 CROSS (" + cross50200Side + ")" : (sep2050 > 0 and sep50200 < 0) ? "ST BULL / LT BEAR" : (sep2050 < 0 and sep50200 > 0) ? "ST BEAR / LT BULL" : "NO ORDER"
+
+marketMaTxt = marketMaBullStrong ? "BULL STACK (" + strengthTxt + ")" : marketMaBearStrong ? "BEAR STACK (" + strengthTxt + ")" : marketMaBullWeak ? "BULL STACK (WEAK " + strengthTxt + ")" : marketMaBearWeak ? "BEAR STACK (WEAK " + strengthTxt + ")" : (mixTag == "N/A" ? "N/A" : "MIXED (" + mixTag + " " + tightTxt + ")")
+
+// ----- RSI + MACD confirmation (direction-bias aware, strong/weak + hysteresis) -----
+// Bias side we want to confirm (matches Market direction semantics).
+dirBullBias = trendStrong ? mUp : pullback ? true : rally ? false : (dirWeak and mUp)
+dirBearBias = trendStrong ? mDown : rally ? true : pullback ? false : (dirWeak and mDown)
+hasBias = dirBullBias or dirBearBias
+
+// RSI hysteresis around 50.
+enterRsiBull = hasBias and dirBullBias and not na(marketRsi) and (marketRsi >= 50.0 + rsiEnterEff)
+exitRsiBull = (not dirBullBias) or na(marketRsi) or (marketRsi <= 50.0 - rsiExitEff)
+var bool rsiBullState = false
+rsiBullState := rsiBullState ? not (exitRsiBull == true) : (enterRsiBull == true)
+
+enterRsiBear = hasBias and dirBearBias and not na(marketRsi) and (marketRsi <= 50.0 - rsiEnterEff)
+exitRsiBear = (not dirBearBias) or na(marketRsi) or (marketRsi >= 50.0 + rsiExitEff)
+var bool rsiBearState = false
+rsiBearState := rsiBearState ? not (exitRsiBear == true) : (enterRsiBear == true)
+
+// MACD hist hysteresis (normalized by ATRBase).
+macdNorm = (not na(marketAtrBase) and marketAtrBase != 0.0 and not na(marketMacdHist)) ? (marketMacdHist / marketAtrBase) : na
+
+enterMacdBull = hasBias and dirBullBias and not na(macdNorm) and (macdNorm >= macdEnterEff)
+exitMacdBull = (not dirBullBias) or na(macdNorm) or (macdNorm <= macdExitEff)
+var bool macdBullState = false
+macdBullState := macdBullState ? not (exitMacdBull == true) : (enterMacdBull == true)
+
+enterMacdBear = hasBias and dirBearBias and not na(macdNorm) and (macdNorm <= -macdEnterEff)
+exitMacdBear = (not dirBearBias) or na(macdNorm) or (macdNorm >= -macdExitEff)
+var bool macdBearState = false
+macdBearState := macdBearState ? not (exitMacdBear == true) : (enterMacdBear == true)
+
+// Enforce bullish/bearish state exclusivity on bias flips.
+if dirBullBias
+    rsiBearState := false
+    macdBearState := false
+if dirBearBias
+    rsiBullState := false
+    macdBullState := false
+
+// Direction-aware alignment.
+rsiAligned = dirBullBias ? rsiBullState : dirBearBias ? rsiBearState : false
+macdAligned = dirBullBias ? macdBullState : dirBearBias ? macdBearState : false
+
+marketMomentumStrong = hasBias and rsiAligned and macdAligned
+marketMomentumWeak = hasBias and (not marketMomentumStrong) and (rsiAligned or macdAligned)
+
+// Opposite-side checks (beyond enter thresholds).
+rsiOpp = hasBias and not na(marketRsi) and ((dirBullBias and marketRsi <= 50.0 - rsiEnterEff) or (dirBearBias and marketRsi >= 50.0 + rsiEnterEff))
+macdOpp = hasBias and not na(macdNorm) and ((dirBullBias and macdNorm <= -macdEnterEff) or (dirBearBias and macdNorm >= macdEnterEff))
+
+marketMomentumOpposed = hasBias and rsiOpp and macdOpp
+marketMomentumNeutral = hasBias and (not rsiAligned) and (not macdAligned) and (not rsiOpp) and (not macdOpp)
+
+weakTag = rsiAligned and not macdAligned ? " (RSI)" : macdAligned and not rsiAligned ? " (MACD)" : ""
+marketMomentumTxt = not hasBias ? "N/A" : marketMomentumStrong ? "ALIGNED" : marketMomentumWeak ? "WEAK" + weakTag : marketMomentumOpposed ? "OPPOSED" : marketMomentumNeutral ? "NEUTRAL" : "MIXED"
+
+// Back-compat bool.
+marketMomentum = marketMomentumStrong
 marketSupportive = marketRegime == "TREND"
 
 // ---------- Stock Behavior block ----------
@@ -251,6 +408,8 @@ thesisBearBase = ctxSpy1D ? mDown : (mDown and (relWeak or (rsDelta <= 0 and clo
 thesisBull = (ctxStock4H or ctxStock1H) ? (thesisBullBase and dailyBull) : thesisBullBase
 thesisBear = (ctxStock4H or ctxStock1H) ? (thesisBearBase and dailyBear) : thesisBearBase
 thesisDir = thesisBull ? "BULLISH THESIS" : thesisBear ? "BEARISH THESIS" : "NO CLEAR THESIS"
+setupSide = thesisBull ? "CALL" : thesisBear ? "PUT" : "WAIT"
+setupSideTxt = thesisBull ? "CALL (BULLISH)" : thesisBear ? "PUT (BEARISH)" : "WAIT / NO CLEAR THESIS"
 
 swingHigh = ta.highest(high, rewardLookback)
 swingLow = ta.lowest(low, rewardLookback)
@@ -277,7 +436,27 @@ rrAccept = not na(rr) and rr >= 2
 rrStrong = not na(rr) and rr >= 3
 
 // ---------- Scoring ----------
-marketScore = f_b2i(mUp or mDown) * 5 + f_b2i(marketSupportive) * 5 + f_b2i(marketMAAligned) * 5 + f_b2i(marketMomentum) * 5
+erSpan = math.max(erEnterEff - erExitEff, 0.0001)
+marketDirectionNorm = hasStruct ? f_clamp01((mEr - erExitEff) / erSpan) : 0.0
+marketDirectionScore = 5.0 * marketDirectionNorm
+
+marketRegimeScore = marketRegime == "TREND" ? 5.0 : marketRegime == "RANGE" ? 3.0 : marketRegime == "CHOP" ? 2.0 : 1.0
+marketRegimeScore := marketVolatile and marketRegime != "VOLATILE" ? math.max(0.0, marketRegimeScore - 0.5) : marketRegimeScore
+
+rsiDen = math.max(rsiEnterEff, 0.0001)
+rsiDelta = dirBullBias ? (marketRsi - 50.0) : dirBearBias ? (50.0 - marketRsi) : na
+rsiNorm = hasBias and not na(rsiDelta) ? f_clamp01(rsiDelta / rsiDen) : 0.0
+
+macdDen = math.max(macdEnterEff, 0.0001)
+macdDelta = dirBullBias ? macdNorm : dirBearBias ? -macdNorm : na
+macdNormScore = hasBias and not na(macdDelta) ? f_clamp01(macdDelta / macdDen) : 0.0
+marketMomentumScore = 5.0 * ((rsiNorm + macdNormScore) / 2.0)
+
+marketScore = marketDirectionScore + marketRegimeScore + marketMAAlignScore + marketMomentumScore
+minMarketScoreEff = is1D ? minMarketScore1D : is4H ? minMarketScore4H : minMarketScore1H
+minMarketScoreAdj = marketRegime == "CHOP" ? 1.0 : marketRegime == "TREND" ? -0.5 : 0.0
+minMarketScoreAdj := marketVolatile ? minMarketScoreAdj + 0.5 : minMarketScoreAdj
+minMarketScoreReq = math.max(0.0, minMarketScoreEff + minMarketScoreAdj)
 
 behaviorScoreStock = f_b2i(relClear) * 5 + f_b2i(cleanStructure) * 5 + f_b2i(volumeHealthy) * 5 + f_b2i(hasKeyLevels) * 5
 behaviorScoreSpy = f_b2i(cleanStructure) * 5 + f_b2i(volumeHealthy) * 5 + f_b2i(hasKeyLevels) * 5 + f_b2i(localRegime != "CHOP" and not localVolatile) * 5
@@ -290,7 +469,7 @@ riskScore = f_b2i(riskDefined) * 10 + f_b2i(riskDefined and hasKeyLevels) * 10
 rewardScore = f_b2i(rrAccept) * 10 + f_b2i(rrStrong) * 10
 score = marketScore + behaviorScore + locationScore + riskScore + rewardScore
 
-filterMarket = marketSupportive
+filterMarket = marketScore >= minMarketScoreReq
 filterBehavior = ctxSpy1D ? (cleanStructure and volumeHealthy and hasKeyLevels) : (relClear and cleanStructure and volumeHealthy and hasKeyLevels)
 filterBehavior := (ctxStock4H or ctxStock1H) ? (filterBehavior and mtfAligned) : filterBehavior
 filterLocation = locationPass
@@ -298,16 +477,24 @@ filterRisk = riskDefined
 filterReward = rrAccept
 passCount = f_b2i(filterMarket) + f_b2i(filterBehavior) + f_b2i(filterLocation) + f_b2i(filterRisk) + f_b2i(filterReward)
 
-grade = "D"
+// --- GRADE = jakosc setupu (bez kary srodowiskowej) ---
+string gradeBase = "D"
 if riskDefined
-    grade := passCount == 5 ? "A" : passCount >= 4 ? "B" : passCount >= 3 ? "C" : "D"
-if marketRegime == "CHOP" or marketRegime == "RANGE" or marketVolatile
-    grade := grade == "A" ? "B" : grade
+    gradeBase := passCount == 5 ? "A" : passCount >= 4 ? "B" : passCount >= 3 ? "C" : "D"
 
-sizeDecision = f_size_from_grade(grade)
-if marketRegime == "CHOP" or marketRegime == "RANGE" or marketVolatile
+// Keep `grade` as displayed output variable used by table/colors.
+grade = gradeBase
+
+// --- SIZE = grade + kara srodowiskowa ---
+sizeDecision = f_size_from_grade(gradeBase)
+
+// Single environment penalty step for CHOP/RANGE/VOLATILE.
+bool envPenalty = (marketRegime == "CHOP") or (marketRegime == "RANGE") or marketVolatile
+if envPenalty
     sizeDecision := f_reduce_size(sizeDecision)
-if grade == "D"
+
+// Hard rule: D is always NO TRADE.
+if gradeBase == "D"
     sizeDecision := "NO TRADE"
 
 gradeColor = grade == "A" ? color.new(color.green, 70) : grade == "B" ? color.new(color.teal, 70) : grade == "C" ? color.new(color.orange, 70) : color.new(color.red, 70)
@@ -324,20 +511,33 @@ if barstate.islast
         if not ctxSupported
             f_add_row(t, row, "Context", "Unsupported symbol/TF combination", false, true)
             row += 1
-            f_add_row(t, row, "Allowed", "SPY 1D | STOCK 1D | STOCK 4H | STOCK 1H", true, true)
+            f_add_row(t, row, "Allowed", "SPY 1D | QQQ 1D | STOCK 1D | STOCK 4H | STOCK 1H", true, true)
             row += 1
         else
             // Market Alignment
             f_add_header(t, row, "Market Alignment", "")
             row += 1
-            f_add_row(t, row, "Market regime", marketRegimeTxt, marketSupportive, false)
+            regimePass = marketRegime == "TREND" or marketRegime == "RANGE"
+            regimeManual = marketRegime == "CHOP" or (marketVolatile and marketRegime != "VOLATILE")
+            f_add_row(t, row, "Market regime", marketRegimeTxt, regimePass, regimeManual)
             row += 1
-            f_add_row(t, row, "Market direction", marketDirection, mUp or mDown, false)
+            dirPass = marketDirectionScore >= 3.5
+            dirManual = marketDirectionScore >= 1.5 and not dirPass
+            f_add_row(t, row, "Market direction", marketDirection, dirPass, dirManual)
             row += 1
-            f_add_row(t, row, "MA 20/50/200 alignment", marketMaBull ? "BULL STACK" : marketMaBear ? "BEAR STACK" : "MIXED", marketMAAligned, false)
+            maPass = marketMAAlignScore >= 3.5
+            maManual = marketMAAlignScore >= 1.5 and not maPass
+            f_add_row(t, row, "MA 20/50/200 alignment", marketMaTxt, maPass, maManual)
             row += 1
-            f_add_row(t, row, "RSI + MACD confirmation", marketMomentum ? "ALIGNED" : "MIXED", marketMomentum, false)
+            momPass = marketMomentumScore >= 3.5
+            momManual = marketMomentumScore >= 1.5 and not momPass
+            f_add_row(t, row, "RSI + MACD confirmation", marketMomentumTxt, momPass, momManual)
             row += 1
+            if showMarketDebug
+                dirDbg = dirBullBias ? "BULL" : dirBearBias ? "BEAR" : "NONE"
+                debugTxt = "mUp/mDown=" + str.tostring(mUp) + "/" + str.tostring(mDown) + " ER=" + str.tostring(mEr, "#.##") + " dir=" + dirDbg + " macdN=" + str.tostring(macdNorm, "#.##") + " mE/x=" + str.tostring(macdEnterEff, "#.##") + "/" + str.tostring(macdExitEff, "#.##") + " stack=" + strengthTxt
+                f_add_row(t, row, "Debug (market)", debugTxt, true, true)
+                row += 1
 
             // Stock Behavior / Structure
             f_add_header(t, row, "Stock Behavior", "")
@@ -376,6 +576,8 @@ if barstate.islast
             row += 1
             f_add_row(t, row, "Thesis direction", thesisDir, thesisBull or thesisBear, false)
             row += 1
+            f_add_row(t, row, "Setup direction (options)", setupSideTxt, thesisBull or thesisBear, false)
+            row += 1
             riskTxt = riskDefined ? "Stop@" + str.tostring(invalidation, format.mintick) + " | Risk " + str.tostring(riskDist, format.mintick) : "UNDEFINED"
             f_add_row(t, row, "Risk definition / invalidation", riskTxt, riskDefined, false)
             row += 1
@@ -390,7 +592,8 @@ if barstate.islast
             // Block + final outputs
             f_add_header(t, row, "Scoring Block", "Value")
             row += 1
-            f_add_row(t, row, "Market Alignment", str.tostring(marketScore) + "/20", marketScore >= 15, false)
+            marketScoreTxt = str.tostring(marketScore, "#.##") + "/20"
+            f_add_row(t, row, "Market Alignment", marketScoreTxt, marketScore >= minMarketScoreReq, false)
             row += 1
             f_add_row(t, row, "Stock Behavior", str.tostring(behaviorScore) + "/20", behaviorScore >= 15, false)
             row += 1
@@ -402,7 +605,7 @@ if barstate.islast
             row += 1
 
             table.cell(t, 0, row, "TOTAL SCORE", text_color=color.white, bgcolor=color.new(color.navy, 65), text_halign=text.align_left)
-            table.cell(t, 1, row, str.tostring(score) + "/100", text_color=color.white, bgcolor=color.new(color.navy, 65), text_halign=text.align_left)
+            table.cell(t, 1, row, str.tostring(score, "#.##") + "/100", text_color=color.white, bgcolor=color.new(color.navy, 65), text_halign=text.align_left)
             row += 1
 
             table.cell(t, 0, row, "GRADE (A/B/C/D)", text_color=color.white, bgcolor=gradeColor, text_halign=text.align_left)
