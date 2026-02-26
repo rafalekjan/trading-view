@@ -25,6 +25,7 @@ nearAtrMult = input.float(0.75, "Near key level (xATR)", minval=0.1, step=0.05, 
 extendAtrMult = input.float(2.0, "Extended from EMA20 (xATR)", minval=0.5, step=0.1, group=groupProxy)
 volEnterMult = input.float(1.30, "Volatility enter (ATR x baseline)", minval=1.0, step=0.05, group=groupProxy)
 volExitMult = input.float(1.15, "Volatility exit (ATR x baseline)", minval=1.0, step=0.05, group=groupProxy)
+volMinRatio = input.float(1.0, "Volume healthy (x baseline)", minval=0.1, step=0.05, group=groupProxy)
 maFlatAtrMult = input.float(0.08, "MA50 flatness (ATR x)", minval=0.01, step=0.01, group=groupProxy)
 chopCrossMinRate = input.float(0.20, "Chop cross rate threshold", minval=0.01, maxval=1.0, step=0.01, group=groupProxy)
 erMin = input.float(0.30, "Trend strength min (ER)", minval=0.01, maxval=1.0, step=0.01, group=groupProxy)
@@ -38,9 +39,12 @@ rsiEnterBand = input.float(2.0, "RSI enter band (+/- around 50)", minval=0.1, st
 rsiExitMult = input.float(0.60, "RSI exit mult", minval=0.05, maxval=0.99, step=0.01, group=groupProxy)
 macdEnterAtr = input.float(0.10, "MACD hist enter (x ATRBase)", minval=0.01, step=0.01, group=groupProxy)
 macdExitMult = input.float(0.60, "MACD hist exit mult", minval=0.05, maxval=0.99, step=0.01, group=groupProxy)
+rsDeltaMin = input.float(0.01, "RS delta min (abs, e.g. 0.01 = 1%)", minval=0.0, step=0.005, group=groupProxy)
+rsSlopeMin = input.float(0.0002, "RS slope min (abs, ~%/bar)", minval=0.0, step=0.0001, group=groupProxy)
 minMarketScore1D = input.float(13.0, "Min market score 1D", minval=0.0, maxval=20.0, step=0.5, group=groupProxy)
 minMarketScore4H = input.float(11.5, "Min market score 4H", minval=0.0, maxval=20.0, step=0.5, group=groupProxy)
 minMarketScore1H = input.float(10.5, "Min market score 1H", minval=0.0, maxval=20.0, step=0.5, group=groupProxy)
+mtfAllowWeak = input.bool(true, "MTF allow weak alignment (4H/1H)", group=groupProxy)
 showMarketDebug = input.bool(false, "Show market debug row", group=groupProxy)
 useConfirmedSecurity = input.bool(false, "Use confirmed security data (less realtime flicker)", group=groupProxy)
 // Ensure hysteresis order even if user sets invalid values in inputs.
@@ -168,7 +172,11 @@ localCrossRate = structLen > 0 ? localCross / float(structLen) : 0.0
 localAtrBaseNorm = (not na(atrBase) and close != 0.0) ? atrBase / close : 0.0
 localFlat = localAtrBaseNorm > 0.0 ? math.abs(localSlope) <= localAtrBaseNorm * maFlatAtrMult : false
 localCrossy = localCrossRate >= chopCrossMinRate
-localTrendStrong = (localUp or localDown) and localEr >= erMin
+enterLocalTrend = (localUp or localDown) and (localEr >= erEnterEff)
+exitLocalTrend = (not (localUp or localDown)) or (localEr < erExitEff)
+var bool localTrendStrongState = false
+localTrendStrongState := localTrendStrongState ? not (exitLocalTrend == true) : (enterLocalTrend == true)
+localTrendStrong = localTrendStrongState
 localChop = not localTrendStrong and localCrossy and localFlat
 localEnterVol = (not na(atr) and not na(atrBase)) and (atr > atrBase * volEnterEff)
 localExitVol = (not na(atr) and not na(atrBase)) and (atr < atrBase * volExitEff)
@@ -210,8 +218,10 @@ dSma50 = f_sec_f(syminfo.tickerid, "D", ta.sma(close, maMidLen))
 dSma200 = f_sec_f(syminfo.tickerid, "D", ta.sma(close, maLongLen))
 dUpStruct = f_sec_b(syminfo.tickerid, "D", f_up_struct(structLen))
 dDownStruct = f_sec_b(syminfo.tickerid, "D", f_down_struct(structLen))
-dailyBull = dClose > dSma200 and dEma20 > dSma50 and dUpStruct
-dailyBear = dClose < dSma200 and dEma20 < dSma50 and dDownStruct
+dailyBiasBull = dClose > dSma200 and dEma20 > dSma50
+dailyBiasBear = dClose < dSma200 and dEma20 < dSma50
+dailyBull = dailyBiasBull and dUpStruct
+dailyBear = dailyBiasBear and dDownStruct
 
 // ---------- Market Alignment block ----------
 marketClose = ctxSpy1D ? close : spyClose
@@ -383,20 +393,51 @@ marketMomentum = marketMomentumStrong
 marketSupportive = marketRegime == "TREND"
 
 // ---------- Stock Behavior block ----------
-spyRet = spyClose / spyClose[rsLookback] - 1.0
-stockRet = close / close[rsLookback] - 1.0
-rsDelta = stockRet - spyRet
-rsRatio = close / spyClose
-rsSlope = ta.linreg(rsRatio, rsLookback, 0) - ta.linreg(rsRatio, rsLookback, 1)
-relStrong = rsDelta > 0 and rsSlope > 0
-relWeak = rsDelta < 0 and rsSlope < 0
+// Use Daily RS sources on intraday to avoid timeframe-dependent RS noise.
+spyCloseD = f_sec_f("SPY", "D", close)
+rsStockClose = (ctxStock4H or ctxStock1H) ? dClose : close
+rsSpyClose = (ctxStock4H or ctxStock1H) ? spyCloseD : spyClose
+
+// Estimate bars/day from observed day boundary changes.
+isNewDay = ta.change(time("D")) != 0
+var int dayBars = 0
+var int prevDayBars = na
+dayBars := isNewDay ? 1 : (dayBars + 1)
+if isNewDay
+    prevDayBars := dayBars[1]
+barsPerDayEff = int(math.max(1.0, float(nz(prevDayBars, dayBars))))
+
+// Convert RS lookback (days) to bars on intraday.
+rsLenBars = (ctxStock4H or ctxStock1H) ? (rsLookback * barsPerDayEff) : rsLookback
+
+spyRet = (not na(rsSpyClose[rsLenBars]) and rsSpyClose[rsLenBars] != 0.0) ? (rsSpyClose / rsSpyClose[rsLenBars] - 1.0) : na
+stockRet = (not na(rsStockClose[rsLenBars]) and rsStockClose[rsLenBars] != 0.0) ? (rsStockClose / rsStockClose[rsLenBars] - 1.0) : na
+rsDelta = nz(stockRet, 0.0) - nz(spyRet, 0.0)
+rsRatio = (not na(rsSpyClose) and rsSpyClose != 0.0) ? (rsStockClose / rsSpyClose) : na
+rsRatioSafe = nz(rsRatio, 0.0)
+rsLin0 = ta.linreg(rsRatioSafe, rsLenBars, 0)
+rsLin1 = ta.linreg(rsRatioSafe, rsLenBars, 1)
+rsSlopeRaw = not na(rsRatio) ? (rsLin0 - rsLin1) : 0.0
+rsSlopeNorm = (not na(rsRatio) and rsRatio != 0.0) ? (rsSlopeRaw / rsRatio) : 0.0
+rsSlopeNorm := (ctxStock4H or ctxStock1H) ? (rsSlopeNorm * barsPerDayEff) : rsSlopeNorm
+relStrong = (rsDelta >= rsDeltaMin) and (rsSlopeNorm >= rsSlopeMin)
+relWeak = (rsDelta <= -rsDeltaMin) and (rsSlopeNorm <= -rsSlopeMin)
 relClear = relStrong or relWeak
 rsState = relStrong ? "STRONGER" : relWeak ? "WEAKER" : "NEUTRAL"
 
-cleanStructure = (upStruct or downStruct) and not localChop
-volumeHealthy = volume >= volBase
+structOk = (localUp or localDown) and not localChop
+structStrong = structOk and localTrendStrong
+cleanStructure = structOk
+volRatio = (not na(volBase) and volBase > 0.0) ? (volume / volBase) : na
+volumeHealthy = not na(volRatio) and volRatio >= volMinRatio
 
-mtfAligned = (upStruct and dailyBull) or (downStruct and dailyBear)
+dBull = dailyBull == true
+dBear = dailyBear == true
+dBiasBull = dailyBiasBull == true
+dBiasBear = dailyBiasBear == true
+mtfAlignedStrong = (localUp and dBull) or (localDown and dBear)
+mtfAlignedWeak = (localUp and dBiasBull) or (localDown and dBiasBear)
+mtfAligned = mtfAllowWeak ? (mtfAlignedStrong or mtfAlignedWeak) : mtfAlignedStrong
 
 // ---------- Location block ----------
 locationPass = nearKeyLevel and notExtended
@@ -405,8 +446,8 @@ extAtr = atr > 0 ? math.abs(close - ema20) / atr : na
 // ---------- Risk Definition + Reward Justification ----------
 thesisBullBase = ctxSpy1D ? mUp : (mUp and (relStrong or (rsDelta >= 0 and close > sma50)))
 thesisBearBase = ctxSpy1D ? mDown : (mDown and (relWeak or (rsDelta <= 0 and close < sma50)))
-thesisBull = (ctxStock4H or ctxStock1H) ? (thesisBullBase and dailyBull) : thesisBullBase
-thesisBear = (ctxStock4H or ctxStock1H) ? (thesisBearBase and dailyBear) : thesisBearBase
+thesisBull = (ctxStock4H or ctxStock1H) ? (thesisBullBase and dBull) : thesisBullBase
+thesisBear = (ctxStock4H or ctxStock1H) ? (thesisBearBase and dBear) : thesisBearBase
 thesisDir = thesisBull ? "BULLISH THESIS" : thesisBear ? "BEARISH THESIS" : "NO CLEAR THESIS"
 setupSide = thesisBull ? "CALL" : thesisBear ? "PUT" : "WAIT"
 setupSideTxt = thesisBull ? "CALL (BULLISH)" : thesisBear ? "PUT (BEARISH)" : "WAIT / NO CLEAR THESIS"
@@ -458,11 +499,13 @@ minMarketScoreAdj = marketRegime == "CHOP" ? 1.0 : marketRegime == "TREND" ? -0.
 minMarketScoreAdj := marketVolatile ? minMarketScoreAdj + 0.5 : minMarketScoreAdj
 minMarketScoreReq = math.max(0.0, minMarketScoreEff + minMarketScoreAdj)
 
-behaviorScoreStock = f_b2i(relClear) * 5 + f_b2i(cleanStructure) * 5 + f_b2i(volumeHealthy) * 5 + f_b2i(hasKeyLevels) * 5
-behaviorScoreSpy = f_b2i(cleanStructure) * 5 + f_b2i(volumeHealthy) * 5 + f_b2i(hasKeyLevels) * 5 + f_b2i(localRegime != "CHOP" and not localVolatile) * 5
+behaviorScoreStock = f_b2i(relClear) * 5.0 + f_b2i(cleanStructure) * 5.0 + f_b2i(volumeHealthy) * 5.0 + f_b2i(hasKeyLevels) * 5.0
+behaviorScoreSpyRaw = f_b2i(cleanStructure) * 5.0 + f_b2i(volumeHealthy) * 5.0 + f_b2i(hasKeyLevels) * 5.0
+behaviorScoreSpy = behaviorScoreSpyRaw * (20.0 / 15.0)
 behaviorScore = ctxSpy1D ? behaviorScoreSpy : behaviorScoreStock
-behaviorScore := (ctxStock4H or ctxStock1H) ? behaviorScore - (f_b2i(not mtfAligned) * 5) : behaviorScore
-behaviorScore := math.max(0, math.min(20, behaviorScore))
+mtfScore = (ctxStock4H or ctxStock1H) ? (mtfAlignedStrong ? 0.0 : mtfAlignedWeak ? 2.5 : 5.0) : 0.0
+behaviorScore := (ctxStock4H or ctxStock1H) ? (behaviorScore - mtfScore) : behaviorScore
+behaviorScore := math.max(0.0, math.min(20.0, behaviorScore))
 
 locationScore = f_b2i(nearKeyLevel) * 10 + f_b2i(notExtended) * 10
 riskScore = f_b2i(riskDefined) * 10 + f_b2i(riskDefined and hasKeyLevels) * 10
@@ -543,18 +586,24 @@ if barstate.islast
             f_add_header(t, row, "Stock Behavior", "")
             row += 1
             if not ctxSpy1D
-                rsTxt = rsState + " (" + str.tostring(rsDelta * 100, "#.##") + "%)"
+                rsSlopeUnit = (ctxStock4H or ctxStock1H) ? "%/day" : "%/bar"
+                rsTxt = rsState + " (" + str.tostring(rsDelta * 100, "#.##") + "%, " + str.tostring(rsSlopeNorm * 100, "#.###") + rsSlopeUnit + ")"
                 f_add_row(t, row, "Relative strength vs SPY", rsTxt, relClear, false)
                 row += 1
-            f_add_row(t, row, "Price structure", upStruct ? "HH/HL" : downStruct ? "LH/LL" : "RANGE/CHOP", cleanStructure, false)
+            structTxt = localUp ? "HH/HL" : localDown ? "LH/LL" : "RANGE/CHOP"
+            structManual = cleanStructure and not structStrong
+            f_add_row(t, row, "Price structure", structTxt, structStrong, structManual)
             row += 1
-            f_add_row(t, row, "Volume behavior", volumeHealthy ? "ABOVE BASELINE" : "BELOW BASELINE", volumeHealthy, false)
+            volTxt = not na(volRatio) ? str.tostring(volRatio, "#.##") + "x BASE" : "N/A"
+            volStateTxt = volumeHealthy ? "HEALTHY (" + volTxt + ")" : "LOW (" + volTxt + ")"
+            f_add_row(t, row, "Volume behavior", volStateTxt, volumeHealthy, false)
             row += 1
             levelTxt = hasKeyLevels ? "S:" + str.tostring(pivotLow, format.mintick) + " R:" + str.tostring(pivotHigh, format.mintick) : "NO CLEAR PIVOT LEVELS"
             f_add_row(t, row, "Key levels / structure points", levelTxt, hasKeyLevels, false)
             row += 1
             if ctxStock4H or ctxStock1H
-                f_add_row(t, row, "Daily alignment (MTF)", mtfAligned ? "ALIGNED" : "NOT ALIGNED", mtfAligned, false)
+                mtfTxt = mtfAlignedStrong ? "ALIGNED (STRONG)" : mtfAlignedWeak ? "ALIGNED (WEAK)" : "NOT ALIGNED"
+                f_add_row(t, row, "Daily alignment (MTF)", mtfTxt, mtfAlignedStrong, mtfAlignedWeak)
                 row += 1
             if ctxStock1H
                 vwapTxt = close > vwapSession ? "ABOVE VWAP" : close < vwapSession ? "BELOW VWAP" : "AT VWAP"
