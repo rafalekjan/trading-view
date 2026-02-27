@@ -1,9 +1,9 @@
-//@version=6
+﻿//@version=6
 indicator("ModMark Market", overlay=true, max_labels_count=50)
 
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 // Inputs (UI)
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 showTable       = input.bool(true,  "Show table (visibility toggle)", group="Table")
 showText        = input.bool(true, "Show table text", group="Table")
 showNumbers     = input.bool(false, "Show numbers", group="Table")
@@ -49,9 +49,9 @@ breakoutVolMult = input.float(1.10, "Breakout volume min (x volMA)", minval=0.5,
 macdFlipLookback= input.int(20, "MACD flip lookback", minval=5, maxval=200, group="Follow-through")
 macdFlipChopMin = input.int(4, "MACD flips = choppy if above", minval=1, maxval=100, group="Follow-through")
 
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 // Eligibility: ONLY SPY/QQQ on 1D
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 is1D = timeframe.period == "D" or timeframe.period == "1D" or (timeframe.isdaily and timeframe.multiplier == 1)
 tickerU = str.upper(syminfo.ticker)
 tickerIdU = str.upper(syminfo.tickerid)
@@ -62,9 +62,9 @@ tkr = isSpy ? "SPY" : isQqq ? "QQQ" : syminfo.ticker
 ctxEligible = is1D and isSpyQqq
 ctxDebugTxt = "TF=" + timeframe.period + " M=" + str.tostring(timeframe.multiplier) + " T=" + tickerU
 
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 // Core calculations (backend)
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 // MAs
 ema20  = ta.ema(close, 20)
 sma50  = ta.sma(close, 50)
@@ -192,9 +192,9 @@ near200 = not na(dist200Atr) and dist200Atr <= near200AtrMult
 bias200Txt =
      na(sma200) ? "N/A (200 MA not ready)" :
      near200 ? "Around 200 MA zone (chop risk / caution)" :
-     close > sma200 ? "Above 200 MA → long bias" :
-     close < sma200 ? "Below 200 MA → short bias" :
-     "At 200 MA → caution"
+     close > sma200 ? "Above 200 MA â†’ long bias" :
+     close < sma200 ? "Below 200 MA â†’ short bias" :
+     "At 200 MA â†’ caution"
 
 // Relation to 20 EMA and 50 MA (text)
 rel20Txt = close > ema20 ? "Price above 20 EMA (short-term momentum up)" : "Price below 20 EMA (short-term momentum down)"
@@ -202,10 +202,10 @@ rel50Txt = close > sma50 ? "Price above 50 MA (trend support intact)"    : "Pric
 
 // MA shape (flat vs sloped)
 maShapeTxt =
-     (ema20Flat and sma50Flat) ? "20/50 MAs flat → range/chop conditions" :
-     (ema20Slope > 0 and sma50Slope > 0) ? "20/50 MAs sloped up → trend supportive" :
-     (ema20Slope < 0 and sma50Slope < 0) ? "20/50 MAs sloped down → trend supportive" :
-     "MAs mixed/transition → caution"
+     (ema20Flat and sma50Flat) ? "20/50 MAs flat â†’ range/chop conditions" :
+     (ema20Slope > 0 and sma50Slope > 0) ? "20/50 MAs sloped up â†’ trend supportive" :
+     (ema20Slope < 0 and sma50Slope < 0) ? "20/50 MAs sloped down â†’ trend supportive" :
+     "MAs mixed/transition â†’ caution"
 
 // RSI / MACD (text, no triggers)
 rsi = ta.rsi(close, 14)
@@ -277,7 +277,7 @@ atrPct = 100.0 * atr / close
 var int failedUp = 0
 var int failedDn = 0
 
-// Define “breakout” vs last swing high/low, and “fail” if closes back inside quickly
+// Define â€śbreakoutâ€ť vs last swing high/low, and â€śfailâ€ť if closes back inside quickly
 breakAbove = haveSwings and close > lastPH
 breakBelow = haveSwings and close < lastPL
 breakAboveVolOk = breakAbove and volume > volMA * breakoutVolMult
@@ -359,15 +359,15 @@ pullbackRespectTxt =
 distEmaAtr = atr != 0.0 ? math.abs(close - ema20) / atr : na
 isExtended = not na(distEmaAtr) and distEmaAtr > extendAtrMult
 extendedTxt =
-     isExtended ? "Price extended from 20 EMA (" + str.tostring(distEmaAtr, "#.##") + "x ATR)" :
-     "Price not extended from 20 EMA (" + str.tostring(distEmaAtr, "#.##") + "x ATR)"
+     isExtended ? (showNumbers ? "Price extended from 20 EMA (" + str.tostring(distEmaAtr, "#.##") + "x ATR)" : "Price extended from 20 EMA") :
+     (showNumbers ? "Price not extended from 20 EMA (" + str.tostring(distEmaAtr, "#.##") + "x ATR)" : "Price not extended from 20 EMA")
 
 overnightRisk = (wideRangeCount >= 5) or (bigGapCount >= 5) or atrUnstable
 overnightTxt =
      overnightRisk ? "Overnight conditions unstable (gaps/range/ATR jump)" :
      "Overnight conditions acceptable"
 
-// “Tradeable” environment (text gate; no signals)
+// â€śTradeableâ€ť environment (text gate; no signals)
 tradeable =
      (isTrendUp or isTrendDown) and not isChoppy and (atrPct < atrPctVolExtreme) and (not sma200Flat) and (not isExtended) and (not overnightRisk) and ((not breakAbove and not breakBelow) or breakAboveVolOk or breakBelowVolOk)
 
@@ -375,7 +375,7 @@ tradeableTxt =
      tradeable ? "Tradeable environment (supports swing context)" :
      "Not tradeable / cash is valid (defensive)"
 
-// A-grade gate from doc: if choppy → cannot be A-setup
+// A-grade gate from doc: if choppy â†’ cannot be A-setup
 agradeTxt =
      isChoppy ? "A-setup NOT allowed (chop environment)" :
      "A-setup gate passes (market not flagged as chop)"
@@ -465,6 +465,7 @@ majorSRStateTxt = na(majorDistNorm) ? "Major S/R not ready" : majorNear ? "Near 
 extensionStateTxt = isExtended ? "Price extended from 20 EMA" : "Price not extended from 20 EMA"
 chaosStateTxt = cleanNorm >= 0.67 ? "Chaos low" : cleanNorm >= 0.45 ? "Chaos medium" : "Chaos high"
 scoreTxt = showNumbers ? str.tostring(marketScore, "#.##") + "/100" : scoreStateTxt
+scoreTotalDisplayTxt = str.tostring(marketScore, "#.##") + "/100"
 maCrossDisplayTxt = showNumbers ? maCrossTxt : crossStateTxt
 atrChangeDisplayTxt = showNumbers ? atrChangeTxt : atrChangeStateTxt
 failedDisplayTxt = showNumbers ? failedTxt : failedStateTxt
@@ -479,9 +480,9 @@ scoreCDisplayTxt = showNumbers ? str.tostring(scoreC, "#.##") + "/10" : scoreCSt
 scoreDDisplayTxt = showNumbers ? str.tostring(scoreD, "#.##") + "/20" : scoreDStateTxt
 scoreEDisplayTxt = showNumbers ? str.tostring(scoreE, "#.##") + "/15" : scoreEStateTxt
 goNoGo = tradeable and not hardDefensive
-decisionSummaryTxt = goNoGo ? "GO ✅" : "NO-GO ❌"
-hardStopSummaryTxt = hardDefensive ? "YES ❌" : "NO ✅"
-aSetupSummaryTxt = isChoppy ? "BLOCKED ❌" : "ALLOWED ✅"
+decisionSummaryTxt = goNoGo ? "GO" : "NO-GO"
+hardStopSummaryTxt = hardDefensive ? "YES" : "NO"
+aSetupSummaryTxt = isChoppy ? "BLOCKED" : "ALLOWED"
 
 structureStatus = (isTrendUp or isTrendDown) ? 2 : isChoppy ? 0 : 1
 zone200Status = near200 and isChoppy ? 0 : near200 ? 1 : close < sma200 ? 1 : 2
@@ -502,13 +503,13 @@ healthScore = float(okCount * 2 + warnCount)
 healthMax = float((okCount + warnCount + badCount) * 2)
 healthPct = healthMax > 0 ? 100.0 * healthScore / healthMax : 0.0
 healthStateTxt = healthPct >= 75 ? "STRONG" : healthPct >= 55 ? "OK" : "WEAK"
-checklistSummaryTxt = "✅ " + str.tostring(okCount) + " | ⚠️ " + str.tostring(warnCount) + " | ❌ " + str.tostring(badCount)
+checklistSummaryTxt = "OK " + str.tostring(okCount) + " | WARN " + str.tostring(warnCount) + " | BAD " + str.tostring(badCount)
 checklistDisplayTxt = showNumbers ? checklistSummaryTxt + " | " + str.tostring(healthPct, "#.##") + "% " + healthStateTxt : checklistSummaryTxt + " | " + healthStateTxt
 
 softDefensive = badCount >= 3 or healthPct < 55
-softStopSummaryTxt = softDefensive ? "YES ⚠️" : "NO ✅"
+softStopSummaryTxt = softDefensive ? "YES" : "NO"
 riskModeEff = hardDefensive ? "DEFENSIVE" : softDefensive and riskMode == "NORMAL" ? "REDUCED" : riskMode
-riskModeSummaryTxt = riskModeEff == "NORMAL" ? "NORMAL ✅" : riskModeEff == "REDUCED" ? "REDUCED ⚠️" : "DEFENSIVE ❌"
+riskModeSummaryTxt = riskModeEff == "NORMAL" ? "NORMAL" : riskModeEff == "REDUCED" ? "REDUCED" : "DEFENSIVE"
 
 combinedScoreBase = clamp(0.70 * marketScore + 0.30 * healthPct, 0.0, 100.0)
 overallRankRaw = combinedScoreBase >= 80 ? 4 : combinedScoreBase >= 60 ? 3 : combinedScoreBase >= 40 ? 2 : 1
@@ -516,29 +517,77 @@ overallRank = hardDefensive ? 1 : overallRankRaw
 overallRank := badCount >= 4 ? math.min(overallRank, 2) : overallRank
 overallRank := healthPct < 55 ? math.min(overallRank, 3) : overallRank
 overallStateShort = overallRank == 4 ? "SUPPORTIVE" : overallRank == 3 ? "SELECTIVE" : overallRank == 2 ? "MIXED" : "DEFENSIVE"
-overallLabelTxt = overallStateShort == "SUPPORTIVE" ? "SUPPORTIVE ✅" : overallStateShort == "SELECTIVE" ? "SELECTIVE ⚠️" : overallStateShort == "MIXED" ? "MIXED ⚠️" : "DEFENSIVE ❌"
+overallLabelTxt = overallStateShort
 overallSummaryTxt = showNumbers ? overallLabelTxt + " (M " + str.tostring(marketScore, "#.##") + " | H " + str.tostring(healthPct, "#.##") + " | C " + str.tostring(combinedScoreBase, "#.##") + ")" : overallLabelTxt
 
 issueVol = atrPct >= atrPctVolExtreme
 issueOvernight = overnightRisk
 issueChop = isChoppy or maCrossChoppy or near200
+issueNoDir = not haveSwings or ((not isTrendUp) and (not isTrendDown))
 issueMomentum = rsiConflict or macdFlipChoppy
 issueChaos = cleanNorm < 0.45
+issueExtended = isExtended
+issuePullbackControl = (isTrendUp and not bullRespects20) or (isTrendDown and not bearRespects20)
 
-topIssueTxt = issueVol ? "Volatility EXTREME" : issueOvernight ? "Overnight risk elevated" : issueChop ? "CHOP conditions" : issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : "No major issue"
-topIssueSeverity = issueVol or issueOvernight or issueChop ? 0 : issueMomentum or issueChaos ? 1 : 2
-secondaryIssueTxt = issueVol ? (issueOvernight ? "Overnight risk elevated" : issueChop ? "CHOP conditions" : issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : "None") : issueOvernight ? (issueChop ? "CHOP conditions" : issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : "None") : issueChop ? (issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : "None") : issueMomentum ? (issueChaos ? "Chaos high" : "None") : "None"
-secondaryIssueSeverity = secondaryIssueTxt == "None" ? 2 : secondaryIssueTxt == "Momentum conflict" or secondaryIssueTxt == "Chaos high" ? 1 : 0
+topIssueTxt = issueVol ? "Volatility EXTREME" : issueOvernight ? "Overnight risk elevated" : issueChop ? "CHOP conditions" : issueNoDir ? "Structure unclear / no trend" : issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : issueExtended ? "Price extended" : "No major issue"
+topIssueSeverity = issueVol or issueOvernight or issueChop or issueNoDir ? 0 : issueMomentum or issueChaos or issueExtended ? 1 : 2
+secondaryIssueTxt = topIssueTxt == "No major issue" ? "None" :
+     topIssueTxt != "Overnight risk elevated" and issueOvernight ? "Overnight risk elevated" :
+     topIssueTxt != "CHOP conditions" and issueChop ? "CHOP conditions" :
+     topIssueTxt != "Structure unclear / no trend" and issueNoDir ? "Structure unclear / no trend" :
+     topIssueTxt != "Momentum conflict" and issueMomentum ? "Momentum conflict" :
+     topIssueTxt != "Chaos high" and issueChaos ? "Chaos high" :
+     topIssueTxt != "Price extended" and issueExtended ? "Price extended" :
+     "None"
+secondaryIssueSeverity = secondaryIssueTxt == "None" ? 2 : (secondaryIssueTxt == "Momentum conflict" or secondaryIssueTxt == "Chaos high" or secondaryIssueTxt == "Price extended") ? 1 : 0
+
+primaryBlockerTxt = issueVol ? "Volatility EXTREME" : issueOvernight ? "Overnight risk elevated" : issueChop ? "CHOP conditions" : issueNoDir ? "Structure unclear / no trend" : "None"
+secondaryBlockerTxt = primaryBlockerTxt != "Overnight risk elevated" and issueOvernight ? "Overnight risk elevated" :
+     primaryBlockerTxt != "CHOP conditions" and issueChop ? "CHOP conditions" :
+     primaryBlockerTxt != "Structure unclear / no trend" and issueNoDir ? "Structure unclear / no trend" :
+     "None"
+blockersTxt = primaryBlockerTxt == "None" ? (softDefensive ? "No hard blocker (soft-stop active)" : "None") : (secondaryBlockerTxt == "None" ? primaryBlockerTxt : primaryBlockerTxt + " | " + secondaryBlockerTxt)
+blockersSeverity = primaryBlockerTxt == "None" ? (softDefensive ? 1 : 2) : 0
+
+warningPrimaryTxt = issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : issuePullbackControl ? "Pullbacks not controlled" : issueExtended ? "Price extended" : "None"
+warningSecondaryTxt = warningPrimaryTxt != "Chaos high" and issueChaos ? "Chaos high" :
+     warningPrimaryTxt != "Momentum conflict" and issueMomentum ? "Momentum conflict" :
+     warningPrimaryTxt != "Pullbacks not controlled" and issuePullbackControl ? "Pullbacks not controlled" :
+     warningPrimaryTxt != "Price extended" and issueExtended ? "Price extended" :
+     "None"
+warningsTxt = warningPrimaryTxt == "None" ? "None" : (warningSecondaryTxt == "None" ? warningPrimaryTxt : warningPrimaryTxt + " | " + warningSecondaryTxt)
+warningsSeverity = warningPrimaryTxt == "None" ? 2 : 1
+topBlockerSummaryTxt = primaryBlockerTxt == "None" ? (softDefensive ? "No hard blocker (soft-stop active)" : "None") : primaryBlockerTxt
+
+waitForTxt =
+     issueVol ? "Wait: volatility cools down" :
+     issueOvernight ? "Wait: gaps and wide ranges normalize" :
+     issueChop ? (near200 ? "Wait: clean move away from 200 MA zone" : "Wait: cleaner trend and follow-through") :
+     issueNoDir ? "Wait: structure and trend become clear" :
+     issueMomentum ? "Wait: RSI and MACD align" :
+     issueChaos ? "Wait: cleaner candles and less whipsaw" :
+     issuePullbackControl ? "Wait: pullbacks hold 20 EMA cleanly" :
+     issueExtended ? "Wait: pullback toward 20 EMA" :
+     softDefensive ? "Wait: checklist health improves" :
+     "No unlock condition needed"
+waitForSeverity = primaryBlockerTxt == "None" ? (softDefensive ? 1 : 2) : 1
+
+proceedRank = hardDefensive ? 0 : goNoGo ? (softDefensive ? 1 : 2) : 0
+proceedTxt = proceedRank == 2 ? "YES" : proceedRank == 1 ? "CAUTIOUS" : "NO"
+riskPlanTxt = hardDefensive or not goNoGo ? "NO TRADE" : (softDefensive or riskModeEff == "REDUCED" ? "HALF" : "FULL")
+riskPlanSeverity = riskPlanTxt == "FULL" ? 2 : riskPlanTxt == "HALF" ? 1 : 0
+marketQualityTxt = tradeableTxt
+marketQualitySeverity = hardDefensive ? 0 : goNoGo ? (softDefensive ? 1 : 2) : 0
 
 confidenceRank = badCount >= 3 ? 0 : badCount <= 2 ? 1 : 1
 confidenceRank := badCount == 0 and warnCount <= 2 ? 2 : confidenceRank
-confidenceTxt = confidenceRank == 2 ? "HIGH ✅" : confidenceRank == 1 ? "MED ⚠️" : "LOW ❌"
+confidenceTxt = confidenceRank == 2 ? "HIGH" : confidenceRank == 1 ? "MED" : "LOW"
 
-nextStepTxt = hardDefensive ? "Stop -> Hard defensive" : not goNoGo ? "Stop -> Market not supportive" : softDefensive ? "Proceed cautious -> reduced/selective" : "Proceed -> Stock selection"
+nextStepTxt = hardDefensive ? "Stop: hard defensive" : not goNoGo ? "Stop: market not supportive" : softDefensive ? "Proceed with reduced/selective risk" : "Proceed to stock selection"
 
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 // Table
-//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 pos =
      tablePos == "Top Left" ? position.top_left :
      tablePos == "Bottom Left" ? position.bottom_left :
@@ -546,9 +595,9 @@ pos =
      position.top_right
 
 // Table instance with runtime-configurable frame/border visibility.
-rowsSupportedSummaryOnly = 13
-rowsSupportedSummary = summaryOnly ? rowsSupportedSummaryOnly : 25
-rowsSupportedScoreBreakdown = summaryOnly ? 0 : 7
+rowsSupportedSummaryOnly = 12
+rowsSupportedSummary = summaryOnly ? rowsSupportedSummaryOnly : 24
+rowsSupportedScoreBreakdown = summaryOnly ? 0 : 2
 rowsSupportedDetail = summaryOnly ? 0 : (not compact ? 16 : 0)
 rowsSupported = rowsSupportedSummary + rowsSupportedScoreBreakdown + rowsSupportedDetail
 rowsUnsupported = showWhenUnsupported ? 5 : 0
@@ -572,14 +621,17 @@ goodBgColorNow = color.new(color.green, statusAlphaNow)
 warnBgColorNow = color.new(color.orange, statusAlphaNow)
 badBgColorNow = color.new(color.red, statusAlphaNow)
 decisionBgColorNow = goNoGo ? goodBgColorNow : badBgColorNow
+proceedBgColorNow = proceedRank == 2 ? goodBgColorNow : proceedRank == 1 ? warnBgColorNow : badBgColorNow
 hardStopBgColorNow = hardDefensive ? badBgColorNow : goodBgColorNow
 softStopBgColorNow = softDefensive ? warnBgColorNow : goodBgColorNow
 overallBgColorNow = overallRank == 4 ? goodBgColorNow : overallRank == 3 ? warnBgColorNow : overallRank == 2 ? warnBgColorNow : badBgColorNow
-checklistBgColorNow = healthPct >= 75 ? goodBgColorNow : healthPct >= 55 ? warnBgColorNow : badBgColorNow
-topIssueBgColorNow = topIssueSeverity == 2 ? goodBgColorNow : topIssueSeverity == 1 ? warnBgColorNow : badBgColorNow
-secondaryIssueBgColorNow = secondaryIssueSeverity == 2 ? goodBgColorNow : secondaryIssueSeverity == 1 ? warnBgColorNow : badBgColorNow
 riskModeBgColorNow = riskModeEff == "NORMAL" ? goodBgColorNow : riskModeEff == "REDUCED" ? warnBgColorNow : badBgColorNow
-aSetupBgColorNow = isChoppy ? badBgColorNow : goodBgColorNow
+checklistBgColorNow = healthPct >= 75 ? goodBgColorNow : healthPct >= 55 ? warnBgColorNow : badBgColorNow
+blockersBgColorNow = blockersSeverity == 2 ? goodBgColorNow : blockersSeverity == 1 ? warnBgColorNow : badBgColorNow
+warningsBgColorNow = warningsSeverity == 2 ? goodBgColorNow : warningsSeverity == 1 ? warnBgColorNow : badBgColorNow
+waitForBgColorNow = waitForSeverity == 2 ? goodBgColorNow : waitForSeverity == 1 ? warnBgColorNow : badBgColorNow
+riskPlanBgColorNow = riskPlanSeverity == 2 ? goodBgColorNow : riskPlanSeverity == 1 ? warnBgColorNow : badBgColorNow
+marketQualityBgColorNow = marketQualitySeverity == 2 ? goodBgColorNow : marketQualitySeverity == 1 ? warnBgColorNow : badBgColorNow
 confidenceBgColorNow = confidenceRank == 2 ? goodBgColorNow : confidenceRank == 1 ? warnBgColorNow : badBgColorNow
 nextStepBgColorNow = hardDefensive ? badBgColorNow : softDefensive ? warnBgColorNow : goNoGo ? goodBgColorNow : badBgColorNow
 volatilityBgColorNow = atrPct >= atrPctVolExtreme ? badBgColorNow : isVolatile ? warnBgColorNow : goodBgColorNow
@@ -635,23 +687,21 @@ if barstate.islast
             r += 1
             setRowStatus(r, "Decision", decisionSummaryTxt, decisionBgColorNow)
             r += 1
-            setRowStatus(r, "Hard Stop", hardStopSummaryTxt, hardStopBgColorNow)
-            r += 1
-            setRowStatus(r, "Soft Stop", softStopSummaryTxt, softStopBgColorNow)
-            r += 1
             setRowStatus(r, "Overall", overallSummaryTxt, overallBgColorNow)
-            r += 1
-            setRowStatus(r, "Checklist", checklistDisplayTxt, checklistBgColorNow)
-            r += 1
-            setRowStatus(r, "Top Issue", topIssueTxt, topIssueBgColorNow)
-            r += 1
-            setRowStatus(r, "Secondary Issue", secondaryIssueTxt, secondaryIssueBgColorNow)
             r += 1
             setRowStatus(r, "Risk Mode", riskModeSummaryTxt, riskModeBgColorNow)
             r += 1
-            setRowStatus(r, "A-Setup", aSetupSummaryTxt, aSetupBgColorNow)
+            setRowStatus(r, "Proceed", proceedTxt, proceedBgColorNow)
             r += 1
-            setRowStatus(r, "Confidence", confidenceTxt, confidenceBgColorNow)
+            setRowStatus(r, "Top Blocker", topBlockerSummaryTxt, blockersBgColorNow)
+            r += 1
+            setRowStatus(r, "Warnings", warningsTxt, warningsBgColorNow)
+            r += 1
+            setRowStatus(r, "Wait For", waitForTxt, waitForBgColorNow)
+            r += 1
+            setRowStatus(r, "Risk Plan", riskPlanTxt, riskPlanBgColorNow)
+            r += 1
+            setRowStatus(r, "Trade Quality", marketQualityTxt, marketQualityBgColorNow)
             r += 1
             setRowStatus(r, "Next Step", nextStepTxt, nextStepBgColorNow)
             r += 1
@@ -720,17 +770,7 @@ if barstate.islast
 
                 setHeader(r, "--- SCORE ---")
                 r += 1
-                setRow(r, "Subscores", subscoreDisplayTxt)
-                r += 1
-                setRow(r, "Score A Structure", scoreADisplayTxt)
-                r += 1
-                setRow(r, "Score B Momentum", scoreBDisplayTxt)
-                r += 1
-                setRow(r, "Score C Volume", scoreCDisplayTxt)
-                r += 1
-                setRow(r, "Score D Vol/ON", scoreDDisplayTxt)
-                r += 1
-                setRow(r, "Score E Behavior", scoreEDisplayTxt)
+                setRow(r, "Score Total", scoreTotalDisplayTxt)
                 r += 1
 // Optional: no plots (document says prefer text output)
 // If you ever want to visually debug: uncomment these

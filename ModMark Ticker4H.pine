@@ -1,0 +1,443 @@
+﻿//@version=5
+indicator("ModMark — Stock 4H (Structure & Planning) — Table", overlay=true, max_labels_count=50)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Inputs
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+groupTable = "Table"
+showTable     = input.bool(true, "Show table", group=groupTable)
+visibilityPct = input.int(85, "Visibility (0-100)", minval=0, maxval=100, group=groupTable)
+tablePos      = input.string("Top Right", "Position", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group=groupTable)
+tableMode     = input.string("Summary", "Mode", options=["Summary","Compact","Full"], group=groupTable)
+showNumbers   = input.bool(false, "Show numbers (debug)", group=groupTable)
+
+groupDetect = "Detection"
+pivotLR      = input.int(3, "Swing pivot L/R", minval=1, maxval=20, group=groupDetect)
+majorPivotLR = input.int(10, "Major pivot L/R", minval=3, maxval=50, group=groupDetect)
+maSlopeLen   = input.int(10, "MA slope lookback", minval=2, maxval=100, group=groupDetect)
+flatSlopePct = input.float(0.10, "MA flat slope threshold (%)", minval=0.0, step=0.01, group=groupDetect)
+
+groupVol = "Volatility / ATR"
+atrLen        = input.int(14, "ATR length", minval=2, group=groupVol)
+atrPctHigh    = input.float(2.5, "ATR% high", minval=0.1, step=0.1, group=groupVol)
+atrPctExtreme = input.float(4.0, "ATR% extreme", minval=0.1, step=0.1, group=groupVol)
+
+groupLoc = "Location / Extended"
+nearLevelAtr = input.float(1.0, "Near structure if within ATR *", minval=0.1, step=0.1, group=groupLoc)
+extATR_20     = input.float(2.0, "Extended if |price-20EMA| ≥ ATR *", minval=0.5, step=0.1, group=groupLoc)
+extATR_50     = input.float(2.5, "Extended if |price-50SMA| ≥ ATR *", minval=0.5, step=0.1, group=groupLoc)
+
+groupMom = "RSI / MACD"
+rsiLen     = input.int(14, "RSI length", minval=2, group=groupMom)
+rsiPivotLR = input.int(3, "RSI pivot L/R", minval=1, maxval=20, group=groupMom)
+macdFast   = input.int(12, "MACD fast", minval=1, group=groupMom)
+macdSlow   = input.int(26, "MACD slow", minval=2, group=groupMom)
+macdSig    = input.int(9,  "MACD signal", minval=1, group=groupMom)
+macdFlipLB = input.int(60, "MACD flip lookback", minval=10, maxval=300, group=groupMom)
+macdFlipWarn = input.int(10, "MACD flips warn if ≥", minval=1, maxval=60, group=groupMom)
+
+groupVolm = "Volume"
+volMaLen     = input.int(20, "Volume MA length", minval=5, group=groupVolm)
+breakVolMult = input.float(1.2, "Breakout volume confirms if ≥ volMA *", minval=0.5, step=0.1, group=groupVolm)
+
+groupRR = "Risk / Reward"
+maxStopAtr   = input.float(2.0, "Risk definable if stop distance ≤ ATR *", minval=0.5, step=0.1, group=groupRR)
+minRR_Accept = input.float(2.0, "RR acceptable ≥", minval=1.0, step=0.1, group=groupRR)
+minRR_Strong = input.float(3.0, "RR strong ≥", minval=1.0, step=0.1, group=groupRR)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Context gating: only 4H and not SPY/QQQ
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+tkr = syminfo.ticker
+isSpy = (tkr == "SPY") or str.contains(syminfo.tickerid, ":SPY")
+isQqq = (tkr == "QQQ") or str.contains(syminfo.tickerid, ":QQQ")
+isSpyQqq = isSpy or isQqq
+
+// 4H detection: prefer exact 240 minutes; TradingView shows "240" for 4h on many markets.
+is4H = timeframe.isminutes and timeframe.multiplier == 240
+
+ctxEligible = showTable and is4H and not isSpyQqq
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Helpers
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+pos =
+     tablePos == "Top Left" ? position.top_left :
+     tablePos == "Bottom Left" ? position.bottom_left :
+     tablePos == "Bottom Right" ? position.bottom_right :
+     position.top_right
+
+bgAlpha = 100 - visibilityPct
+bgBase  = color.new(color.black, bgAlpha)
+headBg  = color.new(color.gray, math.min(90, bgAlpha + 10))
+goodBg  = color.new(color.lime,  math.min(85, bgAlpha + 5))
+warnBg  = color.new(color.orange,math.min(85, bgAlpha + 5))
+badBg   = color.new(color.red,   math.min(80, bgAlpha + 0))
+txtCol  = color.white
+
+slopePct(src, len) => nz(100.0 * (src - src[len]) / src[len])
+isFlat(v) => math.abs(v) < flatSlopePct
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Backend calculations (4H)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ema20  = ta.ema(close, 20)
+sma50  = ta.sma(close, 50)
+sma200 = ta.sma(close, 200)
+
+ema20Slope = slopePct(ema20, maSlopeLen)
+sma50Slope = slopePct(sma50, maSlopeLen)
+sma200Slope= slopePct(sma200, maSlopeLen)
+
+ema20Flat = isFlat(ema20Slope)
+sma50Flat = isFlat(sma50Slope)
+
+atr = ta.atr(atrLen)
+atrPct = 100.0 * atr / close
+
+// Swings structure
+ph = ta.pivothigh(high, pivotLR, pivotLR)
+pl = ta.pivotlow(low,  pivotLR, pivotLR)
+
+var float lastPH = na
+var float prevPH = na
+var float lastPL = na
+var float prevPL = na
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
+
+haveSwings = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL)
+
+hh = haveSwings and (lastPH > prevPH)
+lh = haveSwings and (lastPH < prevPH)
+hl = haveSwings and (lastPL > prevPL)
+ll = haveSwings and (lastPL < prevPL)
+
+structureState =
+     not haveSwings ? "N/A" :
+     (hh and hl) ? "BULL (HH+HL)" :
+     (lh and ll) ? "BEAR (LH+LL)" :
+     "CHOP (overlap)"
+
+structureClean = haveSwings and (structureState != "CHOP (overlap)")
+directionClear = haveSwings and (structureState == "BULL (HH+HL)" or structureState == "BEAR (LH+LL)")
+
+// Pullback integrity: thesis invalidation
+structIntact =
+     not haveSwings ? false :
+     (structureState == "BULL (HH+HL)") ? (close > lastPL) :
+     (structureState == "BEAR (LH+LL)") ? (close < lastPH) :
+     false
+
+pullbackTxt =
+     not haveSwings ? "Pullback: N/A" :
+     structIntact ? "Pullback: controlled (structure intact)" :
+     "Pullback: breaks structure (quality down)"
+
+// Location: near structure or “middle of nowhere”
+mph = ta.pivothigh(high, majorPivotLR, majorPivotLR)
+mpl = ta.pivotlow(low,  majorPivotLR, majorPivotLR)
+var float lastMajorH = na
+var float lastMajorL = na
+if not na(mph)
+    lastMajorH := mph
+if not na(mpl)
+    lastMajorL := mpl
+
+distToLevelATR(_lvl) => (atr > 0 and not na(_lvl)) ? math.abs(close - _lvl) / atr : na
+d1 = distToLevelATR(lastPH)
+d2 = distToLevelATR(lastPL)
+d3 = distToLevelATR(lastMajorH)
+d4 = distToLevelATR(lastMajorL)
+nearest = math.min(math.min(nz(d1, 1e9), nz(d2, 1e9)), math.min(nz(d3, 1e9), nz(d4, 1e9)))
+
+nearStructure = (atr > 0) and (nearest <= nearLevelAtr)
+locationTxt =
+     not haveSwings ? "Location: N/A" :
+     nearStructure ? "Location: at structure/level" :
+     "Location: middle of nowhere (wait)"
+
+// Extended
+dist20ATR = (atr > 0) ? math.abs(close - ema20) / atr : na
+dist50ATR = (atr > 0) ? math.abs(close - sma50) / atr : na
+extended20 = not na(dist20ATR) and dist20ATR >= extATR_20
+extended50 = not na(dist50ATR) and dist50ATR >= extATR_50
+extendedTxt =
+     (extended20 or extended50) ? (showNumbers ? "Extended (ATR multiple high)" : "Extended (chasing risk)") :
+     "Not extended (ok)"
+
+// MA context
+maTxt =
+     (ema20Flat and sma50Flat) ? "MAs flat (chop risk)" :
+     (ema20Slope > 0 and sma50Slope > 0) ? "MAs sloped up" :
+     (ema20Slope < 0 and sma50Slope < 0) ? "MAs sloped down" :
+     "MAs mixed (transition)"
+
+bias200Txt =
+     na(sma200) ? "200MA: N/A" :
+     close > sma200 ? "200MA: above (long bias if aligned)" :
+     close < sma200 ? "200MA: below (short bias if aligned)" :
+     "200MA: at (caution)"
+
+// RSI (4H): momentum confirmation
+rsi = ta.rsi(close, rsiLen)
+
+// RSI pivots for HL/LH
+rsiPH = ta.pivothigh(rsi, rsiPivotLR, rsiPivotLR)
+rsiPL = ta.pivotlow(rsi,  rsiPivotLR, rsiPivotLR)
+var float lastRsiPH = na
+var float prevRsiPH = na
+var float lastRsiPL = na
+var float prevRsiPL = na
+if not na(rsiPH)
+    prevRsiPH := lastRsiPH
+    lastRsiPH := rsiPH
+if not na(rsiPL)
+    prevRsiPL := lastRsiPL
+    lastRsiPL := rsiPL
+haveRsiSwings = not na(lastRsiPH) and not na(prevRsiPH) and not na(lastRsiPL) and not na(prevRsiPL)
+
+rsiRegimeTxt =
+     rsi >= 50 ? "RSI: bullish regime (≥50)" :
+     rsi <= 40 ? "RSI: weak/bear (≤40)" :
+     "RSI: mixed (40–50)"
+
+rsiSwingsTxt =
+     not haveRsiSwings ? "RSI swings: N/A" :
+     (lastRsiPL > prevRsiPL) ? "RSI swings: HL (ok)" :
+     "RSI swings: not HL (caution)"
+
+// MACD (4H): momentum support + flipiness
+[macdLine, macdSigLine, macdHist] = ta.macd(close, macdFast, macdSlow, macdSig)
+macdTxt =
+     macdLine > macdSigLine and macdHist > 0 ? "MACD: bullish momentum" :
+     macdLine < macdSigLine and macdHist < 0 ? "MACD: bearish momentum" :
+     "MACD: mixed/flat"
+
+macdFlip = ta.cross(macdLine, macdSigLine) ? 1 : 0
+macdFlipCount = ta.sum(macdFlip, macdFlipLB)
+macdFlipTxt =
+     macdFlipCount >= macdFlipWarn ? "MACD flips often (chop risk)" :
+     "MACD flips ok"
+
+// Volume (4H): impulse up on rising volume; pullback on declining volume; breakout participation
+volMA = ta.sma(volume, volMaLen)
+priceUp = close > close[1]
+volUp   = volume > volMA
+
+volumeTxt =
+     priceUp and volUp ? "Volume: impulse confirmed" :
+     priceUp and not volUp ? "Volume: weak participation (caution)" :
+     (not priceUp) and (volume < volMA) ? "Volume: pullback drying up (healthy)" :
+     "Volume: mixed"
+
+// Breakout volume (vs last swing)
+breakAbove = haveSwings and close > lastPH
+breakBelow = haveSwings and close < lastPL
+breakVolTxt =
+     not haveSwings ? "Breakout: N/A" :
+     breakAbove ? (volume >= volMA * breakVolMult ? "Breakout UP + volume confirms" : "Breakout UP but volume weak") :
+     breakBelow ? (volume >= volMA * breakVolMult ? "Breakdown + volume confirms" : "Breakdown but volume weak") :
+     "Breakout: none"
+
+// Volatility (4H)
+volTxt =
+     atrPct >= atrPctExtreme ? (showNumbers ? "Volatility: EXTREME (ATR% high)" : "Volatility: EXTREME (reduce/avoid)") :
+     atrPct >= atrPctHigh ? "Volatility: HIGH (reduce size)" :
+     "Volatility: controlled"
+
+// Risk definition: invalidation at last swing
+invalLong  = lastPL
+invalShort = lastPH
+riskLong   = (atr > 0 and not na(invalLong))  ? (close - invalLong) : na
+riskShort  = (atr > 0 and not na(invalShort)) ? (invalShort - close) : na
+riskDefLong  = not na(riskLong)  and riskLong  > 0 and (riskLong/atr <= maxStopAtr)
+riskDefShort = not na(riskShort) and riskShort > 0 and (riskShort/atr <= maxStopAtr)
+
+riskDefTxt =
+     not haveSwings ? "Risk: N/A" :
+     (structureState == "BULL (HH+HL)") ? (riskDefLong ? "Risk: definable (clear invalidation)" : "Risk: not clean (stop too wide)") :
+     (structureState == "BEAR (LH+LL)") ? (riskDefShort ? "Risk: definable (clear invalidation)" : "Risk: not clean (stop too wide)") :
+     "Risk: unclear (no structure)"
+
+// Reward justification: nearest logical target (major swing)
+targetLong  = nz(lastMajorH, lastPH)
+targetShort = nz(lastMajorL, lastPL)
+rewardLong  = (not na(targetLong))  ? (targetLong - close) : na
+rewardShort = (not na(targetShort)) ? (close - targetShort) : na
+rrLong  = (not na(riskLong)  and riskLong  > 0 and not na(rewardLong))  ? (rewardLong / riskLong) : na
+rrShort = (not na(riskShort) and riskShort > 0 and not na(rewardShort)) ? (rewardShort / riskShort) : na
+
+rrTxt =
+     not haveSwings ? "Reward: N/A" :
+     (structureState == "BULL (HH+HL)") ?
+         (na(rrLong) ? "Reward: N/A" : rrLong >= minRR_Strong ? "Reward: strong (3:1+)" : rrLong >= minRR_Accept ? "Reward: acceptable (2:1+)" : "Reward: weak (<2:1)") :
+     (structureState == "BEAR (LH+LL)") ?
+         (na(rrShort) ? "Reward: N/A" : rrShort >= minRR_Strong ? "Reward: strong (3:1+)" : rrShort >= minRR_Accept ? "Reward: acceptable (2:1+)" : "Reward: weak (<2:1)") :
+     "Reward: unclear (no direction)"
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Decision UI (GO/NO-GO + blocker + wait-for)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+hardStop = (not directionClear) or (not structIntact) or (atrPct >= atrPctExtreme)
+softStop = (not nearStructure) or (extended20 or extended50) or (not (riskDefLong or riskDefShort))
+
+tradeQuality =
+     hardStop ? "DO NOTHING (no drop lower)" :
+     softStop ? "SELECTIVE (reduce size / wait better location)" :
+     "TRADEABLE (plan ok on 4H)"
+
+goNoGo = not hardStop
+
+// Top blocker
+topIssueTxt =
+     (atrPct >= atrPctExtreme) ? "Blocker: volatility extreme" :
+     (not directionClear) ? "Blocker: structure unclear (chop)" :
+     (not structIntact) ? "Blocker: pullback breaks structure" :
+     (not nearStructure) ? "Blocker: middle of nowhere" :
+     (extended20 or extended50) ? "Blocker: extended (chasing)" :
+     (not (riskDefLong or riskDefShort)) ? "Blocker: no clean invalidation" :
+     ((structureState == "BULL (HH+HL)" and not (na(rrLong)) and rrLong < minRR_Accept) or (structureState == "BEAR (LH+LL)" and not (na(rrShort)) and rrShort < minRR_Accept)) ? "Blocker: reward < 2:1" :
+     "No major blocker"
+
+// Wait-for / unlock condition
+waitForTxt =
+     (atrPct >= atrPctExtreme) ? "Wait: volatility cool-down (ATR normalizes)" :
+     (not directionClear) ? "Wait: clean HH/HL or LH/LL (exit overlap)" :
+     (not structIntact) ? "Wait: structure rebuild (new HL/LH forms)" :
+     (not nearStructure) ? "Wait: price returns to level / MA (location)" :
+     (extended20 or extended50) ? "Wait: pullback / base near 20/50" :
+     (not (riskDefLong or riskDefShort)) ? "Wait: clear swing invalidation prints" :
+     "Wait: no condition"
+
+// Risk plan
+riskPlanTxt =
+     hardStop ? "Risk Plan: NO TRADE ❌" :
+     softStop ? "Risk Plan: HALF / REDUCED ⚠️" :
+     "Risk Plan: NORMAL ✅"
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Table rendering (with border)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+isSummary = tableMode == "Summary"
+isCompact = tableMode == "Compact"
+isFull    = tableMode == "Full"
+
+rowsSummary = 12
+rowsCompact = 22
+rowsFull    = 32
+rowsTarget = isSummary ? rowsSummary : isCompact ? rowsCompact : rowsFull
+
+var table t = na
+var int lastRows = na
+
+newTable() =>
+    table.new(pos, 2, rowsTarget, border_width=1, frame_width=1)
+
+setHeader(_r, _txt) =>
+    table.cell(t, 0, _r, _txt, bgcolor=headBg, text_color=txtCol, text_halign=text.align_left)
+    table.cell(t, 1, _r, "", bgcolor=headBg)
+    table.merge_cells(t, 0, _r, 1, _r)
+
+setRow(_r, _k, _v, _bg) =>
+    table.cell(t, 0, _r, _k, bgcolor=bgBase, text_color=txtCol, text_halign=text.align_left)
+    table.cell(t, 1, _r, _v, bgcolor=_bg, text_color=txtCol, text_halign=text.align_left)
+
+if barstate.islast
+    if not ctxEligible
+        if not na(t)
+            table.delete(t)
+            t := na
+            lastRows := na
+    else
+        if na(t) or (lastRows != rowsTarget)
+            if not na(t)
+                table.delete(t)
+            t := newTable()
+            lastRows := rowsTarget
+
+        // SUMMARY first (decision)
+        r = 0
+        setHeader(r, "— STOCK 4H (Structure & Planning) —")
+        r += 1
+
+        setRow(r, "Ticker / TF", tkr + " | " + timeframe.period, bgBase)
+        r += 1
+
+        setRow(r, "Decision", goNoGo ? "GO ✅" : "NO-GO ❌", goNoGo ? goodBg : badBg)
+        r += 1
+
+        setRow(r, "Trade Quality", tradeQuality, hardStop ? badBg : softStop ? warnBg : goodBg)
+        r += 1
+
+        setRow(r, "Top Issue", topIssueTxt, (topIssueTxt == "No major blocker") ? goodBg : warnBg)
+        r += 1
+
+        setRow(r, "Wait For", waitForTxt, (waitForTxt == "Wait: no condition") ? goodBg : warnBg)
+        r += 1
+
+        setRow(r, "Risk Plan", riskPlanTxt, hardStop ? badBg : softStop ? warnBg : goodBg)
+        r += 1
+
+        setRow(r, "Volatility", volTxt, (atrPct >= atrPctExtreme) ? badBg : (atrPct >= atrPctHigh) ? warnBg : goodBg)
+        r += 1
+
+        // Required planning rows from blueprint
+        setRow(r, "Location", locationTxt, nearStructure ? goodBg : warnBg)
+        r += 1
+        setRow(r, "Risk Definition", riskDefTxt, (riskDefLong or riskDefShort) ? goodBg : warnBg)
+        r += 1
+        setRow(r, "Reward / RR", rrTxt, (rrTxt == "Reward: strong (3:1+)" or rrTxt == "Reward: acceptable (2:1+)") ? goodBg : warnBg)
+        r += 1
+
+        if not isSummary
+            // COMPACT DETAILS
+            setHeader(r, "— STRUCTURE / LEVELS —")
+            r += 1
+            setRow(r, "Structure", structureState, structureClean ? goodBg : badBg)
+            r += 1
+            setRow(r, "Pullback quality", pullbackTxt, structIntact ? goodBg : badBg)
+            r += 1
+            setRow(r, "Extended", extendedTxt, (extended20 or extended50) ? warnBg : goodBg)
+            r += 1
+            setRow(r, "MAs", maTxt, (ema20Flat and sma50Flat) ? warnBg : goodBg)
+            r += 1
+            setRow(r, "200MA", bias200Txt, bgBase)
+            r += 1
+
+            setHeader(r, "— MOMENTUM —")
+            r += 1
+            setRow(r, "RSI", rsiRegimeTxt, (rsi >= 50 or rsi <= 40) ? goodBg : warnBg)
+            r += 1
+            setRow(r, "RSI swings", rsiSwingsTxt, (rsiSwingsTxt == "RSI swings: HL (ok)") ? goodBg : warnBg)
+            r += 1
+            setRow(r, "MACD", macdTxt, (macdTxt == "MACD: mixed/flat") ? warnBg : goodBg)
+            r += 1
+            setRow(r, "MACD flips", macdFlipTxt, (macdFlipCount >= macdFlipWarn) ? warnBg : goodBg)
+            r += 1
+
+            setHeader(r, "— VOLUME / BREAKOUT —")
+            r += 1
+            setRow(r, "Volume", volumeTxt, (volumeTxt == "Volume: weak participation (caution)") ? warnBg : goodBg)
+            r += 1
+            setRow(r, "Breakout", breakVolTxt, (str.contains(breakVolTxt, "volume weak")) ? warnBg : goodBg)
+            r += 1
+
+            if isFull
+                // FULL EXTRA DETAILS
+                setHeader(r, "— RAW (debug-ish) —")
+                r += 1
+                if showNumbers
+                    setRow(r, "ATR%", "ATR% = " + str.tostring(atrPct, "#.##"), bgBase)
+                    r += 1
+                    setRow(r, "MACD flips#", "flips = " + str.tostring(macdFlipCount), bgBase)
+                    r += 1
+                    setRow(r, "Dist to level", "nearest ATR = " + str.tostring(nearest, "#.##"), bgBase)
+                    r += 1
+                else
+                    setRow(r, "Debug", "Enable 'Show numbers' for raw stats", bgBase)
+                    r += 1

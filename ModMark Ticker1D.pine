@@ -6,6 +6,7 @@ indicator("ModMark Stock 1D", overlay=true, max_labels_count=50)
 //â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 showTable   = input.bool(true, "Show table (visibility toggle)", group="Table")
 showText    = input.bool(true, "Show table text", group="Table")
+showNumbers = input.bool(false, "Show numbers (debug)", group="Table")
 visibilityPct = input.int(100, "Visibility 0-100", minval=0, maxval=100, group="Table")
 fontSizeOpt = input.string("Tiny", "Font size", options=["Tiny","Small","Normal"], group="Table")
 tablePos    = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group="Table")
@@ -331,37 +332,133 @@ qualityTxt = doNothing ? "DO NOTHING (cash valid)" : (not structIntact) ? "C/D (
 riskDefOk = (hh and hl and riskDefLong) or (lh and ll and riskDefShort)
 rrWeak = (hh and hl and (na(rrLong) or rrLong < minRR_Accept)) or (lh and ll and (na(rrShort) or rrShort < minRR_Accept))
 
-goNoGo = not doNothing and structIntact and not badMomentum and riskDefOk
-decisionTxt = goNoGo ? "GO proceed" : "NO-GO stop/cash"
+hardNoDir = noDir
+hardStruct = haveSwings and not structIntact
+hardVol = volHardStop
+hardOvernight = badOvernight
+hardStopActive = hardNoDir or hardStruct or hardVol or hardOvernight
 
-topIssueTxt =
-     noDir ? "Direction/structure unclear" :
-     (not structIntact) ? "Structure broken" :
-     volHardStop ? "Volatility hard-stop" :
-     badOvernight ? "Overnight risk elevated" :
-     (badLocation and badExtended) ? "Bad location + extended" :
-     badMomentum ? "Momentum conflict/chop" :
-     (not riskDefOk) ? "Risk not clearly definable" :
-     rrWeak ? "Reward / RR too weak" :
-     "No major blocker"
+warnChop = (structureTxt == "Overlapping / unclear (chop)") or (ema20Flat and sma50Flat) or (macdFlipCount >= macdFlipWarn)
+warnLocation = badLocation
+warnExtended = badExtended
+warnMomentum = badMomentum
+warnRiskDef = not riskDefOk
+warnRR = rrWeak
+warnUnstable = not na(atrJump) and atrJump >= atrJumpMult
+warnWeakVolume = priceUp and not volUp
+warnPullback = (hh and hl and not pullbackVolHealthy) or (lh and ll and not pullbackVolHealthy)
+warnChaos = (sloppyCount >= sloppyWarnCount or outsideCount >= math.ceil(sloppyWarnCount / 2))
 
-topIssueSeverity =
-     (noDir or (not structIntact) or volHardStop or badOvernight) ? 0 :
-     ((badLocation and badExtended) or badMomentum or (not riskDefOk) or rrWeak) ? 1 :
-     2
+overallPenalty =
+     (hardNoDir ? 35.0 : 0.0) +
+     (hardStruct ? 35.0 : 0.0) +
+     (hardVol ? 30.0 : 0.0) +
+     (hardOvernight ? 25.0 : 0.0) +
+     (warnLocation ? 12.0 : 0.0) +
+     (warnExtended ? 12.0 : 0.0) +
+     (warnMomentum ? 15.0 : 0.0) +
+     (warnRiskDef ? 20.0 : 0.0) +
+     (warnRR ? 15.0 : 0.0) +
+     (warnUnstable ? 10.0 : 0.0) +
+     (warnWeakVolume ? 8.0 : 0.0) +
+     (warnPullback ? 10.0 : 0.0) +
+     (warnChaos ? 10.0 : 0.0)
+overallScore = math.max(0.0, math.min(100.0, 100.0 - overallPenalty))
+
+overallRank = hardStopActive ? 1 : overallScore >= 80 ? 4 : overallScore >= 65 ? 3 : overallScore >= 45 ? 2 : 1
+overallTxt = overallRank == 4 ? "A TRADEABLE" : overallRank == 3 ? "B SELECTIVE" : overallRank == 2 ? "C DEFENSIVE" : "D NO-TRADE"
+overallDisplayTxt = showNumbers ? overallTxt + " (" + str.tostring(overallScore, "#.##") + "/100)" : overallTxt
+
+riskModeTxt = overallRank == 4 ? "NORMAL" : overallRank == 3 ? "REDUCED" : "DEFENSIVE"
+goNoGo = not hardStopActive and overallRank >= 3
+decisionTxt = goNoGo ? "GO" : "NO-GO"
+proceedTxt = not goNoGo ? "NO (wait for unlock)" : riskModeTxt == "NORMAL" ? "YES" : "YES (reduced/selective)"
+riskPlanTxt = riskModeTxt == "NORMAL" ? "FULL" : riskModeTxt == "REDUCED" ? "HALF" : "NO TRADE"
+
+topBlockerTxt =
+     hardVol ? "Volatility EXTREME" :
+     hardOvernight ? "Overnight risk elevated" :
+     warnChop ? "CHOP conditions" :
+     hardNoDir ? "Structure unclear / no trend" :
+     warnMomentum ? "Momentum conflict" :
+     (warnChaos or warnPullback) ? "Chaos high / pullbacks not controlled" :
+     warnExtended ? "Price extended" :
+     "None"
+
+secondaryBlockerTxt =
+     topBlockerTxt != "Overnight risk elevated" and hardOvernight ? "Overnight risk elevated" :
+     topBlockerTxt != "CHOP conditions" and warnChop ? "CHOP conditions" :
+     topBlockerTxt != "Structure unclear / no trend" and hardNoDir ? "Structure unclear / no trend" :
+     topBlockerTxt != "Momentum conflict" and warnMomentum ? "Momentum conflict" :
+     topBlockerTxt != "Chaos high / pullbacks not controlled" and (warnChaos or warnPullback) ? "Chaos high / pullbacks not controlled" :
+     topBlockerTxt != "Price extended" and warnExtended ? "Price extended" :
+     "None"
+
+blockersTxt = topBlockerTxt == "None" ? "None" : secondaryBlockerTxt == "None" ? topBlockerTxt : topBlockerTxt + " | " + secondaryBlockerTxt
+
+warning1Txt =
+     warnMomentum ? "Momentum conflict" :
+     (warnChaos or warnPullback) ? "Pullback/chaos caution" :
+     warnExtended ? "Price extended" :
+     warnLocation ? "Far from structure" :
+     warnRiskDef ? "Risk definition weak" :
+     warnRR ? "Reward/RR weak" :
+     warnUnstable ? "ATR unstable" :
+     warnWeakVolume ? "Weak volume confirmation" :
+     "None"
+
+warning2Txt =
+     warning1Txt != "Pullback/chaos caution" and (warnChaos or warnPullback) ? "Pullback/chaos caution" :
+     warning1Txt != "Momentum conflict" and warnMomentum ? "Momentum conflict" :
+     warning1Txt != "Price extended" and warnExtended ? "Price extended" :
+     warning1Txt != "Far from structure" and warnLocation ? "Far from structure" :
+     warning1Txt != "Risk definition weak" and warnRiskDef ? "Risk definition weak" :
+     warning1Txt != "Reward/RR weak" and warnRR ? "Reward/RR weak" :
+     warning1Txt != "ATR unstable" and warnUnstable ? "ATR unstable" :
+     warning1Txt != "Weak volume confirmation" and warnWeakVolume ? "Weak volume confirmation" :
+     "None"
+
+warningsTxt = warning1Txt == "None" ? "None" : warning2Txt == "None" ? warning1Txt : warning1Txt + " | " + warning2Txt
+
+waitForTxt =
+     topBlockerTxt == "Volatility EXTREME" ? "Wait: ATR/volatility cools down" :
+     topBlockerTxt == "Overnight risk elevated" ? "Wait: fewer gaps and wide-range days normalize" :
+     topBlockerTxt == "CHOP conditions" ? (close > sma200 ? "Wait: MA slope improves and follow-through appears" : "Wait: reclaim/lose 200MA and move away from zone") :
+     topBlockerTxt == "Structure unclear / no trend" ? "Wait: clear HH/HL or LH/LL structure" :
+     topBlockerTxt == "Momentum conflict" ? "Wait: RSI and MACD align with structure" :
+     topBlockerTxt == "Chaos high / pullbacks not controlled" ? "Wait: cleaner candles and controlled pullbacks" :
+     topBlockerTxt == "Price extended" ? "Wait: pullback toward 20EMA/50SMA or base" :
+     "No unlock condition needed"
+
+rrValue = (hh and hl) ? rrLong : (lh and ll) ? rrShort : na
+rrDisplayTxt = showNumbers and not na(rrValue) ? rrTxt + " (" + str.tostring(rrValue, "#.##") + "x)" : rrTxt
+
+decisionSev = goNoGo ? 2 : 0
+overallSev = overallRank == 4 ? 2 : overallRank == 3 ? 1 : 0
+riskModeSev = riskModeTxt == "NORMAL" ? 2 : riskModeTxt == "REDUCED" ? 1 : 0
+proceedSev = not goNoGo ? 0 : riskModeTxt == "NORMAL" ? 2 : 1
+blockersSev = topBlockerTxt == "None" ? 2 : 0
+warningsSev = warning1Txt == "None" ? 2 : 1
+waitForSev = topBlockerTxt == "None" and warning1Txt == "None" ? 2 : 1
+qualitySev = str.contains(qualityTxt, "A/B") ? 2 : str.contains(qualityTxt, "B/C") ? 1 : 0
+nextStepSev = proceedSev
+volSev = hardVol ? 0 : atrPct >= atrPctHigh ? 1 : 2
+overnightSev = hardOvernight ? 0 : gapCount >= math.max(1, gapCountWarn - 2) ? 1 : 2
+riskDefSev = not haveSwings ? 1 : riskDefOk ? 2 : 0
+rrSev = not haveSwings ? 1 : warnRR ? 0 : 2
+nextStepTxt = not goNoGo ? "Wait for unlock conditions" : riskModeTxt == "NORMAL" ? "Proceed to setup planning" : "Proceed with reduced risk"
 
 //â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 // Table lifecycle (create ONLY when eligible)
-//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 var table t = na
 var int rowsActive = 0
 
 isSummaryMode = tableMode == "Summary"
 isFullMode = tableMode == "Full"
 
-rowsSummary = 9
-rowsCompactExtra = 20
-rowsFullExtra = 11
+rowsSummary = 12
+rowsCompactExtra = 16
+rowsFullExtra = 19
 rowsTarget = isSummaryMode ? rowsSummary : (isFullMode ? rowsSummary + rowsCompactExtra + rowsFullExtra : rowsSummary + rowsCompactExtra)
 panelEnabled = showTable and ctxEligible and rowsTarget > 0
 
@@ -381,26 +478,28 @@ goodBgColorNow = color.new(color.green, statusAlphaNow)
 warnBgColorNow = color.new(color.orange, statusAlphaNow)
 badBgColorNow = color.new(color.red, statusAlphaNow)
 
-decisionBgColorNow = goNoGo ? goodBgColorNow : badBgColorNow
-topIssueBgColorNow = topIssueSeverity == 2 ? goodBgColorNow : topIssueSeverity == 1 ? warnBgColorNow : badBgColorNow
-qualityBgColorNow = doNothing ? badBgColorNow : (badMomentum or badLocation or badExtended) ? warnBgColorNow : goodBgColorNow
-volBgColorNow = volHardStop ? badBgColorNow : atrPct >= atrPctHigh ? warnBgColorNow : goodBgColorNow
-overnightBgColorNow = badOvernight ? badBgColorNow : gapCount >= math.max(1, gapCountWarn - 2) ? warnBgColorNow : goodBgColorNow
-riskBgColorNow = not haveSwings ? warnBgColorNow : riskDefOk ? goodBgColorNow : badBgColorNow
-rrBgColorNow = not haveSwings ? warnBgColorNow : rrWeak ? badBgColorNow : goodBgColorNow
+bgFromSev(_sev) =>
+    _sev == 2 ? goodBgColorNow : _sev == 1 ? warnBgColorNow : badBgColorNow
+
+statusTag(_sev) =>
+    _sev == 2 ? "✅" : _sev == 1 ? "⚠️" : "❌"
 
 setRow(_r, _k, _v) =>
     table.cell(t, 0, _r, _k, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
-    table.cell(t, 1, _r, _v, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
+    table.cell(t, 1, _r, "-", text_halign=text.align_center, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
+    table.cell(t, 2, _r, _v, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
 
 setHeader(_r, _txt) =>
     table.cell(t, 0, _r, _txt, text_halign=text.align_left, text_color=textColorNow, bgcolor=sectionBgColorNow, text_size=textSizeNow)
     table.cell(t, 1, _r, "", text_halign=text.align_left, text_color=textColorNow, bgcolor=sectionBgColorNow, text_size=textSizeNow)
-    table.merge_cells(t, 0, _r, 1, _r)
+    table.cell(t, 2, _r, "", text_halign=text.align_left, text_color=textColorNow, bgcolor=sectionBgColorNow, text_size=textSizeNow)
+    table.merge_cells(t, 0, _r, 2, _r)
 
-setRowStatus(_r, _k, _v, _bg) =>
+setRowStatus(_r, _k, _sev, _v) =>
+    _bg = bgFromSev(_sev)
     table.cell(t, 0, _r, _k, text_halign=text.align_left, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
-    table.cell(t, 1, _r, _v, text_halign=text.align_left, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
+    table.cell(t, 1, _r, statusTag(_sev), text_halign=text.align_center, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
+    table.cell(t, 2, _r, _v, text_halign=text.align_left, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
 
 if barstate.islast
     if not panelEnabled
@@ -412,7 +511,7 @@ if barstate.islast
         if na(t) or rowsActive != rowsTarget
             if not na(t)
                 table.delete(t)
-            t := table.new(pos, 2, rowsTarget, frame_width=1, border_width=1, frame_color=frameColorInp, border_color=borderColorInp)
+            t := table.new(pos, 3, rowsTarget, frame_width=1, border_width=1, frame_color=frameColorInp, border_color=borderColorInp)
             rowsActive := rowsTarget
 
         table.set_position(t, pos)
@@ -421,24 +520,34 @@ if barstate.islast
         table.set_frame_width(t, showFrame and visibilityPct > 0 ? frameWidthInp : 0)
         table.set_border_width(t, showBorders and visibilityPct > 0 ? borderWidthInp : 0)
 
+        atrStatsTxt = showNumbers ? ("ATR% " + str.tostring(atrPct, "#.##") + " | jump x" + str.tostring(atrJump, "#.##")) : (volTxt + " | " + unstableTxt)
+        overnightDetailsTxt = showNumbers ? ("Gap count " + str.tostring(gapCount, "#") + " / " + str.tostring(gapLookback)) : overnightTxt
+        benchmarkDisplayTxt = showNumbers ? (benchTicker + " | RS slope " + str.tostring(rsSlope, "#.##") + "%") : rsTxt
+
         r = 0
         setRow(r, "Stock -> Daily", tkr + " | " + timeframe.period)
         r += 1
         setHeader(r, "--- SUMMARY ---")
         r += 1
-        setRowStatus(r, "Decision", decisionTxt, decisionBgColorNow)
+        setRowStatus(r, "Decision", decisionSev, decisionTxt)
         r += 1
-        setRowStatus(r, "Top Issue", topIssueTxt, topIssueBgColorNow)
+        setRowStatus(r, "Overall", overallSev, overallDisplayTxt)
         r += 1
-        setRowStatus(r, "Trade Quality", qualityTxt, qualityBgColorNow)
+        setRowStatus(r, "Risk Mode", riskModeSev, riskModeTxt)
         r += 1
-        setRowStatus(r, "Volatility", volTxt, volBgColorNow)
+        setRowStatus(r, "Proceed", proceedSev, proceedTxt)
         r += 1
-        setRowStatus(r, "Overnight", overnightTxt, overnightBgColorNow)
+        setRowStatus(r, "Top Blocker", blockersSev, topBlockerTxt)
         r += 1
-        setRowStatus(r, "Risk Definition", riskDefTxt, riskBgColorNow)
+        setRowStatus(r, "Warnings", warningsSev, warningsTxt)
         r += 1
-        setRowStatus(r, "Reward / RR", rrTxt, rrBgColorNow)
+        setRowStatus(r, "Wait For", waitForSev, waitForTxt)
+        r += 1
+        setRowStatus(r, "Risk Plan", proceedSev, riskPlanTxt)
+        r += 1
+        setRowStatus(r, "Trade Quality", qualitySev, qualityTxt)
+        r += 1
+        setRowStatus(r, "Next Step", nextStepSev, nextStepTxt)
         r += 1
 
         if not isSummaryMode
@@ -465,28 +574,37 @@ if barstate.islast
             r += 1
             setRow(r, "MACD", macdTxt)
             r += 1
-            setRow(r, "RSI Conflict", rsiConflictTxt)
-            r += 1
 
-            setHeader(r, "--- VALIDATION ---")
+            setHeader(r, "--- RISK / OVERNIGHT ---")
             r += 1
-            setRow(r, "Volume", volumeTxt)
+            setRowStatus(r, "Volatility", volSev, volTxt)
             r += 1
-            setRow(r, "Breakout Volume", breakVolTxt)
+            setRowStatus(r, "Overnight", overnightSev, overnightTxt)
             r += 1
-            setRow(r, "Pullback Volume", pullbackVolTxt)
+            setRowStatus(r, "Risk Definition", riskDefSev, riskDefTxt)
             r += 1
-            setRow(r, "ATR Stability", unstableTxt)
-            r += 1
-
-            setHeader(r, "--- BEHAVIOR ---")
-            r += 1
-            setRow(r, "Behavior", behaviorTxt)
-            r += 1
-            setRow(r, "Consolidation", consTxt)
+            setRowStatus(r, "Reward / RR", rrSev, rrDisplayTxt)
             r += 1
 
             if isFullMode
+                setHeader(r, "--- VALIDATION ---")
+                r += 1
+                setRow(r, "Volume", volumeTxt)
+                r += 1
+                setRow(r, "Breakout Volume", breakVolTxt)
+                r += 1
+                setRow(r, "Pullback Volume", pullbackVolTxt)
+                r += 1
+                setRow(r, "ATR Stability", unstableTxt)
+                r += 1
+
+                setHeader(r, "--- BEHAVIOR ---")
+                r += 1
+                setRow(r, "Behavior", behaviorTxt)
+                r += 1
+                setRow(r, "Consolidation", consTxt)
+                r += 1
+
                 setHeader(r, "--- DETAILS ---")
                 r += 1
                 setRow(r, "MA Shape", maShapeTxt)
@@ -503,9 +621,9 @@ if barstate.islast
                 r += 1
                 setRow(r, "Key Levels", "Swings + major pivots + 52w levels")
                 r += 1
-                setRow(r, "ATR Stats", "ATR% " + str.tostring(atrPct, "#.##") + " | jump x" + str.tostring(atrJump, "#.##"))
+                setRow(r, "ATR Stats", atrStatsTxt)
                 r += 1
-                setRow(r, "Overnight Details", "Gap count " + str.tostring(gapCount, "#") + " / " + str.tostring(gapLookback))
+                setRow(r, "Overnight Details", overnightDetailsTxt)
                 r += 1
-                setRow(r, "Benchmark", benchTicker + " | RS slope " + str.tostring(rsSlope, "#.##") + "%")
+                setRow(r, "Benchmark", benchmarkDisplayTxt)
                 r += 1
