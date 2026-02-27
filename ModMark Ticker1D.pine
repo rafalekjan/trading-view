@@ -1,0 +1,511 @@
+﻿//@version=6
+indicator("ModMark Stock 1D", overlay=true, max_labels_count=50)
+
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
+// Inputs
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
+showTable   = input.bool(true, "Show table (visibility toggle)", group="Table")
+showText    = input.bool(true, "Show table text", group="Table")
+visibilityPct = input.int(100, "Visibility 0-100", minval=0, maxval=100, group="Table")
+fontSizeOpt = input.string("Tiny", "Font size", options=["Tiny","Small","Normal"], group="Table")
+tablePos    = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group="Table")
+compactText = input.bool(false, "Compact text", group="Table")
+tableMode   = input.string("Full", "Table mode", options=["Summary","Compact","Full"], group="Table")
+showFrame   = input.bool(true, "Show table frame", group="Table")
+showBorders = input.bool(true, "Show cell borders", group="Table")
+frameWidthInp = input.int(1, "Frame width", minval=0, maxval=5, group="Table")
+borderWidthInp = input.int(1, "Cell border width", minval=0, maxval=5, group="Table")
+frameColorInp = input.color(color.new(color.white, 0), "Frame color", group="Table")
+borderColorInp = input.color(color.new(color.white, 0), "Cell border color", group="Table")
+
+// Structure / pivots
+pivotLR     = input.int(3, "Swing pivot L/R", minval=1, maxval=20, group="Structure")
+majorPivotLR= input.int(10, "Major pivot L/R (key levels)", minval=3, maxval=50, group="Structure")
+lookKeyLvls = input.int(252, "Key levels lookback (e.g., 52w)", minval=50, maxval=1000, group="Structure")
+
+// MAs
+slopeLen    = input.int(10, "MA slope lookback", minval=2, maxval=100, group="Moving Averages")
+flatSlopePct= input.float(0.08, "MA flat slope threshold (%)", minval=0.0, step=0.01, group="Moving Averages")
+
+// Volatility / ATR
+atrLen          = input.int(14, "ATR length", minval=2, group="Volatility")
+atrPctHigh      = input.float(3.0, "ATR% high", minval=0.1, step=0.1, group="Volatility")
+atrPctExtreme   = input.float(5.0, "ATR% extreme", minval=0.1, step=0.1, group="Volatility")
+atrJumpMult     = input.float(1.6, "ATR jump multiplier (unstable)", minval=1.0, step=0.1, group="Volatility")
+
+// Location / Extended
+nearLevelAtr    = input.float(1.0, "Near structure if within ATR *", minval=0.1, step=0.1, group="Location")
+extATR_20       = input.float(2.0, "Extended if |price-20EMA| â‰Ą ATR *", minval=0.5, step=0.1, group="Location")
+extATR_50       = input.float(2.5, "Extended if |price-50SMA| â‰Ą ATR *", minval=0.5, step=0.1, group="Location")
+
+// Bench / Relative Strength
+benchTicker     = input.string("SPY", "Benchmark ticker (RS)", group="Relative Strength")
+rsLen           = input.int(20, "RS lookback bars", minval=5, maxval=200, group="Relative Strength")
+rsPullbackBars  = input.int(5, "Benchmark pullback bars", minval=2, maxval=30, group="Relative Strength")
+
+// RSI / MACD
+rsiLen          = input.int(14, "RSI length", minval=2, group="Momentum")
+rsiPivotLR      = input.int(3, "RSI pivot L/R", minval=1, maxval=20, group="Momentum")
+macdFast        = input.int(12, "MACD fast", minval=1, group="Momentum")
+macdSlow        = input.int(26, "MACD slow", minval=2, group="Momentum")
+macdSig         = input.int(9,  "MACD signal", minval=1, group="Momentum")
+macdFlipLookback= input.int(60, "MACD flip lookback", minval=10, maxval=300, group="Momentum")
+macdFlipWarn    = input.int(10, "MACD flips warn if â‰Ą", minval=1, maxval=50, group="Momentum")
+
+// Volume
+volMaLen        = input.int(20, "Volume MA length", minval=5, group="Volume")
+breakVolMult    = input.float(1.2, "Breakout volume confirms if â‰Ą volMA *", minval=0.5, step=0.1, group="Volume")
+
+// Clean vs Sloppy behavior
+wickWarnPct     = input.float(55, "Sloppy if wick% â‰Ą", minval=0, maxval=100, step=1, group="Behavior")
+sloppyLookback  = input.int(30, "Sloppy lookback", minval=10, maxval=200, group="Behavior")
+sloppyWarnCount = input.int(10, "Sloppy if count â‰Ą", minval=1, maxval=100, group="Behavior")
+
+// Risk / Reward
+maxStopAtr      = input.float(2.0, "Risk definable if stop distance â‰¤ ATR *", minval=0.5, step=0.1, group="Risk/Reward")
+minRR_Accept    = input.float(2.0, "RR acceptable â‰Ą", minval=1.0, step=0.1, group="Risk/Reward")
+minRR_Strong    = input.float(3.0, "RR strong â‰Ą", minval=1.0, step=0.1, group="Risk/Reward")
+
+// Overnight (gaps)
+gapLookback     = input.int(60, "Gap lookback", minval=20, maxval=400, group="Overnight")
+gapPctWarn      = input.float(1.0, "Gap% warning if >", minval=0.1, step=0.1, group="Overnight")
+gapCountWarn    = input.int(6, "Overnight unfriendly if gap-count â‰Ą", minval=1, maxval=50, group="Overnight")
+
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
+// Eligibility: ONLY non-SPY/QQQ on 1D
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
+is1D      = timeframe.period == "D" or timeframe.period == "1D" or (timeframe.isdaily and timeframe.multiplier == 1)
+tkr       = syminfo.ticker
+isSpyQqq  = (tkr == "SPY") or (tkr == "QQQ")
+ctxEligible = is1D and (not isSpyQqq)
+
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
+// Helpers
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
+pos = tablePos == "Top Left" ? position.top_left : tablePos == "Bottom Left" ? position.bottom_left : tablePos == "Bottom Right" ? position.bottom_right : position.top_right
+
+slopePct(src, len) => nz(100.0 * (src - src[len]) / src[len])
+isFlat(v) => math.abs(v) < flatSlopePct
+
+fmtTxt(a, b) => compactText ? a : (a + " â€” " + b)
+
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
+// Backend calculations
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
+// MAs
+ema20  = ta.ema(close, 20)
+sma50  = ta.sma(close, 50)
+sma200 = ta.sma(close, 200)
+
+ema20Slope  = slopePct(ema20, slopeLen)
+sma50Slope  = slopePct(sma50, slopeLen)
+sma200Slope = slopePct(sma200, slopeLen)
+
+ema20Flat = isFlat(ema20Slope)
+sma50Flat = isFlat(sma50Slope)
+sma200Flat= isFlat(sma200Slope)
+
+// ATR
+atr    = ta.atr(atrLen)
+atrPct = 100.0 * atr / close
+atrMA  = ta.sma(atr, 20)
+atrJump= (not na(atrMA) and atrMA > 0) ? (atr / atrMA) : na
+
+volTxt = atrPct >= atrPctExtreme ? "EXTREME volatility" : atrPct >= atrPctHigh ? "HIGH volatility" : "Controlled volatility"
+
+unstableTxt = na(atrJump) ? "ATR stability N/A" : atrJump >= atrJumpMult ? "ATR unstable (spiking)" : "ATR stable"
+
+// Swings (structure)
+ph = ta.pivothigh(high, pivotLR, pivotLR)
+pl = ta.pivotlow(low,  pivotLR, pivotLR)
+
+var float lastPH = na
+var float prevPH = na
+var float lastPL = na
+var float prevPL = na
+
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
+
+haveSwings = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL)
+
+hh = haveSwings and (lastPH > prevPH)
+lh = haveSwings and (lastPH < prevPH)
+hl = haveSwings and (lastPL > prevPL)
+ll = haveSwings and (lastPL < prevPL)
+
+structureTxt = not haveSwings ? "Structure N/A (waiting for swings)" : (hh and hl) ? "Bull structure (HH+HL)" : (lh and ll) ? "Bear structure (LH+LL)" : "Overlapping / unclear (chop)"
+
+// Direction clarity (non-negotiable)
+dirTxt = not haveSwings ? "Direction N/A" : (hh and hl) ? "Direction = BULL" : (lh and ll) ? "Direction = BEAR" : "Direction unclear (no-trade bias)"
+
+// Structure integrity (is trend thesis still valid?)
+// Bull thesis invalid if break last swing low; bear thesis invalid if break last swing high.
+structIntact = (hh and hl) ? (close > lastPL) : (lh and ll) ? (close < lastPH) : false
+
+integrityTxt = not haveSwings ? "Integrity N/A" : structIntact ? "Structure intact" : "Structure broken (thesis invalid)"
+
+// Key levels (major + 52w)
+mph = ta.pivothigh(high, majorPivotLR, majorPivotLR)
+mpl = ta.pivotlow(low,  majorPivotLR, majorPivotLR)
+
+var float lastMajorH = na
+var float lastMajorL = na
+if not na(mph)
+    lastMajorH := mph
+if not na(mpl)
+    lastMajorL := mpl
+
+hi52 = ta.highest(high, lookKeyLvls)
+lo52 = ta.lowest(low,  lookKeyLvls)
+
+nearestLevelDist = na(atr) or atr == 0 ? na : math.min(math.min(math.abs(close - nz(lastPH, close)), math.abs(close - nz(lastPL, close))), math.min(math.abs(close - nz(lastMajorH, close)), math.abs(close - nz(lastMajorL, close)))) / atr
+
+nearStructure = not na(nearestLevelDist) and nearestLevelDist <= nearLevelAtr
+
+locationTxt = not haveSwings ? "Location N/A" : nearStructure ? "Near structure / key level" : "Middle of nowhere (far from structure)"
+
+// MA regime / roles
+bias200Txt = na(sma200) ? "200MA N/A" : close > sma200 ? "Above 200MA (long bias)" : close < sma200 ? "Below 200MA (short bias)" : "At 200MA (caution)"
+
+maShapeTxt = (ema20Flat and sma50Flat) ? "20/50 flat (range/chop risk)" : (ema20Slope > 0 and sma50Slope > 0) ? "20/50 sloped up" : (ema20Slope < 0 and sma50Slope < 0) ? "20/50 sloped down" : "20/50 mixed (transition)"
+
+// â€śRespect 20EMAâ€ť in pullback (simple deterministic check)
+pullbackRespect20 = not na(ema20) and (low <= ema20) and (close >= ema20) // tagged EMA and reclaimed same bar
+pullbackTxt = pullbackRespect20 ? "Pullback respects 20EMA (tag+reclaim)" : "No clear 20EMA respect event"
+
+// Extended
+dist20ATR = (atr > 0) ? math.abs(close - ema20) / atr : na
+dist50ATR = (atr > 0) ? math.abs(close - sma50) / atr : na
+
+extended20 = not na(dist20ATR) and dist20ATR >= extATR_20
+extended50 = not na(dist50ATR) and dist50ATR >= extATR_50
+
+extendedTxt = (extended20 and extended50) ? "EXTENDED vs 20EMA & 50MA" : extended20 ? "Extended vs 20EMA" : extended50 ? "Extended vs 50MA" : "Not extended (ok)"
+
+// RSI (momentum, swings, recover)
+rsi = ta.rsi(close, rsiLen)
+
+rsiPH = ta.pivothigh(rsi, rsiPivotLR, rsiPivotLR)
+rsiPL = ta.pivotlow(rsi,  rsiPivotLR, rsiPivotLR)
+
+var float lastRsiPH = na
+var float prevRsiPH = na
+var float lastRsiPL = na
+var float prevRsiPL = na
+
+if not na(rsiPH)
+    prevRsiPH := lastRsiPH
+    lastRsiPH := rsiPH
+if not na(rsiPL)
+    prevRsiPL := lastRsiPL
+    lastRsiPL := rsiPL
+
+haveRsiSwings = not na(lastRsiPH) and not na(prevRsiPH) and not na(lastRsiPL) and not na(prevRsiPL)
+
+rsiLevelTxt = rsi > 50 ? "RSI > 50 (bull regime)" : rsi < 50 ? "RSI < 50 (bear regime)" : "RSI ~ 50 (neutral)"
+
+rsiSwingsTxt = not haveRsiSwings ? "RSI swings N/A" : (lastRsiPL > prevRsiPL and lastRsiPH > prevRsiPH) ? "RSI HH+HL (supports bull)" : (lastRsiPL < prevRsiPL and lastRsiPH < prevRsiPH) ? "RSI LH+LL (supports bear)" : "RSI swings mixed (caution)"
+
+// RSI â€śrecover after pullbackâ€ť (deterministic heuristic)
+rsiRecover = (rsi[3] < 50 and rsi > 50) or (rsi[3] < 55 and rsi > 55)
+rsiRecoverTxt = rsiRecover ? "RSI recovered quickly (pullback digestion)" : "No strong RSI recover flag"
+
+// Divergence warning (heads-up only)
+bullDiv = haveSwings and haveRsiSwings and (lastPL < prevPL) and (lastRsiPL > prevRsiPL)
+bearDiv = haveSwings and haveRsiSwings and (lastPH > prevPH) and (lastRsiPH < prevRsiPH)
+divTxt = not (haveSwings and haveRsiSwings) ? "Divergence N/A" : bullDiv ? "Bull divergence warning" : bearDiv ? "Bear divergence warning" : "No divergence warning"
+
+// RSI vs structure conflict
+rsiConflict = (hh and hl and rsi < 50) or (lh and ll and rsi > 50)
+rsiConflictTxt = rsiConflict ? "RSI contradicts structure â†’ caution" : "RSI aligned (no conflict flag)"
+
+// MACD momentum + flipiness (chop)
+[macdLine, macdSignal, macdHist] = ta.macd(close, macdFast, macdSlow, macdSig)
+macdTxt = macdLine > macdSignal and macdHist > 0 ? "MACD bullish momentum" : macdLine < macdSignal and macdHist < 0 ? "MACD bearish momentum" : "MACD mixed/flat"
+
+macdFlip = ta.cross(macdLine, macdSignal)
+macdFlipCount = math.sum(macdFlip ? 1.0 : 0.0, macdFlipLookback)
+macdFlipTxt = macdFlipCount >= macdFlipWarn ? "MACD flips often (chop risk)" : "MACD flips not elevated"
+
+// Volume confirmation
+volMA = ta.sma(volume, volMaLen)
+priceUp = close > close[1]
+volUp   = volume > volMA
+
+volumeTxt = priceUp and volUp ? "Rising price + rising volume" : priceUp and not volUp ? "Rising price + weak volume (caution)" : (not priceUp) and volUp ? "Down day + strong volume (pressure)" : "Volume neutral"
+
+// Breakout volume (vs last swing)
+breakAbove = haveSwings and close > lastPH
+breakBelow = haveSwings and close < lastPL
+
+breakVolTxt = not haveSwings ? "Breakout N/A" : breakAbove ? (volume >= volMA * breakVolMult ? "Breakout up + volume confirms" : "Breakout up BUT weak volume") : breakBelow ? (volume >= volMA * breakVolMult ? "Breakdown + volume confirms" : "Breakdown BUT weak volume") : "No active swing breakout"
+
+// Pullback volume quality (volume dries up on pullback = healthier trend)
+pullbackBarBull = haveSwings and hh and hl and close < close[1] and close >= ema20
+pullbackBarBear = haveSwings and lh and ll and close > close[1] and close <= ema20
+pullbackBar = pullbackBarBull or pullbackBarBear
+pullbackVolLookback = 10
+pullbackBarsCount = math.sum(pullbackBar ? 1.0 : 0.0, pullbackVolLookback)
+pullbackLowVolCount = math.sum((pullbackBar and volume < volMA) ? 1.0 : 0.0, pullbackVolLookback)
+pullbackVolRatio = pullbackBarsCount > 0 ? pullbackLowVolCount / pullbackBarsCount : 0.0
+pullbackVolHealthy = pullbackBarsCount >= 2 and pullbackVolRatio >= 0.6
+pullbackVolTxt = pullbackBarsCount == 0 ? "Pullback volume N/A" : pullbackVolHealthy ? "Pullback volume healthy (drying up)" : "Pullback volume not healthy"
+
+// Clean vs sloppy behavior (wickiness + outside bars)
+rng = high - low
+body = math.abs(close - open)
+wickPct = (rng > 0) ? (100.0 * (rng - body) / rng) : 0.0
+outsideBar = high > high[1] and low < low[1]
+sloppyCandle = wickPct >= wickWarnPct
+
+sloppyCount = math.sum(sloppyCandle ? 1.0 : 0.0, sloppyLookback)
+outsideCount= math.sum(outsideBar ? 1.0 : 0.0, sloppyLookback)
+
+behaviorTxt = (sloppyCount >= sloppyWarnCount or outsideCount >= math.ceil(sloppyWarnCount/2)) ? "Sloppy / erratic behavior" : "Clean/controlled behavior"
+
+// Consolidation health (range compression)
+consLen = 20
+consRange = ta.highest(high, consLen) - ta.lowest(low, consLen)
+consAtr = (atr > 0) ? consRange / atr : na
+isConsolidating = not na(consAtr) and consAtr <= 6.0
+consTxt = isConsolidating ? "Consolidation present (range compressed)" : "No clear consolidation flag"
+
+// Overnight friendliness (gaps)
+gapPct = 100.0 * math.abs(open - close[1]) / close[1]
+gapEvent = gapPct > gapPctWarn
+gapCount = math.sum(gapEvent ? 1.0 : 0.0, gapLookback)
+
+overnightTxt = gapCount >= gapCountWarn ? "Overnight unfriendly (frequent gaps)" : "Overnight acceptable (gaps not elevated)"
+
+// Relative strength vs benchmark (ratio trend + during benchmark pullback)
+benchClose = request.security(benchTicker, "D", close, barmerge.gaps_off, barmerge.lookahead_off)
+rsRatio = close / benchClose
+
+rsSlope = slopePct(rsRatio, rsLen)
+benchPullback = benchClose < benchClose[rsPullbackBars]
+stockHeld = close >= close[rsPullbackBars] // simple â€śholdsâ€ť during benchmark pullback
+
+rsTxt = na(benchClose) ? "RS N/A (benchmark unavailable)" : (rsSlope > 0 and benchPullback and stockHeld) ? "Relative strength vs benchmark (holding during pullback)" : (rsSlope > 0) ? "Relative strength improving" : (rsSlope < 0) ? "Relative weakness (underperforming)" : "RS flat / market-like (quality down)"
+
+// Risk definition (invalidation level) + reward target + RR (backend only)
+invalLong = lastPL
+invalShort= lastPH
+
+riskLong = (atr > 0 and not na(invalLong))  ? (close - invalLong) : na
+riskShort= (atr > 0 and not na(invalShort)) ? (invalShort - close) : na
+
+riskDefLong  = not na(riskLong)  and riskLong > 0 and (riskLong/atr <= maxStopAtr)
+riskDefShort = not na(riskShort) and riskShort > 0 and (riskShort/atr <= maxStopAtr)
+
+riskDefTxt = not haveSwings ? "Risk definition N/A" : (hh and hl) ? (riskDefLong ? "Risk definable (invalidation at last swing low)" : "Risk NOT clean (stop too wide/unclear)") : (lh and ll) ? (riskDefShort ? "Risk definable (invalidation at last swing high)" : "Risk NOT clean (stop too wide/unclear)") : "Risk definition weak (no clear direction)"
+
+// Reward target: next level (52w or major pivot) in trend direction
+targetLong = math.min(nz(lastMajorH, hi52), hi52)
+targetShort= math.max(nz(lastMajorL, lo52), lo52)
+
+rewardLong  = (not na(targetLong))  ? (targetLong - close) : na
+rewardShort = (not na(targetShort)) ? (close - targetShort) : na
+
+rrLong  = (not na(riskLong)  and riskLong  > 0 and not na(rewardLong))  ? (rewardLong / riskLong) : na
+rrShort = (not na(riskShort) and riskShort > 0 and not na(rewardShort)) ? (rewardShort / riskShort) : na
+
+rrTxt = not haveSwings ? "Reward N/A" : (hh and hl) ? (na(rrLong) ? "RR N/A" : rrLong >= minRR_Strong ? "Reward strong (3:1+)" : rrLong >= minRR_Accept ? "Reward acceptable (2:1+)" : "Reward weak (<2:1)") : (lh and ll) ? (na(rrShort) ? "RR N/A" : rrShort >= minRR_Strong ? "Reward strong (3:1+)" : rrShort >= minRR_Accept ? "Reward acceptable (2:1+)" : "Reward weak (<2:1)") : "Reward unclear (no direction)"
+
+// Final â€śtrade qualityâ€ť label (text-only)
+volHardStop = atrPct >= atrPctExtreme or (not na(atrJump) and atrJump >= atrJumpMult)
+noDir = (not haveSwings) or (structureTxt == "Overlapping / unclear (chop)")
+badLocation = not nearStructure
+badExtended = extended20 or extended50
+badMomentum = rsiConflict or (macdFlipCount >= macdFlipWarn)
+badOvernight = gapCount >= gapCountWarn
+
+doNothing = noDir or volHardStop or badOvernight or (badLocation and badExtended)
+
+qualityTxt = doNothing ? "DO NOTHING (cash valid)" : (not structIntact) ? "C/D (structure broken)" : (badExtended or badLocation) ? "B/C (location/extended caution)" : (badMomentum) ? "B/C (momentum caution)" : "A/B (supportive daily context)"
+
+riskDefOk = (hh and hl and riskDefLong) or (lh and ll and riskDefShort)
+rrWeak = (hh and hl and (na(rrLong) or rrLong < minRR_Accept)) or (lh and ll and (na(rrShort) or rrShort < minRR_Accept))
+
+goNoGo = not doNothing and structIntact and not badMomentum and riskDefOk
+decisionTxt = goNoGo ? "GO proceed" : "NO-GO stop/cash"
+
+topIssueTxt =
+     noDir ? "Direction/structure unclear" :
+     (not structIntact) ? "Structure broken" :
+     volHardStop ? "Volatility hard-stop" :
+     badOvernight ? "Overnight risk elevated" :
+     (badLocation and badExtended) ? "Bad location + extended" :
+     badMomentum ? "Momentum conflict/chop" :
+     (not riskDefOk) ? "Risk not clearly definable" :
+     rrWeak ? "Reward / RR too weak" :
+     "No major blocker"
+
+topIssueSeverity =
+     (noDir or (not structIntact) or volHardStop or badOvernight) ? 0 :
+     ((badLocation and badExtended) or badMomentum or (not riskDefOk) or rrWeak) ? 1 :
+     2
+
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
+// Table lifecycle (create ONLY when eligible)
+//â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
+var table t = na
+var int rowsActive = 0
+
+isSummaryMode = tableMode == "Summary"
+isFullMode = tableMode == "Full"
+
+rowsSummary = 9
+rowsCompactExtra = 20
+rowsFullExtra = 11
+rowsTarget = isSummaryMode ? rowsSummary : (isFullMode ? rowsSummary + rowsCompactExtra + rowsFullExtra : rowsSummary + rowsCompactExtra)
+panelEnabled = showTable and ctxEligible and rowsTarget > 0
+
+visPctNow = float(math.max(0, math.min(100, visibilityPct)))
+visAlphaNow = int(math.round(100.0 - visPctNow))
+textColorNow = showText ? color.new(chart.fg_color, visAlphaNow) : color.new(chart.fg_color, 100)
+rowBgAlphaNow = int(math.round(100.0 - visPctNow * 0.30))
+sectionBgAlphaNow = int(math.round(100.0 - visPctNow * 0.45))
+rowBgColorNow = color.new(color.black, rowBgAlphaNow)
+sectionBgColorNow = color.new(color.gray, sectionBgAlphaNow)
+frameColorNow = color.new(frameColorInp, visAlphaNow)
+borderColorNow = color.new(borderColorInp, visAlphaNow)
+textSizeNow = fontSizeOpt == "Tiny" ? size.tiny : fontSizeOpt == "Small" ? size.small : size.normal
+emphTextColorNow = showText ? color.new(color.white, visAlphaNow) : color.new(color.white, 100)
+statusAlphaNow = int(math.min(95, visAlphaNow + 35))
+goodBgColorNow = color.new(color.green, statusAlphaNow)
+warnBgColorNow = color.new(color.orange, statusAlphaNow)
+badBgColorNow = color.new(color.red, statusAlphaNow)
+
+decisionBgColorNow = goNoGo ? goodBgColorNow : badBgColorNow
+topIssueBgColorNow = topIssueSeverity == 2 ? goodBgColorNow : topIssueSeverity == 1 ? warnBgColorNow : badBgColorNow
+qualityBgColorNow = doNothing ? badBgColorNow : (badMomentum or badLocation or badExtended) ? warnBgColorNow : goodBgColorNow
+volBgColorNow = volHardStop ? badBgColorNow : atrPct >= atrPctHigh ? warnBgColorNow : goodBgColorNow
+overnightBgColorNow = badOvernight ? badBgColorNow : gapCount >= math.max(1, gapCountWarn - 2) ? warnBgColorNow : goodBgColorNow
+riskBgColorNow = not haveSwings ? warnBgColorNow : riskDefOk ? goodBgColorNow : badBgColorNow
+rrBgColorNow = not haveSwings ? warnBgColorNow : rrWeak ? badBgColorNow : goodBgColorNow
+
+setRow(_r, _k, _v) =>
+    table.cell(t, 0, _r, _k, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
+    table.cell(t, 1, _r, _v, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
+
+setHeader(_r, _txt) =>
+    table.cell(t, 0, _r, _txt, text_halign=text.align_left, text_color=textColorNow, bgcolor=sectionBgColorNow, text_size=textSizeNow)
+    table.cell(t, 1, _r, "", text_halign=text.align_left, text_color=textColorNow, bgcolor=sectionBgColorNow, text_size=textSizeNow)
+    table.merge_cells(t, 0, _r, 1, _r)
+
+setRowStatus(_r, _k, _v, _bg) =>
+    table.cell(t, 0, _r, _k, text_halign=text.align_left, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
+    table.cell(t, 1, _r, _v, text_halign=text.align_left, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
+
+if barstate.islast
+    if not panelEnabled
+        if not na(t)
+            table.delete(t)
+            t := na
+            rowsActive := 0
+    else
+        if na(t) or rowsActive != rowsTarget
+            if not na(t)
+                table.delete(t)
+            t := table.new(pos, 2, rowsTarget, frame_width=1, border_width=1, frame_color=frameColorInp, border_color=borderColorInp)
+            rowsActive := rowsTarget
+
+        table.set_position(t, pos)
+        table.set_frame_color(t, frameColorNow)
+        table.set_border_color(t, borderColorNow)
+        table.set_frame_width(t, showFrame and visibilityPct > 0 ? frameWidthInp : 0)
+        table.set_border_width(t, showBorders and visibilityPct > 0 ? borderWidthInp : 0)
+
+        r = 0
+        setRow(r, "Stock -> Daily", tkr + " | " + timeframe.period)
+        r += 1
+        setHeader(r, "--- SUMMARY ---")
+        r += 1
+        setRowStatus(r, "Decision", decisionTxt, decisionBgColorNow)
+        r += 1
+        setRowStatus(r, "Top Issue", topIssueTxt, topIssueBgColorNow)
+        r += 1
+        setRowStatus(r, "Trade Quality", qualityTxt, qualityBgColorNow)
+        r += 1
+        setRowStatus(r, "Volatility", volTxt, volBgColorNow)
+        r += 1
+        setRowStatus(r, "Overnight", overnightTxt, overnightBgColorNow)
+        r += 1
+        setRowStatus(r, "Risk Definition", riskDefTxt, riskBgColorNow)
+        r += 1
+        setRowStatus(r, "Reward / RR", rrTxt, rrBgColorNow)
+        r += 1
+
+        if not isSummaryMode
+            setHeader(r, "--- STRUCTURE ---")
+            r += 1
+            setRow(r, "Direction", dirTxt)
+            r += 1
+            setRow(r, "Structure", structureTxt)
+            r += 1
+            setRow(r, "Integrity", integrityTxt)
+            r += 1
+            setRow(r, "Location", locationTxt)
+            r += 1
+            setRow(r, "Extended", extendedTxt)
+            r += 1
+            setRow(r, "200MA Bias", bias200Txt)
+            r += 1
+
+            setHeader(r, "--- MOMENTUM ---")
+            r += 1
+            setRow(r, "Relative Strength", rsTxt)
+            r += 1
+            setRow(r, "RSI", rsiLevelTxt)
+            r += 1
+            setRow(r, "MACD", macdTxt)
+            r += 1
+            setRow(r, "RSI Conflict", rsiConflictTxt)
+            r += 1
+
+            setHeader(r, "--- VALIDATION ---")
+            r += 1
+            setRow(r, "Volume", volumeTxt)
+            r += 1
+            setRow(r, "Breakout Volume", breakVolTxt)
+            r += 1
+            setRow(r, "Pullback Volume", pullbackVolTxt)
+            r += 1
+            setRow(r, "ATR Stability", unstableTxt)
+            r += 1
+
+            setHeader(r, "--- BEHAVIOR ---")
+            r += 1
+            setRow(r, "Behavior", behaviorTxt)
+            r += 1
+            setRow(r, "Consolidation", consTxt)
+            r += 1
+
+            if isFullMode
+                setHeader(r, "--- DETAILS ---")
+                r += 1
+                setRow(r, "MA Shape", maShapeTxt)
+                r += 1
+                setRow(r, "20EMA Pullback", pullbackTxt)
+                r += 1
+                setRow(r, "RSI Swings", rsiSwingsTxt)
+                r += 1
+                setRow(r, "RSI Recover", rsiRecoverTxt)
+                r += 1
+                setRow(r, "RSI Divergence", divTxt)
+                r += 1
+                setRow(r, "MACD Flips", macdFlipTxt)
+                r += 1
+                setRow(r, "Key Levels", "Swings + major pivots + 52w levels")
+                r += 1
+                setRow(r, "ATR Stats", "ATR% " + str.tostring(atrPct, "#.##") + " | jump x" + str.tostring(atrJump, "#.##"))
+                r += 1
+                setRow(r, "Overnight Details", "Gap count " + str.tostring(gapCount, "#") + " / " + str.tostring(gapLookback))
+                r += 1
+                setRow(r, "Benchmark", benchTicker + " | RS slope " + str.tostring(rsSlope, "#.##") + "%")
+                r += 1

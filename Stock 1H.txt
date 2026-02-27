@@ -1,0 +1,839 @@
+Poniżej masz **wyłącznie informacje wynikające z Blueprint**, dotyczące etapu:
+
+> **Analiza tickera na interwale 1H (1-godzinny wykres)**
+
+Nie opisuję marketu.
+Nie opisuję 5m/15m execution.
+Nie wychodzę poza rolę 1H w strukturze swing/day frameworku.
+
+Źródło: 
+
+---
+
+# 🔷 ROLA 1H W BLUEPRINT
+
+Z sekcji *Multi-Timeframe Structure*:
+
+1H (lub 2H) to:
+
+* **Middle Timeframe (Structure & Planning)** dla swingów
+* **Higher Timeframe intraday** dla day trade
+
+Odpowiada za:
+
+* planowanie trade’u
+* definiowanie struktury
+* lokalizację (location)
+* logikę stopa
+* określenie przestrzeni do targetu
+
+Daily = kierunek
+1H = operacyjna struktura
+
+---
+
+# I️⃣ STRUKTURA NA 1H
+
+## 1. Czy struktura jest czytelna
+
+Na 1H należy sprawdzić:
+
+* Higher High + Higher Low → bullish structure
+* Lower High + Lower Low → bearish structure
+* Overlapping swings → chop
+
+Nie oczekujemy:
+
+* Losowych zmian kierunku
+* Częstych fałszywych wybic
+* Braku dominującej strony
+
+Jeśli struktura jest messy → nie schodzimy niżej.
+
+---
+
+## 2. Structure Confirmation (kontrola rynku)
+
+Z sekcji *Structure Confirms Direction*:
+
+Dla long:
+
+* Powstaje higher low
+* Następuje wybicie minor high
+* Pojawia się kontynuacja po konsolidacji
+
+Dla short:
+
+* Powstaje lower high
+* Następuje wybicie minor low
+* Kontynuacja po odrzuceniu poziomu
+
+To potwierdza kontrolę jednej strony.
+
+---
+
+# II️⃣ LOCATION NA 1H
+
+Z sekcji *Core Filters – Location*:
+
+Cena powinna być przy logicznym poziomie.
+
+Skrypt powinien sprawdzić czy cena jest przy:
+
+* Pullbacku w trendzie
+* Breakout level
+* Breakdown level
+* Konsolidacji
+* Prior swing high/low
+* 20 EMA
+* 50 MA
+
+Nie oczekujemy:
+
+* Wejścia w środku zakresu
+* Ceny daleko od struktury
+* Chase ruchu impulsowego
+
+---
+
+# III️⃣ PULLBACK QUALITY NA 1H
+
+Z opisu trendów i structure logic:
+
+Pullback powinien być:
+
+* Kontrolowany
+* Bez zniszczenia struktury
+* Z malejącym momentum
+
+Dla long:
+
+* 1H tworzy higher low
+* Nie łamie poprzedniego swing low
+
+Dla short:
+
+* 1H tworzy lower high
+* Nie łamie poprzedniego swing high
+
+Jeśli pullback niszczy strukturę → jakość spada.
+
+---
+
+# IV️⃣ KEY LEVELS NA 1H
+
+Na 1H należy identyfikować:
+
+* Lokalne swing highs/lows
+* Konsolidacje
+* Breakout base
+* Trend continuation zones
+* 20 EMA
+* 50 MA
+* 200 MA (jeśli istotna)
+
+Cena powinna:
+
+* Reagować na poziomy
+* Respektować strukturę
+
+Nie oczekujemy:
+
+* Whipsaw przez poziomy
+* Ignorowania reakcji rynku
+
+---
+
+# V️⃣ MOVING AVERAGES NA 1H
+
+Z sekcji Moving Averages:
+
+### 20 EMA
+
+* Krótkoterminowe momentum
+* Pullback powinien ją respektować
+
+### 50 MA
+
+* Dynamic support/resistance
+* Brak utrzymania = słabnący trend
+
+### 200 MA
+
+* Bias strukturalny
+
+Skrypt powinien sprawdzić:
+
+* Nachylenie MA
+* Respekt ceny
+* Czy MA nie są płaskie (chop)
+
+---
+
+# VI️⃣ RSI NA 1H
+
+Z sekcji RSI:
+
+RSI = momentum confirmation.
+
+Na 1H należy sprawdzić:
+
+W bullish:
+
+* RSI > 40–50
+* RSI robi higher lows
+* RSI szybko odzyskuje poziom po pullbacku
+
+W bearish:
+
+* RSI < 50–60
+* RSI robi lower highs
+
+Divergence:
+
+* Heads-up, nie sygnał
+* Ma znaczenie przy kluczowych poziomach
+
+Nie oczekujemy:
+
+* Decyzji wyłącznie na RSI
+* Ignorowania struktury
+
+---
+
+# VII️⃣ MACD NA 1H
+
+Z sekcji MACD:
+
+Skrypt powinien sprawdzić:
+
+* Czy momentum wspiera kierunek
+* Czy histogram rośnie przy impulsie
+* Czy MACD nie flipuje ciągle w bok
+
+MACD działa najlepiej w trendzie.
+Jest słaby w chop.
+
+---
+
+# VIII️⃣ VOLUME NA 1H
+
+Z sekcji Volume:
+
+Na 1H należy sprawdzić:
+
+* Impuls z rosnącym volume
+* Pullback z malejącym volume
+* Breakout z participation
+
+Nie oczekujemy:
+
+* Breakout bez volume
+* Impulsu z malejącą aktywnością
+
+Volume = potwierdzenie, nie trigger.
+
+---
+
+# IX️⃣ ATR / REALISTYCZNY RANGE NA 1H
+
+Z sekcji ATR:
+
+Na 1H należy sprawdzić:
+
+* Czy stop mieści się w normalnym range
+* Czy oczekiwany ruch jest realistyczny
+* Czy volatility nie jest ekstremalna
+
+Zbyt ciasny stop przy dużym ATR → problem.
+
+---
+
+# X️⃣ RISK DEFINITION NA 1H
+
+Z sekcji Stop Placement:
+
+Skrypt musi umożliwiać:
+
+* Jasny poziom invalidation
+* Stop poniżej struktury (dla long)
+* Stop powyżej struktury (dla short)
+
+Jeśli poziom invalidation nie jest oczywisty → brak trade.
+
+---
+
+# XI️⃣ REWARD JUSTIFICATION NA 1H
+
+Z sekcji Reward Justification:
+
+Skrypt powinien sprawdzić:
+
+* Najbliższy logiczny target
+* Czy target wynika z poziomu strukturalnego
+* Czy R:R ≥ 2:1
+
+Nie oczekujemy:
+
+* Targetów opartych na nadziei
+* Nierealistycznych projekcji
+
+---
+
+# XII️⃣ CZY STRUKTURA DAJE PRZESTRZEŃ DO RUCHU
+
+Z Swing Framework:
+
+1H powinien:
+
+* Dawać przestrzeń do targetu
+* Nie być ściśnięty między poziomami
+* Pozwalać strukturze się rozwinąć
+
+Jeśli struktura jest zbyt ciasna → reward słaby.
+
+---
+
+# XIII️⃣ CZEGO OCZEKUJEMY NA 1H
+
+* Czystej struktury
+* Potwierdzenia kontroli strony rynku
+* Pullbacków w trendzie
+* Respektu dla poziomów
+* MA wspierających kierunek
+* RSI wspierającego momentum
+* MACD potwierdzającego impet
+* Volume potwierdzającego ruch
+* Jasnego invalidation
+* Logicznego targetu
+
+---
+
+# XIV️⃣ CZEGO NIE OCZEKUJEMY
+
+* Overlapping swings
+* Flat MA
+* Chaotycznych świec
+* Breakout bez volume
+* Braku logicznego stopa
+* Braku przestrzeni do targetu
+* Momentum flipującego bez kierunku
+
+---
+
+
+# ✅ 1️⃣ CZY STRUKTURA 1H JEST ZGODNA Z DAILY (HIERARCHIA TF)
+
+Z sekcji *Multi-Timeframe Structure*:
+
+Jeśli wyższy TF (Daily) jest bullish:
+
+* 1H nie powinien budować pełnej struktury LH/LL
+* 1H powinien tworzyć pullback w ramach większego trendu
+* 1H nie powinien całkowicie negować wyższego kontekstu
+
+Jeśli 1H jest w bezpośrednim konflikcie z Daily →
+Blueprint mówi: czekaj.
+
+To nie jest tylko struktura lokalna —
+to jest struktura w hierarchii.
+
+---
+
+# ✅ 2️⃣ CZY 1H NIE JEST W TRYBIE CHOP (REGIME WEWNĘTRZNY)
+
+Dokument mówi, że regime nie dotyczy tylko marketu, ale zachowania ceny.
+
+Na 1H należy sprawdzić:
+
+* Czy MA są płaskie
+* Czy cena przecina je w obie strony
+* Czy swing highs/lows się nakładają
+* Czy breakouty zawodzą
+
+Jeśli 1H jest choppy →
+planowanie trade’u jest obniżonej jakości.
+
+---
+
+# ✅ 3️⃣ CZY WYBICIA NA 1H MAJĄ FOLLOW-THROUGH
+
+Z sekcji Market Regimes i Volume:
+
+Breakout musi:
+
+* utrzymać poziom
+* mieć kontynuację
+* nie wracać natychmiast do zakresu
+
+Na 1H należy sprawdzić:
+
+* Czy wybicie minor high/low jest kontynuowane
+* Czy nie występują regularne false breakouts
+
+Brak follow-through = środowisko niskiej jakości.
+
+---
+
+# ✅ 4️⃣ CZY MOMENTUM PRZY IMPULSIE JEST ZDROWE
+
+Z sekcji RSI, MACD, Volume:
+
+Na 1H należy sprawdzić:
+
+* Czy RSI potwierdza impuls
+* Czy MACD rośnie przy wybiciu
+* Czy volume wspiera ruch
+
+Jeśli impuls jest słaby (małe świece, brak volume, brak momentum) → jakość spada.
+
+---
+
+# ✅ 5️⃣ CZY STRUKTURA POZWALA ZBUDOWAĆ LOGICZNY PLAN
+
+Z sekcji Core Filters:
+
+1H musi umożliwiać:
+
+* Jasne entry zone
+* Jasny stop (invalidation)
+* Jasny pierwszy target
+
+Jeśli którykolwiek element jest niejasny →
+Blueprint: nie wchodzę.
+
+To jest formalny warunek planowania, nie tylko analizy wykresu.
+
+---
+
+# ✅ 6️⃣ CZY RUCH NIE JEST EXTENDED NA 1H
+
+W wielu miejscach Blueprint mówi:
+
+Nie chase extended moves.
+
+Na 1H należy sprawdzić:
+
+* Czy cena nie jest daleko od 20 EMA
+* Czy nie ma parabolicznego impulsu
+* Czy nie ma kilku świec impulsowych bez pullbacku
+
+Extended = obniżona jakość.
+
+---
+
+# ✅ 7️⃣ CZY 1H DAJE PRZESTRZEŃ DO TARGETU
+
+Z Reward Justification:
+
+Na 1H należy sprawdzić:
+
+* Czy następny poziom strukturalny nie jest zbyt blisko
+* Czy reward jest realistyczny względem struktury
+* Czy nie jesteśmy „pod oporem” lub „nad wsparciem”
+
+Brak przestrzeni = brak asymetrii.
+
+---
+
+# 📌 CZEGO NIE POMINĄŁEŚ
+
+Masz już poprawnie:
+
+* HH/HL / LH/LL
+* Structure confirmation
+* Location
+* MA (20/50/200)
+* RSI
+* MACD
+* Volume
+* ATR
+* Risk definition
+* Reward logic
+* Pullback quality
+
+To jest zgodne z Blueprint.
+
+---
+
+Poniżej masz **wyłącznie informacje z Blueprint**, wyciągnięte pod kątem:
+
+> 🎯 Ocena aktualnego tickera na TF 1H
+> Bez analizy innych kroków
+> Bez rozszerzania systemu
+> Bez dodawania własnych interpretacji
+> Tylko to, co wynika z dokumentu
+
+TF 1H w frameworku występuje jako:
+
+* Middle Timeframe (Structure & Planning)
+* Execution timeframe dla swingów (po potwierdzeniu Daily)
+* Jeden z preferowanych TF dla RSI i MACD
+
+---
+
+# 🔎 ROLA 1H W STRUKTURZE SYSTEMU
+
+Z sekcji Multi-Timeframe Structure:
+
+Daily → Direction
+1H / 2H → Structure & Planning
+Lower TF → dokładny timing
+
+Jeśli struktura na 1H jest messy, **nie przechodzimy dalej**.
+
+---
+
+# 📌 CO SKRYPT NA 1H MUSI ANALIZOWAĆ
+
+---
+
+# 1️⃣ STRUKTURA CENY (NAJWAŻNIEJSZE)
+
+Na 1H należy sprawdzić:
+
+* Higher High + Higher Low (bullish structure)
+* Lower High + Lower Low (bearish structure)
+* Overlapping highs/lows = chop
+
+Dokument jasno mówi:
+
+Jeśli struktura jest nieczytelna → nie schodzę niżej.
+
+Oczekujemy:
+
+* Clean chart structure
+* Kontynuacja po pullbackach
+* Brak chaosu
+
+Nie oczekujemy:
+
+* Nakładających się świec
+* Ciągłych fake breakoutów
+* Braku follow-through
+
+---
+
+# 2️⃣ LOKALIZACJA (LOCATION)
+
+Cena na 1H powinna znajdować się przy:
+
+* Support / Resistance
+* Pullback w trendzie
+* Consolidation
+* Breakout / Breakdown level
+* Major moving averages
+
+Jeśli cena jest:
+
+* extended
+* w „middle of nowhere”
+
+→ jakość spada.
+
+---
+
+# 3️⃣ RESPEKT STRUKTURY I POZIOMÓW
+
+Na 1H sprawdzamy:
+
+* Czy cena reaguje na kluczowe poziomy
+* Czy breakout ma follow-through
+* Czy poziomy są respektowane
+
+Chop = brak utrzymania wybicia.
+
+---
+
+# 4️⃣ RELACJA DO MOVING AVERAGES (1H)
+
+Z sekcji Moving Averages:
+
+### 20 EMA
+
+* Short-term momentum
+* Pullbacks powinny ją respektować w trendzie
+
+### 50 MA
+
+* Dynamic structure
+* Jeśli cena nie utrzymuje 50 → trend słabnie
+
+### 200 MA
+
+* Regime filter
+* Above = long bias
+* Below = short bias
+* Chop wokół 200 = caution
+
+MA są kontekstem, nie sygnałem.
+
+---
+
+# 5️⃣ RSI NA 1H
+
+Z sekcji RSI:
+
+RSI = momentum confirmation, nie trigger.
+
+Na 1H sprawdzamy:
+
+Bullish:
+
+* RSI utrzymuje się powyżej 40–50
+* Higher lows
+* Szybkie odzyskiwanie poziomu
+
+Bearish:
+
+* RSI poniżej 50–60
+* Lower highs
+
+Divergence:
+
+* Heads-up
+
+* Tylko przy kluczowych poziomach
+
+* Nie jest sygnałem samym w sobie
+
+---
+
+# 6️⃣ MACD NA 1H
+
+MACD służy do:
+
+* Potwierdzenia momentum
+* Oceny czy momentum rośnie czy słabnie
+* Unikania walki z osłabiającym się ruchem
+
+Najlepiej działa:
+
+* Na Daily / 4H / 1H
+* W trendzie
+
+Nie jest używany jako trigger.
+
+---
+
+# 7️⃣ VOLUME (1H)
+
+Volume służy do:
+
+* Potwierdzenia breakoutów
+* Oceny participation
+* Sprawdzenia czy pullback ma mniejszy wolumen
+
+Zasada:
+Rising price + rising volume = healthy
+Breakout bez volume = caution
+
+---
+
+# 8️⃣ ATR / VOLATILITY
+
+Na 1H należy ocenić:
+
+* Czy stop jest realistyczny względem ATR
+* Czy range nie jest zbyt ciasny
+* Czy volatility nie wymusza redukcji size
+
+Wysoka zmienność:
+
+* mniejszy size
+
+* szersze stopy
+
+* większa kontrola
+
+---
+
+# 9️⃣ RISK DEFINITION (NA POZIOMIE 1H)
+
+1H musi umożliwiać:
+
+* Wyraźne określenie invalidation level
+* Stop wynikający ze struktury
+* Brak arbitralnego stopa
+
+Jeśli nie można jasno określić, gdzie trade jest błędny → jakość spada.
+
+---
+
+# 🔟 REWARD JUSTIFICATION
+
+Na 1H musi być możliwe:
+
+* Identyfikowanie logicznego targetu
+* Ocena R:R
+* Minimum 2:1 dla akceptowalnej jakości
+* 3:1+ dla silnej jakości
+
+Jeśli reward jest:
+
+* niejasny
+* wymaga „cudu”
+
+→ trade nie spełnia kryteriów jakości.
+
+---
+
+# 1️⃣1️⃣ CZY ŚRODOWISKO POZWALA HOLDOWAĆ
+
+Z sekcji Swing Framework:
+
+Na 1H sprawdzamy:
+
+* Czy struktura pozwala trzymać pozycję
+* Czy nie jest news-driven chaos
+* Czy momentum nie gaśnie
+
+Jeśli środowisko nie wspiera holding risk → redukcja size lub brak trade.
+
+---
+
+# 1️⃣2️⃣ WARUNKI „NO TRADE”
+
+Z sekcji When I Do Nothing:
+
+Nie handluję gdy:
+
+* struktura jest nieczytelna
+* market lacks direction
+* price extended
+* risk forced
+* emocjonalny stan
+
+Jeśli 2+ warunki spełnione → brak trade.
+
+---
+
+# 🎯 PODSUMOWANIE – CO SKRYPT 1H MUSI SPRAWDZAĆ
+
+Skrypt oceniający ticker na 1H powinien analizować:
+
+1. Strukturę HH/HL lub LH/LL
+2. Czy struktura jest clean vs chop
+3. Lokalizację względem kluczowych poziomów
+4. Respekt poziomów i follow-through
+5. Relację do 20 EMA / 50 MA / 200 MA
+6. RSI jako potwierdzenie momentum
+7. MACD jako potwierdzenie momentum
+8. Volume confirmation
+9. ATR / realistyczność range
+10. Czy można jasno zdefiniować invalidation
+11. Czy reward jest asymetryczny
+12. Czy środowisko pozwala utrzymać trade
+13. Czy warunki nie kwalifikują się jako “no trade”
+
+---
+Krótka, precyzyjna odpowiedź:
+
+👉 **Dla TF 1H jako Middle Timeframe (Structure & Planning + Execution Confirmation dla swingów) — nic istotnego nie zostało pominięte.**
+
+Ale żeby odpowiedzieć w 100% uczciwie wobec Blueprint — poniżej dokładne doprecyzowanie.
+
+---
+
+# ✅ Co zostało ujęte w pełni
+
+Dla 1H zostały wyciągnięte wszystkie elementy, które dokument przypisuje do:
+
+* Middle Timeframe (Structure & Planning)
+* Entry Confirmation (po Daily)
+* Stop Placement logic
+* Reward Justification
+* Trade Grading
+* Indicator context (MA, RSI, MACD, Volume, ATR)
+* Regime adaptation
+* No-trade conditions
+
+To obejmuje wszystkie sekcje, w których 1H realnie pełni funkcję operacyjną w systemie.
+
+---
+
+# 🔎 Czy dokument zawiera coś jeszcze specyficznie dla 1H?
+
+Jedyna rzecz, którą można jeszcze doprecyzować (nie nowy warunek, ale implikacja z kilku sekcji):
+
+### 1️⃣ 1H jako „confirmation layer”, nie jako kierunek
+
+Z Multi-Timeframe:
+
+* 1H nie ustala biasu (to robi Daily)
+* 1H nie służy do mikro-timingu (to robi niższy TF)
+* 1H musi być zgodny z Daily
+
+Jeśli 1H jest sprzeczny z Daily → **czekamy**.
+To było logicznie zawarte, ale nie nazwane osobno jako warunek konfliktu warstw.
+
+---
+
+### 2️⃣ Entry Confirmation – reakcja na poziomie
+
+W sekcji Entry Confirmation:
+
+Na execution timeframe (1H dla swingów) trzeba zobaczyć:
+
+* reakcję ceny przy poziomie (nie samo dotknięcie)
+* formowanie higher low / lower high
+* break minor structure
+* volume potwierdzające ruch
+
+To było ujęte, ale warto zaznaczyć:
+1H musi pokazać reakcję, nie tylko obecność przy poziomie.
+
+---
+
+### 3️⃣ Structure Failure jako sygnał wyjścia
+
+W sekcji Exits:
+
+Jeśli struktura na 1H pęka → wychodzę nawet jeśli target nie został osiągnięty.
+
+To nie jest kryterium wejścia,
+ale 1H musi być monitorowany pod kątem:
+
+* utrzymania struktury
+* utraty momentum
+* failure przy kluczowym poziomie
+
+---
+
+# 📌 Czy coś zostało pominięte?
+
+Nie.
+
+Nie ma w Blueprint:
+
+* dodatkowych wskaźników dla 1H
+* osobnych zasad tylko dla 1H
+* alternatywnego systemu dla 1H
+* ukrytych filtrów, które nie zostały wyciągnięte
+
+Wszystkie wymagania dotyczące:
+
+* struktury
+* lokalizacji
+* MA
+* RSI
+* MACD
+* Volume
+* ATR
+* risk clarity
+* reward asymmetry
+* no-trade conditions
+
+zostały uwzględnione.
+
+---
+
+# 🎯 Ostateczna odpowiedź
+
+Dla TF 1H:
+
+🔹 Nic kluczowego nie zostało pominięte.
+🔹 Wszystkie warunki wymagane przez Blueprint zostały ujęte.
+🔹 Jedynie doprecyzowano rolę 1H jako warstwy potwierdzenia, nie kierunku.
+
+---

@@ -1,665 +1,739 @@
 //@version=6
-indicator("ModMark Blueprint Context Reader", overlay=true)
-
-// This script is a direct checklist/scoring framework implementation from ModMark Blueprint.
-// It is not a buy/sell signal script.
-
-groupCore = "Core (Blueprint)"
-maFastLen = input.int(20, "EMA fast (20)", minval=1, group=groupCore)
-maMidLen = input.int(50, "SMA mid (50)", minval=1, group=groupCore)
-maLongLen = input.int(200, "SMA long (200)", minval=1, group=groupCore)
-rsiLen = input.int(14, "RSI length (TV default)", minval=2, group=groupCore)
-atrLen = input.int(14, "ATR length (TV default)", minval=1, group=groupCore)
-macdFast = input.int(12, "MACD fast (TV default)", minval=1, group=groupCore)
-macdSlow = input.int(26, "MACD slow (TV default)", minval=1, group=groupCore)
-macdSignalLen = input.int(9, "MACD signal (TV default)", minval=1, group=groupCore)
-structLen = input.int(10, "Structure window", minval=3, group=groupCore)
-pivotLen = input.int(5, "Pivot window", minval=2, group=groupCore)
-slopeBars = input.int(5, "Slope bars", minval=1, group=groupCore)
-volLen = input.int(20, "Volume/ATR baseline", minval=5, group=groupCore)
-rsLookback = input.int(20, "RS lookback", minval=5, group=groupCore)
-rewardLookback = input.int(20, "Reward lookback", minval=5, group=groupCore)
-
-groupProxy = "Proxy Thresholds (for automating Blueprint checks)"
-nearAtrMult = input.float(0.75, "Near key level (xATR)", minval=0.1, step=0.05, group=groupProxy)
-extendAtrMult = input.float(2.0, "Extended from EMA20 (xATR)", minval=0.5, step=0.1, group=groupProxy)
-volEnterMult = input.float(1.30, "Volatility enter (ATR x baseline)", minval=1.0, step=0.05, group=groupProxy)
-volExitMult = input.float(1.15, "Volatility exit (ATR x baseline)", minval=1.0, step=0.05, group=groupProxy)
-volMinRatio = input.float(1.0, "Volume healthy (x baseline)", minval=0.1, step=0.05, group=groupProxy)
-maFlatAtrMult = input.float(0.08, "MA50 flatness (ATR x)", minval=0.01, step=0.01, group=groupProxy)
-chopCrossMinRate = input.float(0.20, "Chop cross rate threshold", minval=0.01, maxval=1.0, step=0.01, group=groupProxy)
-erMin = input.float(0.30, "Trend strength min (ER)", minval=0.01, maxval=1.0, step=0.01, group=groupProxy)
-erExitMult = input.float(0.90, "Trend strength exit mult", minval=0.1, maxval=1.0, step=0.01, group=groupProxy)
-maStackEnterAtr = input.float(0.10, "MA stack enter (x ATRBase)", minval=0.01, step=0.01, group=groupProxy)
-maStackExitMult = input.float(0.60, "MA stack exit mult", minval=0.05, maxval=0.99, step=0.01, group=groupProxy)
-maPriceEnterAtr = input.float(0.10, "MA stack price enter band (x ATRBase)", minval=0.01, step=0.01, group=groupProxy)
-maPriceExitMult = input.float(0.60, "MA stack price exit mult", minval=0.05, maxval=0.99, step=0.01, group=groupProxy)
-maCrossThrAtr = input.float(0.04, "MA mixed cross threshold (x ATRBase)", minval=0.005, step=0.005, group=groupProxy)
-rsiEnterBand = input.float(2.0, "RSI enter band (+/- around 50)", minval=0.1, step=0.1, group=groupProxy)
-rsiExitMult = input.float(0.60, "RSI exit mult", minval=0.05, maxval=0.99, step=0.01, group=groupProxy)
-macdEnterAtr = input.float(0.10, "MACD hist enter (x ATRBase)", minval=0.01, step=0.01, group=groupProxy)
-macdExitMult = input.float(0.60, "MACD hist exit mult", minval=0.05, maxval=0.99, step=0.01, group=groupProxy)
-rsDeltaMin = input.float(0.01, "RS delta min (abs, e.g. 0.01 = 1%)", minval=0.0, step=0.005, group=groupProxy)
-rsSlopeMin = input.float(0.0002, "RS slope min (abs, ~%/bar)", minval=0.0, step=0.0001, group=groupProxy)
-minMarketScore1D = input.float(13.0, "Min market score 1D", minval=0.0, maxval=20.0, step=0.5, group=groupProxy)
-minMarketScore4H = input.float(11.5, "Min market score 4H", minval=0.0, maxval=20.0, step=0.5, group=groupProxy)
-minMarketScore1H = input.float(10.5, "Min market score 1H", minval=0.0, maxval=20.0, step=0.5, group=groupProxy)
-mtfAllowWeak = input.bool(true, "MTF allow weak alignment (4H/1H)", group=groupProxy)
-showMarketDebug = input.bool(false, "Show market debug row", group=groupProxy)
-useConfirmedSecurity = input.bool(false, "Use confirmed security data (less realtime flicker)", group=groupProxy)
-// Ensure hysteresis order even if user sets invalid values in inputs.
-volEnterEff = math.max(volEnterMult, volExitMult + 0.01)
-volExitEff = math.min(volExitMult, volEnterEff - 0.01)
-erEnterEff = erMin
-erExitEff = math.min(erMin * erExitMult, erEnterEff - 0.001)
-maStackEnterEff = maStackEnterAtr
-maStackExitEff = math.min(maStackEnterAtr * maStackExitMult, maStackEnterEff - 0.001)
-// Keep MIXED/CROSS text classification tighter than stack-exit logic.
-maCrossThrEff = math.min(maCrossThrAtr, maStackExitEff)
-maPriceEnterEff = maPriceEnterAtr
-maPriceExitEff = math.min(maPriceEnterAtr * maPriceExitMult, maPriceEnterEff - 0.001)
-rsiEnterEff = rsiEnterBand
-rsiExitEff = math.min(rsiEnterBand * rsiExitMult, rsiEnterEff - 0.1)
-macdEnterEff = macdEnterAtr
-macdExitEff = math.min(macdEnterAtr * macdExitMult, macdEnterEff - 0.001)
-
-f_b2i(bool b) =>
-    b ? 1 : 0
-
-f_clamp01(float x) =>
-    math.max(0.0, math.min(1.0, x))
-
-f_size_from_grade(string grade) =>
-    grade == "A" ? "FULL" : grade == "B" ? "HALF" : grade == "C" ? "LIGHT" : "NO TRADE"
-
-f_reduce_size(string s) =>
-    s == "FULL" ? "HALF" : s == "HALF" ? "LIGHT" : s == "LIGHT" ? "NO TRADE" : "NO TRADE"
-
-f_macd_hist(float src, int fastLen, int slowLen, int signalLen) =>
-    [macdLineTmp, signalLineTmp, h] = ta.macd(src, fastLen, slowLen, signalLen)
-    h
-
-// Avoid short-circuit warnings by computing highest/lowest components first.
-f_up_struct(int len) =>
-    hNow = ta.highest(high, len)
-    hPrev = ta.highest(high[len], len)
-    lNow = ta.lowest(low, len)
-    lPrev = ta.lowest(low[len], len)
-    hNow > hPrev and lNow > lPrev
-
-f_down_struct(int len) =>
-    hNow = ta.highest(high, len)
-    hPrev = ta.highest(high[len], len)
-    lNow = ta.lowest(low, len)
-    lPrev = ta.lowest(low[len], len)
-    hNow < hPrev and lNow < lPrev
-
-f_cross_count(float src, float ma, int len) =>
-    math.sum(ta.cross(src, ma) ? 1.0 : 0.0, len)
-
-f_sma_slope_norm(int maLen, int slopeLen) =>
-    ma = ta.sma(close, maLen)
-    close != 0 ? ((ma - ma[slopeLen]) / slopeLen) / close : 0.0
-
-f_er(series float src, int len) =>
-    ch = math.abs(src - src[len])
-    vol = math.sum(math.abs(src - src[1]), len)
-    vol == 0.0 ? 0.0 : ch / vol
-
-f_sec_f(string sym, string tf, series float expr) =>
-    request.security(sym, tf, useConfirmedSecurity ? (barstate.isconfirmed ? expr : expr[1]) : expr, barmerge.gaps_off, barmerge.lookahead_off)
-
-f_sec_b(string sym, string tf, series bool expr) =>
-    request.security(sym, tf, useConfirmedSecurity ? (barstate.isconfirmed ? expr : expr[1]) : expr, barmerge.gaps_off, barmerge.lookahead_off)
-
-f_add_row(table t, int row, string item, string status, bool pass, bool manual) =>
-    color statusBg = manual ? color.new(color.gray, 80) : pass ? color.new(color.green, 82) : color.new(color.red, 82)
-    table.cell(t, 0, row, item, text_color=color.white, text_halign=text.align_left, bgcolor=color.new(color.black, 0))
-    table.cell(t, 1, row, status, text_color=color.white, text_halign=text.align_left, bgcolor=statusBg)
-
-f_add_header(table t, int row, string left, string mid) =>
-    color hb = color.new(color.blue, 75)
-    table.cell(t, 0, row, left, text_color=color.white, text_halign=text.align_left, bgcolor=hb)
-    table.cell(t, 1, row, mid, text_color=color.white, text_halign=text.align_left, bgcolor=hb)
-
-// ---------- Context detection ----------
-sym = str.upper(syminfo.ticker)
-isSPY = sym == "SPY"
-isQQQ = sym == "QQQ"
-isBenchmark = isSPY or isQQQ
-
-tfSec = timeframe.in_seconds()
-is1D = timeframe.isdaily or tfSec == 86400
-is4H = timeframe.isintraday and tfSec == 14400
-is1H = timeframe.isintraday and tfSec == 3600
-isSupportedTf = is1D or is4H or is1H
-
-// Keep ctxSpy1D name for backward compatibility with downstream logic.
-ctxSpy1D = isBenchmark and is1D
-ctxStock1D = not isBenchmark and is1D
-ctxStock4H = not isBenchmark and is4H
-ctxStock1H = not isBenchmark and is1H
-ctxSupported = ctxSpy1D or ctxStock1D or ctxStock4H or ctxStock1H
-
-ctxLabel = ctxSpy1D ? (isSPY ? "SPY 1D" : "QQQ 1D") : ctxStock1D ? "STOCK 1D" : ctxStock4H ? "STOCK 4H" : ctxStock1H ? "STOCK 1H" : "UNSUPPORTED"
-
-// ---------- Local symbol calculations ----------
-ema20 = ta.ema(close, maFastLen)
-sma50 = ta.sma(close, maMidLen)
-sma200 = ta.sma(close, maLongLen)
-rsi = ta.rsi(close, rsiLen)
-[macdLine, macdSignal, macdHist] = ta.macd(close, macdFast, macdSlow, macdSignalLen)
-atr = ta.atr(atrLen)
-atrBase = ta.sma(atr, volLen)
-volBase = ta.sma(volume, volLen)
-vwapSession = ta.vwap(hlc3)
-
-hh = ta.highest(high, structLen)
-hhPrev = ta.highest(high[structLen], structLen)
-ll = ta.lowest(low, structLen)
-llPrev = ta.lowest(low[structLen], structLen)
-upStruct = hh > hhPrev and ll > llPrev
-downStruct = hh < hhPrev and ll < llPrev
-
-maSlope50Norm = close != 0 ? ((sma50 - sma50[slopeBars]) / slopeBars) / close : 0.0
-crossCount = int(f_cross_count(close, ema20, structLen))
-localUp = upStruct == true
-localDown = downStruct == true
-localEr = nz(f_er(close, structLen), 0.0)
-localSlope = nz(maSlope50Norm, 0.0)
-localCross = nz(float(crossCount), 0.0)
-localCrossRate = structLen > 0 ? localCross / float(structLen) : 0.0
-localAtrBaseNorm = (not na(atrBase) and close != 0.0) ? atrBase / close : 0.0
-localFlat = localAtrBaseNorm > 0.0 ? math.abs(localSlope) <= localAtrBaseNorm * maFlatAtrMult : false
-localCrossy = localCrossRate >= chopCrossMinRate
-enterLocalTrend = (localUp or localDown) and (localEr >= erEnterEff)
-exitLocalTrend = (not (localUp or localDown)) or (localEr < erExitEff)
-var bool localTrendStrongState = false
-localTrendStrongState := localTrendStrongState ? not (exitLocalTrend == true) : (enterLocalTrend == true)
-localTrendStrong = localTrendStrongState
-localChop = not localTrendStrong and localCrossy and localFlat
-localEnterVol = (not na(atr) and not na(atrBase)) and (atr > atrBase * volEnterEff)
-localExitVol = (not na(atr) and not na(atrBase)) and (atr < atrBase * volExitEff)
-var bool localVolatileState = false
-localVolatileState := localVolatileState ? not (localExitVol == true) : (localEnterVol == true)
-localVolatile = localVolatileState
-localRegime = localChop ? "CHOP" : (not localTrendStrong and localVolatile) ? "VOLATILE" : localTrendStrong ? "TREND" : "RANGE"
-
-pH = ta.pivothigh(high, pivotLen, pivotLen)
-pL = ta.pivotlow(low, pivotLen, pivotLen)
-pivotHigh = ta.valuewhen(not na(pH), pH, 0)
-pivotLow = ta.valuewhen(not na(pL), pL, 0)
-hasKeyLevels = not na(pivotHigh) and not na(pivotLow)
-
-nearDist = hasKeyLevels ? math.min(math.abs(close - pivotHigh), math.abs(close - pivotLow)) : na
-nearKeyLevel = hasKeyLevels and nearDist <= atr * nearAtrMult
-notExtended = atr > 0 ? math.abs(close - ema20) <= atr * extendAtrMult : false
-
-// ---------- SPY calculations (same TF) ----------
-spyClose = f_sec_f("SPY", timeframe.period, close)
-spyEma20 = f_sec_f("SPY", timeframe.period, ta.ema(close, maFastLen))
-spySma50 = f_sec_f("SPY", timeframe.period, ta.sma(close, maMidLen))
-spySma200 = f_sec_f("SPY", timeframe.period, ta.sma(close, maLongLen))
-spyRsi = f_sec_f("SPY", timeframe.period, ta.rsi(close, rsiLen))
-spyMacdHist = f_sec_f("SPY", timeframe.period, f_macd_hist(close, macdFast, macdSlow, macdSignalLen))
-spyAtr = f_sec_f("SPY", timeframe.period, ta.atr(atrLen))
-spyAtrBase = f_sec_f("SPY", timeframe.period, ta.sma(ta.atr(atrLen), volLen))
-
-spyUpStruct = f_sec_b("SPY", timeframe.period, f_up_struct(structLen))
-spyDownStruct = f_sec_b("SPY", timeframe.period, f_down_struct(structLen))
-spySlope50Norm = f_sec_f("SPY", timeframe.period, f_sma_slope_norm(maMidLen, slopeBars))
-spyCrossCount = int(f_sec_f("SPY", timeframe.period, f_cross_count(close, ta.ema(close, maFastLen), structLen)))
-spyEr = f_sec_f("SPY", timeframe.period, f_er(close, structLen))
-
-// ---------- Daily alignment for 4H/1H execution layers ----------
-dClose = f_sec_f(syminfo.tickerid, "D", close)
-dEma20 = f_sec_f(syminfo.tickerid, "D", ta.ema(close, maFastLen))
-dSma50 = f_sec_f(syminfo.tickerid, "D", ta.sma(close, maMidLen))
-dSma200 = f_sec_f(syminfo.tickerid, "D", ta.sma(close, maLongLen))
-dUpStruct = f_sec_b(syminfo.tickerid, "D", f_up_struct(structLen))
-dDownStruct = f_sec_b(syminfo.tickerid, "D", f_down_struct(structLen))
-dailyBiasBull = dClose > dSma200 and dEma20 > dSma50
-dailyBiasBear = dClose < dSma200 and dEma20 < dSma50
-dailyBull = dailyBiasBull and dUpStruct
-dailyBear = dailyBiasBear and dDownStruct
-
-// ---------- Market Alignment block ----------
-marketClose = ctxSpy1D ? close : spyClose
-marketEma20 = ctxSpy1D ? ema20 : spyEma20
-marketSma50 = ctxSpy1D ? sma50 : spySma50
-marketSma200 = ctxSpy1D ? sma200 : spySma200
-marketRsi = ctxSpy1D ? rsi : spyRsi
-marketMacdHist = ctxSpy1D ? macdHist : spyMacdHist
-marketAtr = ctxSpy1D ? atr : spyAtr
-marketAtrBase = ctxSpy1D ? atrBase : spyAtrBase
-marketUp = ctxSpy1D ? upStruct : spyUpStruct
-marketDown = ctxSpy1D ? downStruct : spyDownStruct
-marketSlopeNorm = ctxSpy1D ? maSlope50Norm : spySlope50Norm
-marketCross = ctxSpy1D ? crossCount : spyCrossCount
-marketEr = ctxSpy1D ? localEr : spyEr
-
-mUp = marketUp == true
-mDown = marketDown == true
-mEr = nz(marketEr, 0.0)
-mSlope = nz(marketSlopeNorm, 0.0)
-mCross = nz(float(marketCross), 0.0)
-marketCrossRate = structLen > 0 ? mCross / float(structLen) : 0.0
-marketAtrBaseNorm = (not na(marketAtrBase) and not na(marketClose) and marketClose != 0.0) ? marketAtrBase / marketClose : 0.0
-marketFlat = marketAtrBaseNorm > 0.0 ? math.abs(mSlope) <= marketAtrBaseNorm * maFlatAtrMult : false
-marketCrossy = marketCrossRate >= chopCrossMinRate
-hasStruct = mUp or mDown
-enterTrend = hasStruct and (mEr >= erEnterEff)
-exitTrend = (not hasStruct) or (mEr < erExitEff)
-var bool trendStrongState = false
-trendStrongState := trendStrongState ? not (exitTrend == true) : (enterTrend == true)
-trendStrong = trendStrongState
-marketChop = not trendStrong and marketCrossy and marketFlat
-marketEnterVol = (not na(marketAtr) and not na(marketAtrBase)) and (marketAtr > marketAtrBase * volEnterEff)
-marketExitVol = (not na(marketAtr) and not na(marketAtrBase)) and (marketAtr < marketAtrBase * volExitEff)
-var bool marketVolatileState = false
-marketVolatileState := marketVolatileState ? not (marketExitVol == true) : (marketEnterVol == true)
-marketVolatile = marketVolatileState
-marketRegime = marketChop ? "CHOP" : (not trendStrong and marketVolatile) ? "VOLATILE" : trendStrong ? "TREND" : "RANGE"
-dirWeak = hasStruct and not trendStrong
-// Macro bias from MA order only.
-maOrderReady = not na(marketEma20) and not na(marketSma50) and not na(marketSma200)
-macroBull = maOrderReady and marketEma20 > marketSma50 and marketSma50 > marketSma200
-macroBear = maOrderReady and marketEma20 < marketSma50 and marketSma50 < marketSma200
-
-// Micro-structure vs macro-bias conflict (only when direction is WEAK).
-pullback = dirWeak and macroBull and mDown
-rally = dirWeak and macroBear and mUp
-
-marketDirection = trendStrong ? (mUp ? "BULLISH" : "BEARISH") : pullback ? "BULLISH (PULLBACK)" : rally ? "BEARISH (RALLY)" : dirWeak ? (mUp ? "BULLISH (WEAK)" : "BEARISH (WEAK)") : "RANGE"
-marketRegimeTxt = marketVolatile and marketRegime != "VOLATILE" ? marketRegime + " + VOL" : marketRegime
-
-// ----- MA stack (strong/weak) with hysteresis -----
-maReady = not na(marketClose) and not na(marketEma20) and not na(marketSma50) and not na(marketSma200) and not na(marketAtrBase) and marketAtrBase != 0.0
-bullOrder = maReady and marketEma20 > marketSma50 and marketSma50 > marketSma200
-bearOrder = maReady and marketEma20 < marketSma50 and marketSma50 < marketSma200
-
-// ATRBase-normalized separations (x ATRBase)
-sep2050 = maReady ? (marketEma20 - marketSma50) / marketAtrBase : 0.0
-sep50200 = maReady ? (marketSma50 - marketSma200) / marketAtrBase : 0.0
-stackStrength = bullOrder ? math.min(sep2050, sep50200) : bearOrder ? math.min(-sep2050, -sep50200) : 0.0
-strengthTxt = str.tostring(stackStrength, "#.##") + "x"
-
-// Price-vs-EMA20 sanity check with ATRBase bands + hysteresis.
-priceBandEnter = maReady ? maPriceEnterEff * marketAtrBase : 0.0
-priceBandExit = maReady ? maPriceExitEff * marketAtrBase : 0.0
-bullPriceEnter = maReady and marketClose > marketEma20 + priceBandEnter
-bullPriceExit = maReady and marketClose < marketEma20 - priceBandExit
-bearPriceEnter = maReady and marketClose < marketEma20 - priceBandEnter
-bearPriceExit = maReady and marketClose > marketEma20 + priceBandExit
-
-enterBullStack = bullOrder and sep2050 >= maStackEnterEff and sep50200 >= maStackEnterEff and bullPriceEnter
-exitBullStack = (not bullOrder) or na(marketClose) or (sep2050 <= maStackExitEff) or (sep50200 <= maStackExitEff) or bullPriceExit
-enterBearStack = bearOrder and (-sep2050 >= maStackEnterEff) and (-sep50200 >= maStackEnterEff) and bearPriceEnter
-exitBearStack = (not bearOrder) or na(marketClose) or (-sep2050 <= maStackExitEff) or (-sep50200 <= maStackExitEff) or bearPriceExit
-
-var bool bullStackState = false
-var bool bearStackState = false
-bullStackState := bullStackState ? not (exitBullStack == true) : (enterBullStack == true)
-bearStackState := bearStackState ? not (exitBearStack == true) : (enterBearStack == true)
-
-// Enforce exclusivity
-if bullStackState
-    bearStackState := false
-if bearStackState
-    bullStackState := false
-
-marketMaBullStrong = bullStackState
-marketMaBearStrong = bearStackState
-marketMaBullWeak = bullOrder and not marketMaBullStrong
-marketMaBearWeak = bearOrder and not marketMaBearStrong
-marketMAAlignedStrong = marketMaBullStrong or marketMaBearStrong
-marketMAAlignedWeak = marketMaBullWeak or marketMaBearWeak
-maStrengthNorm = maStackEnterEff > 0.0 ? f_clamp01(stackStrength / maStackEnterEff) : 0.0
-marketMAAlignScore = 5.0 * maStrengthNorm
-
-// ----- MIXED breakdown (based on sep signs + near-zero threshold) -----
-crossThr = maCrossThrEff
-cross2050 = maReady and math.abs(sep2050) <= crossThr
-cross50200 = maReady and math.abs(sep50200) <= crossThr
-compressed = cross2050 and cross50200
-eps = crossThr * 0.20
-cross2050Side = math.abs(sep2050) <= eps ? "20~=50" : (sep2050 > 0 ? "20>50" : "20<50")
-cross50200Side = math.abs(sep50200) <= eps ? "50~=200" : (sep50200 > 0 ? "50>200" : "50<200")
-
-tightness = maReady ? math.min(math.abs(sep2050), math.abs(sep50200)) : na
-tightTxt = not na(tightness) ? str.tostring(tightness, "#.##") + "x" : "na"
-
-mixTag = not maReady ? "N/A" : compressed ? "COMPRESSED" : cross2050 ? "20~50 CROSS (" + cross2050Side + ")" : cross50200 ? "50~200 CROSS (" + cross50200Side + ")" : (sep2050 > 0 and sep50200 < 0) ? "ST BULL / LT BEAR" : (sep2050 < 0 and sep50200 > 0) ? "ST BEAR / LT BULL" : "NO ORDER"
-
-marketMaTxt = marketMaBullStrong ? "BULL STACK (" + strengthTxt + ")" : marketMaBearStrong ? "BEAR STACK (" + strengthTxt + ")" : marketMaBullWeak ? "BULL STACK (WEAK " + strengthTxt + ")" : marketMaBearWeak ? "BEAR STACK (WEAK " + strengthTxt + ")" : (mixTag == "N/A" ? "N/A" : "MIXED (" + mixTag + " " + tightTxt + ")")
-
-// ----- RSI + MACD confirmation (direction-bias aware, strong/weak + hysteresis) -----
-// Bias side we want to confirm (matches Market direction semantics).
-dirBullBias = trendStrong ? mUp : pullback ? true : rally ? false : (dirWeak and mUp)
-dirBearBias = trendStrong ? mDown : rally ? true : pullback ? false : (dirWeak and mDown)
-hasBias = dirBullBias or dirBearBias
-
-// RSI hysteresis around 50.
-enterRsiBull = hasBias and dirBullBias and not na(marketRsi) and (marketRsi >= 50.0 + rsiEnterEff)
-exitRsiBull = (not dirBullBias) or na(marketRsi) or (marketRsi <= 50.0 - rsiExitEff)
-var bool rsiBullState = false
-rsiBullState := rsiBullState ? not (exitRsiBull == true) : (enterRsiBull == true)
-
-enterRsiBear = hasBias and dirBearBias and not na(marketRsi) and (marketRsi <= 50.0 - rsiEnterEff)
-exitRsiBear = (not dirBearBias) or na(marketRsi) or (marketRsi >= 50.0 + rsiExitEff)
-var bool rsiBearState = false
-rsiBearState := rsiBearState ? not (exitRsiBear == true) : (enterRsiBear == true)
-
-// MACD hist hysteresis (normalized by ATRBase).
-macdNorm = (not na(marketAtrBase) and marketAtrBase != 0.0 and not na(marketMacdHist)) ? (marketMacdHist / marketAtrBase) : na
-
-enterMacdBull = hasBias and dirBullBias and not na(macdNorm) and (macdNorm >= macdEnterEff)
-exitMacdBull = (not dirBullBias) or na(macdNorm) or (macdNorm <= macdExitEff)
-var bool macdBullState = false
-macdBullState := macdBullState ? not (exitMacdBull == true) : (enterMacdBull == true)
-
-enterMacdBear = hasBias and dirBearBias and not na(macdNorm) and (macdNorm <= -macdEnterEff)
-exitMacdBear = (not dirBearBias) or na(macdNorm) or (macdNorm >= -macdExitEff)
-var bool macdBearState = false
-macdBearState := macdBearState ? not (exitMacdBear == true) : (enterMacdBear == true)
-
-// Enforce bullish/bearish state exclusivity on bias flips.
-if dirBullBias
-    rsiBearState := false
-    macdBearState := false
-if dirBearBias
-    rsiBullState := false
-    macdBullState := false
-
-// Direction-aware alignment.
-rsiAligned = dirBullBias ? rsiBullState : dirBearBias ? rsiBearState : false
-macdAligned = dirBullBias ? macdBullState : dirBearBias ? macdBearState : false
-
-marketMomentumStrong = hasBias and rsiAligned and macdAligned
-marketMomentumWeak = hasBias and (not marketMomentumStrong) and (rsiAligned or macdAligned)
-
-// Opposite-side checks (beyond enter thresholds).
-rsiOpp = hasBias and not na(marketRsi) and ((dirBullBias and marketRsi <= 50.0 - rsiEnterEff) or (dirBearBias and marketRsi >= 50.0 + rsiEnterEff))
-macdOpp = hasBias and not na(macdNorm) and ((dirBullBias and macdNorm <= -macdEnterEff) or (dirBearBias and macdNorm >= macdEnterEff))
-
-marketMomentumOpposed = hasBias and rsiOpp and macdOpp
-marketMomentumNeutral = hasBias and (not rsiAligned) and (not macdAligned) and (not rsiOpp) and (not macdOpp)
-
-weakTag = rsiAligned and not macdAligned ? " (RSI)" : macdAligned and not rsiAligned ? " (MACD)" : ""
-marketMomentumTxt = not hasBias ? "N/A" : marketMomentumStrong ? "ALIGNED" : marketMomentumWeak ? "WEAK" + weakTag : marketMomentumOpposed ? "OPPOSED" : marketMomentumNeutral ? "NEUTRAL" : "MIXED"
-
-// Back-compat bool.
-marketMomentum = marketMomentumStrong
-marketSupportive = marketRegime == "TREND"
-
-// ---------- Stock Behavior block ----------
-// Use Daily RS sources on intraday to avoid timeframe-dependent RS noise.
-spyCloseD = f_sec_f("SPY", "D", close)
-rsStockClose = (ctxStock4H or ctxStock1H) ? dClose : close
-rsSpyClose = (ctxStock4H or ctxStock1H) ? spyCloseD : spyClose
-
-// Estimate bars/day from observed day boundary changes.
-isNewDay = ta.change(time("D")) != 0
-var int dayBars = 0
-var int prevDayBars = na
-dayBars := isNewDay ? 1 : (dayBars + 1)
-if isNewDay
-    prevDayBars := dayBars[1]
-barsPerDayEff = int(math.max(1.0, float(nz(prevDayBars, dayBars))))
-
-// Convert RS lookback (days) to bars on intraday.
-rsLenBars = (ctxStock4H or ctxStock1H) ? (rsLookback * barsPerDayEff) : rsLookback
-
-spyRet = (not na(rsSpyClose[rsLenBars]) and rsSpyClose[rsLenBars] != 0.0) ? (rsSpyClose / rsSpyClose[rsLenBars] - 1.0) : na
-stockRet = (not na(rsStockClose[rsLenBars]) and rsStockClose[rsLenBars] != 0.0) ? (rsStockClose / rsStockClose[rsLenBars] - 1.0) : na
-rsDelta = nz(stockRet, 0.0) - nz(spyRet, 0.0)
-rsRatio = (not na(rsSpyClose) and rsSpyClose != 0.0) ? (rsStockClose / rsSpyClose) : na
-rsRatioSafe = nz(rsRatio, 0.0)
-rsLin0 = ta.linreg(rsRatioSafe, rsLenBars, 0)
-rsLin1 = ta.linreg(rsRatioSafe, rsLenBars, 1)
-rsSlopeRaw = not na(rsRatio) ? (rsLin0 - rsLin1) : 0.0
-rsSlopeNorm = (not na(rsRatio) and rsRatio != 0.0) ? (rsSlopeRaw / rsRatio) : 0.0
-rsSlopeNorm := (ctxStock4H or ctxStock1H) ? (rsSlopeNorm * barsPerDayEff) : rsSlopeNorm
-relStrong = (rsDelta >= rsDeltaMin) and (rsSlopeNorm >= rsSlopeMin)
-relWeak = (rsDelta <= -rsDeltaMin) and (rsSlopeNorm <= -rsSlopeMin)
-relClear = relStrong or relWeak
-rsState = relStrong ? "STRONGER" : relWeak ? "WEAKER" : "NEUTRAL"
-
-structOk = (localUp or localDown) and not localChop
-structStrong = structOk and localTrendStrong
-cleanStructure = structOk
-volRatio = (not na(volBase) and volBase > 0.0) ? (volume / volBase) : na
-volumeHealthy = not na(volRatio) and volRatio >= volMinRatio
-
-dBull = dailyBull == true
-dBear = dailyBear == true
-dBiasBull = dailyBiasBull == true
-dBiasBear = dailyBiasBear == true
-mtfAlignedStrong = (localUp and dBull) or (localDown and dBear)
-mtfAlignedWeak = (localUp and dBiasBull) or (localDown and dBiasBear)
-mtfAligned = mtfAllowWeak ? (mtfAlignedStrong or mtfAlignedWeak) : mtfAlignedStrong
-
-// ---------- Location block ----------
-locationPass = nearKeyLevel and notExtended
-extAtr = atr > 0 ? math.abs(close - ema20) / atr : na
-
-// ---------- Risk Definition + Reward Justification ----------
-thesisBullBase = ctxSpy1D ? mUp : (mUp and (relStrong or (rsDelta >= 0 and close > sma50)))
-thesisBearBase = ctxSpy1D ? mDown : (mDown and (relWeak or (rsDelta <= 0 and close < sma50)))
-thesisBull = (ctxStock4H or ctxStock1H) ? (thesisBullBase and dBull) : thesisBullBase
-thesisBear = (ctxStock4H or ctxStock1H) ? (thesisBearBase and dBear) : thesisBearBase
-thesisDir = thesisBull ? "BULLISH THESIS" : thesisBear ? "BEARISH THESIS" : "NO CLEAR THESIS"
-setupSide = thesisBull ? "CALL" : thesisBear ? "PUT" : "WAIT"
-setupSideTxt = thesisBull ? "CALL (BULLISH)" : thesisBear ? "PUT (BEARISH)" : "WAIT / NO CLEAR THESIS"
-
-swingHigh = ta.highest(high, rewardLookback)
-swingLow = ta.lowest(low, rewardLookback)
-
-longInvalid = hasKeyLevels ? pivotLow : na
-shortInvalid = hasKeyLevels ? pivotHigh : na
-longTarget = hasKeyLevels ? math.max(pivotHigh, swingHigh) : swingHigh
-shortTarget = hasKeyLevels ? math.min(pivotLow, swingLow) : swingLow
-
-longRisk = thesisBull and not na(longInvalid) and longInvalid < close ? close - longInvalid : na
-shortRisk = thesisBear and not na(shortInvalid) and shortInvalid > close ? shortInvalid - close : na
-riskDist = thesisBull ? longRisk : thesisBear ? shortRisk : na
-invalidation = thesisBull ? longInvalid : thesisBear ? shortInvalid : na
-
-longReward = thesisBull ? longTarget - close : na
-shortReward = thesisBear ? close - shortTarget : na
-rewardDist = thesisBull ? longReward : thesisBear ? shortReward : na
-targetLvl = thesisBull ? longTarget : thesisBear ? shortTarget : na
-
-riskDefined = not na(riskDist) and riskDist > syminfo.mintick * 5
-rewardDefined = not na(rewardDist) and rewardDist > 0
-rr = riskDefined and rewardDefined ? rewardDist / riskDist : na
-rrAccept = not na(rr) and rr >= 2
-rrStrong = not na(rr) and rr >= 3
-
-// ---------- Scoring ----------
-erSpan = math.max(erEnterEff - erExitEff, 0.0001)
-marketDirectionNorm = hasStruct ? f_clamp01((mEr - erExitEff) / erSpan) : 0.0
-marketDirectionScore = 5.0 * marketDirectionNorm
-
-marketRegimeScore = marketRegime == "TREND" ? 5.0 : marketRegime == "RANGE" ? 3.0 : marketRegime == "CHOP" ? 2.0 : 1.0
-marketRegimeScore := marketVolatile and marketRegime != "VOLATILE" ? math.max(0.0, marketRegimeScore - 0.5) : marketRegimeScore
-
-rsiDen = math.max(rsiEnterEff, 0.0001)
-rsiDelta = dirBullBias ? (marketRsi - 50.0) : dirBearBias ? (50.0 - marketRsi) : na
-rsiNorm = hasBias and not na(rsiDelta) ? f_clamp01(rsiDelta / rsiDen) : 0.0
-
-macdDen = math.max(macdEnterEff, 0.0001)
-macdDelta = dirBullBias ? macdNorm : dirBearBias ? -macdNorm : na
-macdNormScore = hasBias and not na(macdDelta) ? f_clamp01(macdDelta / macdDen) : 0.0
-marketMomentumScore = 5.0 * ((rsiNorm + macdNormScore) / 2.0)
-
-marketScore = marketDirectionScore + marketRegimeScore + marketMAAlignScore + marketMomentumScore
-minMarketScoreEff = is1D ? minMarketScore1D : is4H ? minMarketScore4H : minMarketScore1H
-minMarketScoreAdj = marketRegime == "CHOP" ? 1.0 : marketRegime == "TREND" ? -0.5 : 0.0
-minMarketScoreAdj := marketVolatile ? minMarketScoreAdj + 0.5 : minMarketScoreAdj
-minMarketScoreReq = math.max(0.0, minMarketScoreEff + minMarketScoreAdj)
-
-behaviorScoreStock = f_b2i(relClear) * 5.0 + f_b2i(cleanStructure) * 5.0 + f_b2i(volumeHealthy) * 5.0 + f_b2i(hasKeyLevels) * 5.0
-behaviorScoreSpyRaw = f_b2i(cleanStructure) * 5.0 + f_b2i(volumeHealthy) * 5.0 + f_b2i(hasKeyLevels) * 5.0
-behaviorScoreSpy = behaviorScoreSpyRaw * (20.0 / 15.0)
-behaviorScore = ctxSpy1D ? behaviorScoreSpy : behaviorScoreStock
-mtfScore = (ctxStock4H or ctxStock1H) ? (mtfAlignedStrong ? 0.0 : mtfAlignedWeak ? 2.5 : 5.0) : 0.0
-behaviorScore := (ctxStock4H or ctxStock1H) ? (behaviorScore - mtfScore) : behaviorScore
-behaviorScore := math.max(0.0, math.min(20.0, behaviorScore))
-
-locationScore = f_b2i(nearKeyLevel) * 10 + f_b2i(notExtended) * 10
-riskScore = f_b2i(riskDefined) * 10 + f_b2i(riskDefined and hasKeyLevels) * 10
-rewardScore = f_b2i(rrAccept) * 10 + f_b2i(rrStrong) * 10
-score = marketScore + behaviorScore + locationScore + riskScore + rewardScore
-
-filterMarket = marketScore >= minMarketScoreReq
-filterBehavior = ctxSpy1D ? (cleanStructure and volumeHealthy and hasKeyLevels) : (relClear and cleanStructure and volumeHealthy and hasKeyLevels)
-filterBehavior := (ctxStock4H or ctxStock1H) ? (filterBehavior and mtfAligned) : filterBehavior
-filterLocation = locationPass
-filterRisk = riskDefined
-filterReward = rrAccept
-passCount = f_b2i(filterMarket) + f_b2i(filterBehavior) + f_b2i(filterLocation) + f_b2i(filterRisk) + f_b2i(filterReward)
-
-// --- GRADE = jakosc setupu (bez kary srodowiskowej) ---
-string gradeBase = "D"
-if riskDefined
-    gradeBase := passCount == 5 ? "A" : passCount >= 4 ? "B" : passCount >= 3 ? "C" : "D"
-
-// Keep `grade` as displayed output variable used by table/colors.
-grade = gradeBase
-
-// --- SIZE = grade + kara srodowiskowa ---
-sizeDecision = f_size_from_grade(gradeBase)
-
-// Single environment penalty step for CHOP/RANGE/VOLATILE.
-bool envPenalty = (marketRegime == "CHOP") or (marketRegime == "RANGE") or marketVolatile
-if envPenalty
-    sizeDecision := f_reduce_size(sizeDecision)
-
-// Hard rule: D is always NO TRADE.
-if gradeBase == "D"
-    sizeDecision := "NO TRADE"
-
-gradeColor = grade == "A" ? color.new(color.green, 70) : grade == "B" ? color.new(color.teal, 70) : grade == "C" ? color.new(color.orange, 70) : color.new(color.red, 70)
-sizeColor = sizeDecision == "FULL" ? color.new(color.green, 70) : sizeDecision == "HALF" ? color.new(color.teal, 70) : sizeDecision == "LIGHT" ? color.new(color.orange, 70) : color.new(color.red, 70)
-
-// ---------- Table ----------
-var int MAX_ROWS = 56
-var table t = table.new(position.top_right, 2, MAX_ROWS, border_width=0, frame_color=color.new(color.white, 100))
+indicator("ModMark Market", overlay=true, max_labels_count=50)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Inputs (UI)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+showTable       = input.bool(true,  "Show table (visibility toggle)", group="Table")
+showText        = input.bool(true, "Show table text", group="Table")
+showNumbers     = input.bool(false, "Show numbers", group="Table")
+visibilityPct   = input.int(100, "Visibility 0-100", minval=0, maxval=100, group="Table")
+fontSizeOpt     = input.string("Tiny", "Font size", options=["Tiny","Small","Normal"], group="Table")
+tablePos        = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group="Table")
+compact         = input.bool(false, "Compact rows", group="Table")
+summaryOnly     = input.bool(false, "Summary only", group="Table")
+showWhenUnsupported = input.bool(false, "Show status on unsupported chart", group="Table")
+showFrame       = input.bool(true, "Show table frame", group="Table")
+showBorders     = input.bool(true, "Show cell borders", group="Table")
+frameWidthInp   = input.int(1, "Frame width", minval=0, maxval=5, group="Table")
+borderWidthInp  = input.int(1, "Cell border width", minval=0, maxval=5, group="Table")
+frameColorInp   = input.color(color.new(color.white, 0), "Frame color", group="Table")
+borderColorInp  = input.color(color.new(color.white, 0), "Cell border color", group="Table")
+
+// Thresholds (backend only; text output uses them)
+leftRight       = input.int(3, "Swing pivot L/R", minval=1, maxval=20, group="Detection")
+maSlopeLen      = input.int(10, "MA slope lookback", minval=2, maxval=100, group="Detection")
+flatSlopePct    = input.float(0.08, "MA flat slope threshold (%)", minval=0.0, step=0.01, group="Detection")  // per lookback, in %
+maCrossLookback = input.int(20, "MA cross lookback", minval=5, maxval=200, group="Detection")
+maCrossChopMin  = input.int(6, "MA crosses = choppy if above", minval=1, maxval=100, group="Detection")
+near200AtrMult  = input.float(0.50, "Near 200 MA zone (x ATR)", minval=0.05, step=0.05, group="Detection")
+pullbackLookback= input.int(10, "Pullback respect lookback", minval=3, maxval=100, group="Detection")
+rsiStructLen    = input.int(12, "RSI structure lookback", minval=5, maxval=100, group="Detection")
+chaosLookback   = input.int(20, "Chaos lookback", minval=5, maxval=200, group="Detection")
+indecisionMax   = input.float(0.35, "Indecision body/range max", minval=0.05, maxval=0.95, step=0.05, group="Detection")
+majorLookback   = input.int(252, "Major S/R lookback", minval=50, maxval=1000, group="Detection")
+majorPivotLR    = input.int(10, "Major pivot L/R", minval=3, maxval=50, group="Detection")
+majorNearAtrMult= input.float(1.0, "Near major S/R (x ATR)", minval=0.1, step=0.1, group="Detection")
+extendAtrMult   = input.float(2.0, "Extended from EMA20 (x ATR)", minval=0.5, step=0.1, group="Detection")
+atrLen          = input.int(14, "ATR length", minval=2, group="Volatility")
+atrPctVolHigh   = input.float(2.0, "ATR% = volatile if above", minval=0.1, step=0.1, group="Volatility")
+atrPctVolExtreme= input.float(3.5, "ATR% = extreme if above", minval=0.1, step=0.1, group="Volatility")
+atrChangeLen    = input.int(5, "ATR change lookback", minval=1, maxval=50, group="Volatility")
+atrJumpPct      = input.float(25.0, "ATR jump warning (%)", minval=1.0, step=1.0, group="Volatility")
+wideRangePct    = input.float(2.0, "Wide-range day threshold (%)", minval=0.1, step=0.1, group="Volatility")
+gapPctThresh    = input.float(1.0, "Big gap threshold (%)", minval=0.1, step=0.1, group="Volatility")
+followBars      = input.int(2, "Follow-through confirmation bars", minval=1, maxval=10, group="Follow-through")
+rangeBreakLen   = input.int(20, "Range breakout lookback", minval=10, maxval=200, group="Follow-through")
+failedLookback  = input.int(30, "Failed breakout lookback", minval=5, maxval=200, group="Follow-through")
+breakoutVolMult = input.float(1.10, "Breakout volume min (x volMA)", minval=0.5, step=0.05, group="Follow-through")
+macdFlipLookback= input.int(20, "MACD flip lookback", minval=5, maxval=200, group="Follow-through")
+macdFlipChopMin = input.int(4, "MACD flips = choppy if above", minval=1, maxval=100, group="Follow-through")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Eligibility: ONLY SPY/QQQ on 1D
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+is1D = timeframe.period == "D" or timeframe.period == "1D" or (timeframe.isdaily and timeframe.multiplier == 1)
+tickerU = str.upper(syminfo.ticker)
+tickerIdU = str.upper(syminfo.tickerid)
+isSpy = (tickerU == "SPY") or str.contains(tickerIdU, ":SPY") or str.contains(tickerIdU, "SPY")
+isQqq = (tickerU == "QQQ") or str.contains(tickerIdU, ":QQQ") or str.contains(tickerIdU, "QQQ")
+isSpyQqq = isSpy or isQqq
+tkr = isSpy ? "SPY" : isQqq ? "QQQ" : syminfo.ticker
+ctxEligible = is1D and isSpyQqq
+ctxDebugTxt = "TF=" + timeframe.period + " M=" + str.tostring(timeframe.multiplier) + " T=" + tickerU
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Core calculations (backend)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MAs
+ema20  = ta.ema(close, 20)
+sma50  = ta.sma(close, 50)
+sma200 = ta.sma(close, 200)
+atr    = ta.atr(atrLen)
+
+// MA slope as percent over lookback
+slopePct(src, len) =>
+    // percent change over len bars
+    base = src[len]
+    na(base) or base == 0.0 ? 0.0 : nz(100.0 * (src - base) / base)
+
+clamp(float x, float lo, float hi) =>
+    math.max(lo, math.min(hi, x))
+
+clamp01(float x) =>
+    clamp(x, 0.0, 1.0)
+
+ema20Slope = slopePct(ema20, maSlopeLen)
+sma50Slope = slopePct(sma50, maSlopeLen)
+sma200Slope= slopePct(sma200, maSlopeLen)
+
+isFlatSlope(v) => math.abs(v) < flatSlopePct
+
+ema20Flat = isFlatSlope(ema20Slope)
+sma50Flat = isFlatSlope(sma50Slope)
+sma200Flat= isFlatSlope(sma200Slope)
+
+// MA cross frequency (chop proxy)
+crossCount = math.sum((ta.cross(close, ema20) ? 1.0 : 0.0) + (ta.cross(close, sma50) ? 1.0 : 0.0), maCrossLookback)
+maCrossChoppy = crossCount >= maCrossChopMin
+
+// Cleanliness / chaos proxies
+insideBar = high <= high[1] and low >= low[1]
+outsideBar = high >= high[1] and low <= low[1]
+dirFlipBar = ta.change(close > open)
+barRange = high - low
+bodyRangeRatio = barRange > 0.0 ? math.abs(close - open) / barRange : 1.0
+indecisionBar = bodyRangeRatio <= indecisionMax
+
+insideCount = math.sum(insideBar ? 1.0 : 0.0, chaosLookback)
+outsideCount = math.sum(outsideBar ? 1.0 : 0.0, chaosLookback)
+flipCount = math.sum(dirFlipBar ? 1.0 : 0.0, chaosLookback)
+indecisionCount = math.sum(indecisionBar ? 1.0 : 0.0, chaosLookback)
+
+insideRate = insideCount / chaosLookback
+outsideRate = outsideCount / chaosLookback
+flipRate = flipCount / chaosLookback
+indecisionRate = indecisionCount / chaosLookback
+
+chaosNorm = clamp01((insideRate * 0.25 + outsideRate * 0.25 + flipRate * 0.25 + indecisionRate * 0.25) * 2.0)
+cleanNorm = 1.0 - chaosNorm
+cleanlinessTxt = cleanNorm >= 0.67 ? "CLEAN" : cleanNorm >= 0.45 ? "MIXED" : "CHAOTIC"
+chaosTxt = "inside " + str.tostring(insideCount, "#") + " | outside " + str.tostring(outsideCount, "#") + " | flips " + str.tostring(flipCount, "#")
+
+// Structure via pivots (last two highs/lows)
+ph = ta.pivothigh(high, leftRight, leftRight)
+pl = ta.pivotlow(low,  leftRight, leftRight)
+
+var float lastPH = na
+var float prevPH = na
+var float lastPL = na
+var float prevPL = na
+
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
+
+haveSwings = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL)
+
+hh = haveSwings and (lastPH > prevPH)
+lh = haveSwings and (lastPH < prevPH)
+hl = haveSwings and (lastPL > prevPL)
+ll = haveSwings and (lastPL < prevPL)
+
+structureTxt =
+     not haveSwings ? "N/A (waiting for swings)" :
+     (hh and hl) ? "HH + HL (bullish structure)" :
+     (lh and ll) ? "LH + LL (bearish structure)" :
+     "Overlapping / unclear (chop risk)"
+
+// Major S/R map (52W + major pivots)
+majorHigh52 = ta.highest(high, majorLookback)
+majorLow52 = ta.lowest(low, majorLookback)
+majorPh = ta.pivothigh(high, majorPivotLR, majorPivotLR)
+majorPl = ta.pivotlow(low, majorPivotLR, majorPivotLR)
+var float lastMajorPH = na
+var float lastMajorPL = na
+if not na(majorPh)
+    lastMajorPH := majorPh
+if not na(majorPl)
+    lastMajorPL := majorPl
+
+d52Res = math.abs(close - majorHigh52)
+d52Sup = math.abs(close - majorLow52)
+dPivotRes = not na(lastMajorPH) ? math.abs(close - lastMajorPH) : na
+dPivotSup = not na(lastMajorPL) ? math.abs(close - lastMajorPL) : na
+
+majorDist = d52Res
+majorType = "52W RES"
+if not na(d52Sup) and (na(majorDist) or d52Sup < majorDist)
+    majorDist := d52Sup
+    majorType := "52W SUP"
+if not na(dPivotRes) and (na(majorDist) or dPivotRes < majorDist)
+    majorDist := dPivotRes
+    majorType := "PIVOT RES"
+if not na(dPivotSup) and (na(majorDist) or dPivotSup < majorDist)
+    majorDist := dPivotSup
+    majorType := "PIVOT SUP"
+
+majorDistNorm = atr != 0.0 ? majorDist / atr : na
+majorNear = not na(majorDistNorm) and majorDistNorm <= majorNearAtrMult
+majorSRTxt =
+     na(majorDistNorm) ? "Major S/R not ready" :
+     majorNear ? "Near " + majorType + " (" + str.tostring(majorDistNorm, "#.##") + "x ATR)" :
+     "Away from major S/R (" + str.tostring(majorDistNorm, "#.##") + "x ATR)"
+
+// 200 MA regime filter (text only)
+dist200Atr = atr != 0.0 ? math.abs(close - sma200) / atr : na
+near200 = not na(dist200Atr) and dist200Atr <= near200AtrMult
+bias200Txt =
+     na(sma200) ? "N/A (200 MA not ready)" :
+     near200 ? "Around 200 MA zone (chop risk / caution)" :
+     close > sma200 ? "Above 200 MA → long bias" :
+     close < sma200 ? "Below 200 MA → short bias" :
+     "At 200 MA → caution"
+
+// Relation to 20 EMA and 50 MA (text)
+rel20Txt = close > ema20 ? "Price above 20 EMA (short-term momentum up)" : "Price below 20 EMA (short-term momentum down)"
+rel50Txt = close > sma50 ? "Price above 50 MA (trend support intact)"    : "Price below 50 MA (trend weakening)"
+
+// MA shape (flat vs sloped)
+maShapeTxt =
+     (ema20Flat and sma50Flat) ? "20/50 MAs flat → range/chop conditions" :
+     (ema20Slope > 0 and sma50Slope > 0) ? "20/50 MAs sloped up → trend supportive" :
+     (ema20Slope < 0 and sma50Slope < 0) ? "20/50 MAs sloped down → trend supportive" :
+     "MAs mixed/transition → caution"
+
+// RSI / MACD (text, no triggers)
+rsi = ta.rsi(close, 14)
+rsiTxt =
+     rsi > 50 ? "RSI above 50 (bullish momentum regime)" :
+     rsi < 50 ? "RSI below 50 (bearish momentum regime)" :
+     "RSI ~ 50 (neutral / chop risk)"
+
+[macdLine, signalLine, hist] = ta.macd(close, 12, 26, 9)
+macdTxt =
+     macdLine > signalLine and hist > 0 ? "MACD expanding bullish momentum" :
+     macdLine < signalLine and hist < 0 ? "MACD expanding bearish momentum" :
+     "MACD mixed/flattening (less reliable in chop)"
+
+// RSI structure proxy (higher lows / lower highs)
+rsiPh = ta.pivothigh(rsi, leftRight, leftRight)
+rsiPl = ta.pivotlow(rsi, leftRight, leftRight)
+var float lastRsiPH = na
+var float prevRsiPH = na
+var float lastRsiPL = na
+var float prevRsiPL = na
+if not na(rsiPh)
+    prevRsiPH := lastRsiPH
+    lastRsiPH := rsiPh
+if not na(rsiPl)
+    prevRsiPL := lastRsiPL
+    lastRsiPL := rsiPl
+rsiHaveSwings = not na(lastRsiPH) and not na(prevRsiPH) and not na(lastRsiPL) and not na(prevRsiPL)
+rsiHL = rsiHaveSwings and lastRsiPL > prevRsiPL
+rsiLH = rsiHaveSwings and lastRsiPH < prevRsiPH
+rsiRecoverBull = ta.lowest(rsi, rsiStructLen) < 50 and rsi > 50
+rsiRecoverBear = ta.highest(rsi, rsiStructLen) > 50 and rsi < 50
+rsiConflict = (hh and hl and rsiLH) or (lh and ll and rsiHL)
+rsiStructTxt =
+     not rsiHaveSwings ? "RSI structure unavailable" :
+     rsiConflict ? "RSI conflicts with price structure (caution)" :
+     (rsiHL or rsiRecoverBull) ? "RSI supports bullish continuation" :
+     (rsiLH or rsiRecoverBear) ? "RSI supports bearish continuation" :
+     "RSI structure neutral"
+
+rsiBearDiv = hh and rsiLH
+rsiBullDiv = ll and rsiHL
+rsiDivTxt =
+     rsiBearDiv ? "Bearish RSI divergence warning" :
+     rsiBullDiv ? "Bullish RSI divergence warning" :
+     "No RSI divergence warning"
+
+// MACD flipping frequency (chop proxy)
+macdBull = macdLine > signalLine
+macdFlipCount = math.sum(ta.change(macdBull) ? 1.0 : 0.0, macdFlipLookback)
+macdFlipChoppy = macdFlipCount >= macdFlipChopMin
+macdFlipTxt = macdFlipChoppy ? "MACD flips frequently (chop risk)" : "MACD side stable enough"
+
+// Volume confirmation (simple validation text)
+volMA = ta.sma(volume, 20)
+priceUp = close > close[1]
+volUp   = volume > volMA
+
+volumeTxt =
+     priceUp and volUp ? "Rising price + rising volume (healthy move)" :
+     priceUp and not volUp ? "Rising price + falling/weak volume (caution)" :
+     (not priceUp) and volUp ? "Falling price + rising volume (distribution / pressure)" :
+     "Volume not confirming (neutral)"
+
+// ATR / volatility regime
+atrPct = 100.0 * atr / close
+
+// Follow-through / failed breakouts (heuristic)
+var int failedUp = 0
+var int failedDn = 0
+
+// Define “breakout” vs last swing high/low, and “fail” if closes back inside quickly
+breakAbove = haveSwings and close > lastPH
+breakBelow = haveSwings and close < lastPL
+breakAboveVolOk = breakAbove and volume > volMA * breakoutVolMult
+breakBelowVolOk = breakBelow and volume > volMA * breakoutVolMult
+
+// follow-through: stays beyond level for N bars (simple)
+barsSinceBreakAbove = ta.barssince(breakAbove)
+barsSinceBreakBelow = ta.barssince(breakBelow)
+ftUp = haveSwings and barsSinceBreakAbove == 0 ? (math.sum(close > lastPH ? 1.0 : 0.0, followBars) == followBars) : false
+ftDn = haveSwings and barsSinceBreakBelow == 0 ? (math.sum(close < lastPL ? 1.0 : 0.0, followBars) == followBars) : false
+
+rangeHi = ta.highest(high[1], rangeBreakLen)
+rangeLo = ta.lowest(low[1], rangeBreakLen)
+rangeBreakAbove = close > rangeHi
+rangeBreakBelow = close < rangeLo
+barsSinceRangeUp = ta.barssince(rangeBreakAbove)
+barsSinceRangeDn = ta.barssince(rangeBreakBelow)
+ftRangeUp = barsSinceRangeUp == 0 ? (math.sum(close > rangeHi ? 1.0 : 0.0, followBars) == followBars) : false
+ftRangeDn = barsSinceRangeDn == 0 ? (math.sum(close < rangeLo ? 1.0 : 0.0, followBars) == followBars) : false
+followModeTxt =
+     (ftUp or ftDn) ? "Swing-based follow-through" :
+     (ftRangeUp or ftRangeDn) ? "Range-based follow-through" :
+     "No follow-through mode"
+
+// failed breakout counting (within lookback window)
+failUpNow = haveSwings and close[1] > lastPH and close < lastPH
+failDnNow = haveSwings and close[1] < lastPL and close > lastPL
+
+failedUp := int(math.sum(failUpNow ? 1.0 : 0.0, failedLookback))
+failedDn := int(math.sum(failDnNow ? 1.0 : 0.0, failedLookback))
+
+followTxt =
+     (not haveSwings and not (ftRangeUp or ftRangeDn)) ? "N/A (waiting for swings/range break)" :
+     (ftUp or ftDn or ftRangeUp or ftRangeDn) ? "Follow-through present (" + followModeTxt + ")" :
+     ((failedUp + failedDn) >= 3) ? "Many failed breakouts (chop behavior)" :
+     "No strong follow-through signal (neutral)"
+
+breakoutVolTxt =
+     not haveSwings ? "N/A (waiting for swings)" :
+     breakAbove and not breakAboveVolOk ? "Breakout up without volume confirmation (caution)" :
+     breakBelow and not breakBelowVolOk ? "Breakout down without volume confirmation (caution)" :
+     breakAboveVolOk or breakBelowVolOk ? "Breakout volume confirmed" :
+     "No active breakout"
+
+// Market regime (3 regimes from blueprint: Trending / Choppy / Volatile)
+isTrendUp   = haveSwings and hh and hl and (ema20Slope > 0) and (sma50Slope > 0) and not (ema20Flat or sma50Flat)
+isTrendDown = haveSwings and lh and ll and (ema20Slope < 0) and (sma50Slope < 0) and not (ema20Flat or sma50Flat)
+isChoppy    = (not haveSwings) ? false : (structureTxt == "Overlapping / unclear (chop risk)") or (ema20Flat and sma50Flat) or ((failedUp + failedDn) >= 3) or maCrossChoppy or macdFlipChoppy or near200
+atrChangePct = atr[atrChangeLen] != 0.0 ? 100.0 * (atr - atr[atrChangeLen]) / atr[atrChangeLen] : 0.0
+atrUnstable = math.abs(atrChangePct) >= atrJumpPct
+wideRangeNow = 100.0 * (high - low) / close >= wideRangePct
+gapNow = close[1] != 0.0 ? 100.0 * math.abs(open - close[1]) / close[1] : 0.0
+bigGapNow = gapNow >= gapPctThresh
+wideRangeCount = int(math.sum(wideRangeNow ? 1.0 : 0.0, failedLookback))
+bigGapCount = int(math.sum(bigGapNow ? 1.0 : 0.0, failedLookback))
+isVolatile  = atrPct >= atrPctVolHigh or atrUnstable
+volTxt =
+     atrPct >= atrPctVolExtreme ? "Volatility EXTREME (reduce size / caution)" :
+     isVolatile and atrUnstable ? "Volatility unstable (ATR jump risk)" :
+     isVolatile ? "Volatility HIGH (defensive / selective)" :
+     "Volatility controlled (acceptable)"
+
+regimeTxt =
+     isVolatile ? "VOLATILE market" :
+     isTrendUp ? "TRENDING (uptrend)" :
+     isTrendDown ? "TRENDING (downtrend)" :
+     isChoppy ? "CHOPPY / RANGE-BOUND" :
+     "TRANSITION / MIXED"
+
+// Pullback respect of EMA20 in trend context
+bullRespects20 = isTrendUp and math.sum((low <= ema20 and close >= ema20) ? 1.0 : 0.0, pullbackLookback) >= 1 and math.sum(close < ema20 ? 1.0 : 0.0, pullbackLookback) <= 1
+bearRespects20 = isTrendDown and math.sum((high >= ema20 and close <= ema20) ? 1.0 : 0.0, pullbackLookback) >= 1 and math.sum(close > ema20 ? 1.0 : 0.0, pullbackLookback) <= 1
+pullbackRespectTxt =
+     isTrendUp and bullRespects20 ? "Pullbacks respect 20 EMA (bull trend quality)" :
+     isTrendDown and bearRespects20 ? "Pullbacks respect 20 EMA (bear trend quality)" :
+     (isTrendUp or isTrendDown) ? "Trend pullbacks not clean vs 20 EMA" :
+     "Not in trend context"
+
+distEmaAtr = atr != 0.0 ? math.abs(close - ema20) / atr : na
+isExtended = not na(distEmaAtr) and distEmaAtr > extendAtrMult
+extendedTxt =
+     isExtended ? "Price extended from 20 EMA (" + str.tostring(distEmaAtr, "#.##") + "x ATR)" :
+     "Price not extended from 20 EMA (" + str.tostring(distEmaAtr, "#.##") + "x ATR)"
+
+overnightRisk = (wideRangeCount >= 5) or (bigGapCount >= 5) or atrUnstable
+overnightTxt =
+     overnightRisk ? "Overnight conditions unstable (gaps/range/ATR jump)" :
+     "Overnight conditions acceptable"
+
+// “Tradeable” environment (text gate; no signals)
+tradeable =
+     (isTrendUp or isTrendDown) and not isChoppy and (atrPct < atrPctVolExtreme) and (not sma200Flat) and (not isExtended) and (not overnightRisk) and ((not breakAbove and not breakBelow) or breakAboveVolOk or breakBelowVolOk)
+
+tradeableTxt =
+     tradeable ? "Tradeable environment (supports swing context)" :
+     "Not tradeable / cash is valid (defensive)"
+
+// A-grade gate from doc: if choppy → cannot be A-setup
+agradeTxt =
+     isChoppy ? "A-setup NOT allowed (chop environment)" :
+     "A-setup gate passes (market not flagged as chop)"
+
+doNothing = not tradeable or isChoppy or atrPct >= atrPctVolExtreme
+doNothingTxt = doNothing ? "DO NOTHING / CASH is valid now" : "Actionable market context"
+
+// Final risk mode (single operational label)
+hardStopA = isChoppy
+hardDefensive = hardStopA or atrPct >= atrPctVolExtreme or overnightRisk
+riskMode = hardDefensive ? "DEFENSIVE" : (tradeable and not isVolatile and not near200 and cleanNorm >= 0.60 ? "NORMAL" : tradeable ? "REDUCED" : "DEFENSIVE")
+riskModeTxt =
+     riskMode == "NORMAL" ? "NORMAL (trend + controlled conditions)" :
+     riskMode == "REDUCED" ? "REDUCED (tradeable but warnings active)" :
+     "DEFENSIVE (cash / very selective only)"
+
+// Market state scoring (0..100) with hard rules
+scoreA = ((isTrendUp or isTrendDown) ? 15.0 : 0.0) +
+     (((isTrendUp and ema20Slope > 0 and sma50Slope > 0) or (isTrendDown and ema20Slope < 0 and sma50Slope < 0)) ? 10.0 : 0.0) +
+     ((not isChoppy and cleanNorm >= 0.50) ? 10.0 : cleanNorm >= 0.35 ? 5.0 : 0.0) -
+     (isChoppy ? 15.0 : 0.0) -
+     (near200 ? 8.0 : 0.0)
+scoreA := clamp(scoreA, 0.0, 35.0)
+
+rsiDirOk = (isTrendUp and rsi > 50) or (isTrendDown and rsi < 50)
+rsiStructOk = (isTrendUp and (rsiHL or rsiRecoverBull)) or (isTrendDown and (rsiLH or rsiRecoverBear))
+macdDirOk = (isTrendUp and macdLine > signalLine and hist > 0) or (isTrendDown and macdLine < signalLine and hist < 0)
+scoreB = (rsiDirOk ? 8.0 : 0.0) + (rsiStructOk ? 6.0 : 0.0) + (macdDirOk ? 6.0 : 0.0) - (macdFlipChoppy ? 6.0 : 0.0)
+scoreB := clamp(scoreB, 0.0, 20.0)
+
+volTrendOk = (isTrendUp and priceUp and volUp) or (isTrendDown and (not priceUp) and volUp)
+breakoutVolPenalty = (breakAbove and not breakAboveVolOk) or (breakBelow and not breakBelowVolOk)
+scoreC = (volTrendOk ? 5.0 : 0.0) + (((not breakAbove and not breakBelow) or breakAboveVolOk or breakBelowVolOk) ? 5.0 : 0.0) - (breakoutVolPenalty ? 5.0 : 0.0)
+scoreC := clamp(scoreC, 0.0, 10.0)
+
+scoreD = (atrPct < atrPctVolHigh ? 10.0 : atrPct < atrPctVolExtreme ? 4.0 : 0.0) +
+     ((not atrUnstable and wideRangeCount < 5 and bigGapCount < 5) ? 10.0 : not overnightRisk ? 4.0 : 0.0) -
+     ((isVolatile and atrPct < atrPctVolExtreme) ? 8.0 : 0.0) -
+     ((atrPct >= atrPctVolExtreme or overnightRisk) ? 15.0 : 0.0)
+scoreD := clamp(scoreD, 0.0, 20.0)
+
+failCount = failedUp + failedDn
+scoreE = ((ftUp or ftDn) ? 8.0 : 0.0) + (failCount <= 2 ? 7.0 : failCount <= 4 ? 3.0 : 0.0) - (failCount >= 3 ? 10.0 : 0.0)
+scoreE := clamp(scoreE, 0.0, 15.0)
+
+marketScore = clamp(scoreA + scoreB + scoreC + scoreD + scoreE, 0.0, 100.0)
+scoreStateTxt =
+     hardDefensive ? "Defensive / do nothing (hard rule)" :
+     marketScore >= 80 ? "Supportive market (A-grade eligible)" :
+     marketScore >= 60 ? "Tradeable but selective (reduced risk)" :
+     marketScore >= 40 ? "Mixed / caution (B/C environment)" :
+     "Defensive / do nothing"
+
+sizeDecision =
+     hardDefensive or (not tradeable) ? "NO TRADE" :
+     (marketScore >= 80 and riskMode == "NORMAL") ? "FULL" :
+     marketScore >= 60 ? "HALF" :
+     marketScore >= 40 ? "LIGHT" :
+     "NO TRADE"
+sizeDecisionTxt =
+     sizeDecision == "FULL" ? "FULL (high conviction)" :
+     sizeDecision == "HALF" ? "HALF (selective)" :
+     sizeDecision == "LIGHT" ? "LIGHT (pilot / caution)" :
+     "NO TRADE (cash / wait)"
+
+scoreASummary = scoreA >= 24.0 ? "Structure strong" : scoreA >= 14.0 ? "Structure ok" : "Structure weak"
+scoreBSummary = scoreB >= 13.0 ? "Momentum strong" : scoreB >= 7.0 ? "Momentum ok" : "Momentum weak"
+scoreDSummary = scoreD >= 14.0 ? "Risk friendly" : scoreD >= 8.0 ? "Risk mixed" : "Risk hard"
+subscoreTxt = scoreASummary + " | " + scoreBSummary + " | " + scoreDSummary
+
+scoreAStateTxt = scoreA >= 24.0 ? "Strong" : scoreA >= 14.0 ? "Moderate" : "Weak"
+scoreBStateTxt = scoreB >= 13.0 ? "Strong" : scoreB >= 7.0 ? "Moderate" : "Weak"
+scoreCStateTxt = scoreC >= 6.0 ? "Strong" : scoreC >= 3.0 ? "Moderate" : "Weak"
+scoreDStateTxt = scoreD >= 14.0 ? "Strong" : scoreD >= 8.0 ? "Moderate" : "Weak"
+scoreEStateTxt = scoreE >= 9.0 ? "Strong" : scoreE >= 5.0 ? "Moderate" : "Weak"
+
+maCrossTxt = str.tostring(crossCount, "#") + " crosses in last " + str.tostring(maCrossLookback) + " bars" + (maCrossChoppy ? " (choppy)" : " (ok)")
+atrChangeTxt = "ATR change " + str.tostring(atrChangePct, "#.##") + "% over " + str.tostring(atrChangeLen) + " bars"
+failedTxt = "Failed breaks: up " + str.tostring(failedUp) + " | down " + str.tostring(failedDn)
+overnightDetailTxt = "Wide-range days: " + str.tostring(wideRangeCount) + " | big gaps: " + str.tostring(bigGapCount)
+
+crossStateTxt = maCrossChoppy ? "High crossing (choppy)" : crossCount >= maCrossChopMin * 0.5 ? "Medium crossing" : "Low crossing"
+atrChangeStateTxt = math.abs(atrChangePct) >= atrJumpPct ? "ATR spiking" : math.abs(atrChangePct) >= atrJumpPct * 0.5 ? "ATR rising" : "ATR stable"
+failedStateTxt = failCount >= 5 ? "Many failed breakouts" : failCount >= 3 ? "Some failed breakouts" : "Rare failed breakouts"
+overnightStateTxt = overnightRisk ? "Overnight elevated/unfriendly" : "Overnight normal"
+majorSRStateTxt = na(majorDistNorm) ? "Major S/R not ready" : majorNear ? "Near major S/R" : "Away from major S/R"
+extensionStateTxt = isExtended ? "Price extended from 20 EMA" : "Price not extended from 20 EMA"
+chaosStateTxt = cleanNorm >= 0.67 ? "Chaos low" : cleanNorm >= 0.45 ? "Chaos medium" : "Chaos high"
+scoreTxt = showNumbers ? str.tostring(marketScore, "#.##") + "/100" : scoreStateTxt
+maCrossDisplayTxt = showNumbers ? maCrossTxt : crossStateTxt
+atrChangeDisplayTxt = showNumbers ? atrChangeTxt : atrChangeStateTxt
+failedDisplayTxt = showNumbers ? failedTxt : failedStateTxt
+overnightDetailDisplayTxt = showNumbers ? overnightDetailTxt : overnightStateTxt
+majorSRDisplayTxt = showNumbers ? majorSRTxt : majorSRStateTxt
+extensionDisplayTxt = showNumbers ? extendedTxt : extensionStateTxt
+chaosDisplayTxt = showNumbers ? chaosTxt : chaosStateTxt
+subscoreDisplayTxt = showNumbers ? "See numeric breakdown below" : subscoreTxt
+scoreADisplayTxt = showNumbers ? str.tostring(scoreA, "#.##") + "/35" : scoreAStateTxt
+scoreBDisplayTxt = showNumbers ? str.tostring(scoreB, "#.##") + "/20" : scoreBStateTxt
+scoreCDisplayTxt = showNumbers ? str.tostring(scoreC, "#.##") + "/10" : scoreCStateTxt
+scoreDDisplayTxt = showNumbers ? str.tostring(scoreD, "#.##") + "/20" : scoreDStateTxt
+scoreEDisplayTxt = showNumbers ? str.tostring(scoreE, "#.##") + "/15" : scoreEStateTxt
+goNoGo = tradeable and not hardDefensive
+decisionSummaryTxt = goNoGo ? "GO ✅" : "NO-GO ❌"
+hardStopSummaryTxt = hardDefensive ? "YES ❌" : "NO ✅"
+aSetupSummaryTxt = isChoppy ? "BLOCKED ❌" : "ALLOWED ✅"
+
+structureStatus = (isTrendUp or isTrendDown) ? 2 : isChoppy ? 0 : 1
+zone200Status = near200 and isChoppy ? 0 : near200 ? 1 : close < sma200 ? 1 : 2
+cleanStatus = cleanNorm >= 0.67 ? 2 : cleanNorm >= 0.45 ? 1 : 0
+momentumStatus = rsiConflict ? 0 : macdFlipChoppy ? 1 : 2
+crossStatus = maCrossChoppy ? 0 : crossCount >= maCrossChopMin * 0.5 ? 1 : 2
+volStatus = atrPct >= atrPctVolExtreme ? 0 : isVolatile ? 1 : 2
+overnightWarn = not overnightRisk and (wideRangeCount >= 3 or bigGapCount >= 3)
+overnightStatus = overnightRisk ? 0 : overnightWarn ? 1 : 2
+followStatus = (ftUp or ftDn or ftRangeUp or ftRangeDn) ? 2 : failCount >= 3 ? 0 : 1
+aSetupStatus = isChoppy ? 0 : 2
+riskStatusRaw = riskMode == "NORMAL" ? 2 : riskMode == "REDUCED" ? 1 : 0
+
+okCount = (structureStatus == 2 ? 1 : 0) + (zone200Status == 2 ? 1 : 0) + (cleanStatus == 2 ? 1 : 0) + (momentumStatus == 2 ? 1 : 0) + (crossStatus == 2 ? 1 : 0) + (volStatus == 2 ? 1 : 0) + (overnightStatus == 2 ? 1 : 0) + (followStatus == 2 ? 1 : 0) + (aSetupStatus == 2 ? 1 : 0) + (riskStatusRaw == 2 ? 1 : 0)
+warnCount = (structureStatus == 1 ? 1 : 0) + (zone200Status == 1 ? 1 : 0) + (cleanStatus == 1 ? 1 : 0) + (momentumStatus == 1 ? 1 : 0) + (crossStatus == 1 ? 1 : 0) + (volStatus == 1 ? 1 : 0) + (overnightStatus == 1 ? 1 : 0) + (followStatus == 1 ? 1 : 0) + (aSetupStatus == 1 ? 1 : 0) + (riskStatusRaw == 1 ? 1 : 0)
+badCount = (structureStatus == 0 ? 1 : 0) + (zone200Status == 0 ? 1 : 0) + (cleanStatus == 0 ? 1 : 0) + (momentumStatus == 0 ? 1 : 0) + (crossStatus == 0 ? 1 : 0) + (volStatus == 0 ? 1 : 0) + (overnightStatus == 0 ? 1 : 0) + (followStatus == 0 ? 1 : 0) + (aSetupStatus == 0 ? 1 : 0) + (riskStatusRaw == 0 ? 1 : 0)
+healthScore = float(okCount * 2 + warnCount)
+healthMax = float((okCount + warnCount + badCount) * 2)
+healthPct = healthMax > 0 ? 100.0 * healthScore / healthMax : 0.0
+healthStateTxt = healthPct >= 75 ? "STRONG" : healthPct >= 55 ? "OK" : "WEAK"
+checklistSummaryTxt = "✅ " + str.tostring(okCount) + " | ⚠️ " + str.tostring(warnCount) + " | ❌ " + str.tostring(badCount)
+checklistDisplayTxt = showNumbers ? checklistSummaryTxt + " | " + str.tostring(healthPct, "#.##") + "% " + healthStateTxt : checklistSummaryTxt + " | " + healthStateTxt
+
+softDefensive = badCount >= 3 or healthPct < 55
+softStopSummaryTxt = softDefensive ? "YES ⚠️" : "NO ✅"
+riskModeEff = hardDefensive ? "DEFENSIVE" : softDefensive and riskMode == "NORMAL" ? "REDUCED" : riskMode
+riskModeSummaryTxt = riskModeEff == "NORMAL" ? "NORMAL ✅" : riskModeEff == "REDUCED" ? "REDUCED ⚠️" : "DEFENSIVE ❌"
+
+combinedScoreBase = clamp(0.70 * marketScore + 0.30 * healthPct, 0.0, 100.0)
+overallRankRaw = combinedScoreBase >= 80 ? 4 : combinedScoreBase >= 60 ? 3 : combinedScoreBase >= 40 ? 2 : 1
+overallRank = hardDefensive ? 1 : overallRankRaw
+overallRank := badCount >= 4 ? math.min(overallRank, 2) : overallRank
+overallRank := healthPct < 55 ? math.min(overallRank, 3) : overallRank
+overallStateShort = overallRank == 4 ? "SUPPORTIVE" : overallRank == 3 ? "SELECTIVE" : overallRank == 2 ? "MIXED" : "DEFENSIVE"
+overallLabelTxt = overallStateShort == "SUPPORTIVE" ? "SUPPORTIVE ✅" : overallStateShort == "SELECTIVE" ? "SELECTIVE ⚠️" : overallStateShort == "MIXED" ? "MIXED ⚠️" : "DEFENSIVE ❌"
+overallSummaryTxt = showNumbers ? overallLabelTxt + " (M " + str.tostring(marketScore, "#.##") + " | H " + str.tostring(healthPct, "#.##") + " | C " + str.tostring(combinedScoreBase, "#.##") + ")" : overallLabelTxt
+
+issueVol = atrPct >= atrPctVolExtreme
+issueOvernight = overnightRisk
+issueChop = isChoppy or maCrossChoppy or near200
+issueMomentum = rsiConflict or macdFlipChoppy
+issueChaos = cleanNorm < 0.45
+
+topIssueTxt = issueVol ? "Volatility EXTREME" : issueOvernight ? "Overnight risk elevated" : issueChop ? "CHOP conditions" : issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : "No major issue"
+topIssueSeverity = issueVol or issueOvernight or issueChop ? 0 : issueMomentum or issueChaos ? 1 : 2
+secondaryIssueTxt = issueVol ? (issueOvernight ? "Overnight risk elevated" : issueChop ? "CHOP conditions" : issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : "None") : issueOvernight ? (issueChop ? "CHOP conditions" : issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : "None") : issueChop ? (issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : "None") : issueMomentum ? (issueChaos ? "Chaos high" : "None") : "None"
+secondaryIssueSeverity = secondaryIssueTxt == "None" ? 2 : secondaryIssueTxt == "Momentum conflict" or secondaryIssueTxt == "Chaos high" ? 1 : 0
+
+confidenceRank = badCount >= 3 ? 0 : badCount <= 2 ? 1 : 1
+confidenceRank := badCount == 0 and warnCount <= 2 ? 2 : confidenceRank
+confidenceTxt = confidenceRank == 2 ? "HIGH ✅" : confidenceRank == 1 ? "MED ⚠️" : "LOW ❌"
+
+nextStepTxt = hardDefensive ? "Stop -> Hard defensive" : not goNoGo ? "Stop -> Market not supportive" : softDefensive ? "Proceed cautious -> reduced/selective" : "Proceed -> Stock selection"
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Table
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+pos =
+     tablePos == "Top Left" ? position.top_left :
+     tablePos == "Bottom Left" ? position.bottom_left :
+     tablePos == "Bottom Right" ? position.bottom_right :
+     position.top_right
+
+// Table instance with runtime-configurable frame/border visibility.
+rowsSupportedSummaryOnly = 13
+rowsSupportedSummary = summaryOnly ? rowsSupportedSummaryOnly : 25
+rowsSupportedScoreBreakdown = summaryOnly ? 0 : 7
+rowsSupportedDetail = summaryOnly ? 0 : (not compact ? 16 : 0)
+rowsSupported = rowsSupportedSummary + rowsSupportedScoreBreakdown + rowsSupportedDetail
+rowsUnsupported = showWhenUnsupported ? 5 : 0
+rowsTarget = ctxEligible ? rowsSupported : rowsUnsupported
+panelEnabled = showTable and rowsTarget > 0
+var table t = na
+var int rowsActive = 0
+visPctNow = float(math.max(0, math.min(100, visibilityPct)))
+visAlphaNow = int(math.round(100.0 - visPctNow))
+textColorNow = showText ? color.new(chart.fg_color, visAlphaNow) : color.new(chart.fg_color, 100)
+rowBgAlphaNow = int(math.round(100.0 - visPctNow * 0.30))
+sectionBgAlphaNow = int(math.round(100.0 - visPctNow * 0.45))
+rowBgColorNow = color.new(color.black, rowBgAlphaNow)
+sectionBgColorNow = color.new(color.gray, sectionBgAlphaNow)
+frameColorNow = color.new(frameColorInp, visAlphaNow)
+borderColorNow = color.new(borderColorInp, visAlphaNow)
+textSizeNow = fontSizeOpt == "Tiny" ? size.tiny : fontSizeOpt == "Small" ? size.small : size.normal
+emphTextColorNow = showText ? color.new(color.white, visAlphaNow) : color.new(color.white, 100)
+statusAlphaNow = int(math.min(95, visAlphaNow + 35))
+goodBgColorNow = color.new(color.green, statusAlphaNow)
+warnBgColorNow = color.new(color.orange, statusAlphaNow)
+badBgColorNow = color.new(color.red, statusAlphaNow)
+decisionBgColorNow = goNoGo ? goodBgColorNow : badBgColorNow
+hardStopBgColorNow = hardDefensive ? badBgColorNow : goodBgColorNow
+softStopBgColorNow = softDefensive ? warnBgColorNow : goodBgColorNow
+overallBgColorNow = overallRank == 4 ? goodBgColorNow : overallRank == 3 ? warnBgColorNow : overallRank == 2 ? warnBgColorNow : badBgColorNow
+checklistBgColorNow = healthPct >= 75 ? goodBgColorNow : healthPct >= 55 ? warnBgColorNow : badBgColorNow
+topIssueBgColorNow = topIssueSeverity == 2 ? goodBgColorNow : topIssueSeverity == 1 ? warnBgColorNow : badBgColorNow
+secondaryIssueBgColorNow = secondaryIssueSeverity == 2 ? goodBgColorNow : secondaryIssueSeverity == 1 ? warnBgColorNow : badBgColorNow
+riskModeBgColorNow = riskModeEff == "NORMAL" ? goodBgColorNow : riskModeEff == "REDUCED" ? warnBgColorNow : badBgColorNow
+aSetupBgColorNow = isChoppy ? badBgColorNow : goodBgColorNow
+confidenceBgColorNow = confidenceRank == 2 ? goodBgColorNow : confidenceRank == 1 ? warnBgColorNow : badBgColorNow
+nextStepBgColorNow = hardDefensive ? badBgColorNow : softDefensive ? warnBgColorNow : goNoGo ? goodBgColorNow : badBgColorNow
+volatilityBgColorNow = atrPct >= atrPctVolExtreme ? badBgColorNow : isVolatile ? warnBgColorNow : goodBgColorNow
+overnightBgColorNow = overnightRisk ? badBgColorNow : goodBgColorNow
+
+setRow(_r, _k, _v) =>
+    table.cell(t, 0, _r, _k, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
+    table.cell(t, 1, _r, _v, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
+
+setHeader(_r, _txt) =>
+    table.cell(t, 0, _r, _txt, text_halign=text.align_left, text_color=textColorNow, bgcolor=sectionBgColorNow, text_size=textSizeNow)
+    table.cell(t, 1, _r, "", text_halign=text.align_left, text_color=textColorNow, bgcolor=sectionBgColorNow, text_size=textSizeNow)
+    table.merge_cells(t, 0, _r, 1, _r)
+
+setRowStatus(_r, _k, _v, _bg) =>
+    table.cell(t, 0, _r, _k, text_halign=text.align_left, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
+    table.cell(t, 1, _r, _v, text_halign=text.align_left, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
 
 if barstate.islast
-    table.clear(t, 0, 0, 1, MAX_ROWS - 1)
-    if isSupportedTf
-        int row = 0
-        if not ctxSupported
-            f_add_row(t, row, "Context", "Unsupported symbol/TF combination", false, true)
-            row += 1
-            f_add_row(t, row, "Allowed", "SPY 1D | QQQ 1D | STOCK 1D | STOCK 4H | STOCK 1H", true, true)
-            row += 1
+    if not panelEnabled
+        if not na(t)
+            table.delete(t)
+            t := na
+            rowsActive := 0
+    else
+        if na(t) or rowsActive != rowsTarget
+            if not na(t)
+                table.delete(t)
+            t := table.new(pos, 2, rowsTarget, frame_width=1, border_width=1, frame_color=frameColorInp, border_color=borderColorInp)
+            rowsActive := rowsTarget
+
+        table.set_position(t, pos)
+        table.set_frame_color(t, frameColorNow)
+        table.set_border_color(t, borderColorNow)
+        table.set_frame_width(t, showFrame and visibilityPct > 0 ? frameWidthInp : 0)
+        table.set_border_width(t, showBorders and visibilityPct > 0 ? borderWidthInp : 0)
+
+        r = 0
+        if not ctxEligible
+            setRow(r, "Market -> Daily", syminfo.ticker + " | " + timeframe.period)
+            r += 1
+            setRow(r, "Status", "Unsupported chart for this module")
+            r += 1
+            setRow(r, "Required", "SPY or QQQ on 1D")
+            r += 1
+            setRow(r, "Detected", ctxDebugTxt)
+            r += 1
+            setRow(r, "Tip", "Switch symbol/timeframe or disable this panel")
         else
-            // Market Alignment
-            f_add_header(t, row, "Market Alignment", "")
-            row += 1
-            regimePass = marketRegime == "TREND" or marketRegime == "RANGE"
-            regimeManual = marketRegime == "CHOP" or (marketVolatile and marketRegime != "VOLATILE")
-            f_add_row(t, row, "Market regime", marketRegimeTxt, regimePass, regimeManual)
-            row += 1
-            dirPass = marketDirectionScore >= 3.5
-            dirManual = marketDirectionScore >= 1.5 and not dirPass
-            f_add_row(t, row, "Market direction", marketDirection, dirPass, dirManual)
-            row += 1
-            maPass = marketMAAlignScore >= 3.5
-            maManual = marketMAAlignScore >= 1.5 and not maPass
-            f_add_row(t, row, "MA 20/50/200 alignment", marketMaTxt, maPass, maManual)
-            row += 1
-            momPass = marketMomentumScore >= 3.5
-            momManual = marketMomentumScore >= 1.5 and not momPass
-            f_add_row(t, row, "RSI + MACD confirmation", marketMomentumTxt, momPass, momManual)
-            row += 1
-            if showMarketDebug
-                dirDbg = dirBullBias ? "BULL" : dirBearBias ? "BEAR" : "NONE"
-                debugTxt = "mUp/mDown=" + str.tostring(mUp) + "/" + str.tostring(mDown) + " ER=" + str.tostring(mEr, "#.##") + " dir=" + dirDbg + " macdN=" + str.tostring(macdNorm, "#.##") + " mE/x=" + str.tostring(macdEnterEff, "#.##") + "/" + str.tostring(macdExitEff, "#.##") + " stack=" + strengthTxt
-                f_add_row(t, row, "Debug (market)", debugTxt, true, true)
-                row += 1
+            setRow(r, "Market -> Daily", tkr + " | " + timeframe.period)
+            r += 1
+            setHeader(r, "--- SUMMARY ---")
+            r += 1
+            setRowStatus(r, "Decision", decisionSummaryTxt, decisionBgColorNow)
+            r += 1
+            setRowStatus(r, "Hard Stop", hardStopSummaryTxt, hardStopBgColorNow)
+            r += 1
+            setRowStatus(r, "Soft Stop", softStopSummaryTxt, softStopBgColorNow)
+            r += 1
+            setRowStatus(r, "Overall", overallSummaryTxt, overallBgColorNow)
+            r += 1
+            setRowStatus(r, "Checklist", checklistDisplayTxt, checklistBgColorNow)
+            r += 1
+            setRowStatus(r, "Top Issue", topIssueTxt, topIssueBgColorNow)
+            r += 1
+            setRowStatus(r, "Secondary Issue", secondaryIssueTxt, secondaryIssueBgColorNow)
+            r += 1
+            setRowStatus(r, "Risk Mode", riskModeSummaryTxt, riskModeBgColorNow)
+            r += 1
+            setRowStatus(r, "A-Setup", aSetupSummaryTxt, aSetupBgColorNow)
+            r += 1
+            setRowStatus(r, "Confidence", confidenceTxt, confidenceBgColorNow)
+            r += 1
+            setRowStatus(r, "Next Step", nextStepTxt, nextStepBgColorNow)
+            r += 1
 
-            // Stock Behavior / Structure
-            f_add_header(t, row, "Stock Behavior", "")
-            row += 1
-            if not ctxSpy1D
-                rsSlopeUnit = (ctxStock4H or ctxStock1H) ? "%/day" : "%/bar"
-                rsTxt = rsState + " (" + str.tostring(rsDelta * 100, "#.##") + "%, " + str.tostring(rsSlopeNorm * 100, "#.###") + rsSlopeUnit + ")"
-                f_add_row(t, row, "Relative strength vs SPY", rsTxt, relClear, false)
-                row += 1
-            structTxt = localUp ? "HH/HL" : localDown ? "LH/LL" : "RANGE/CHOP"
-            structManual = cleanStructure and not structStrong
-            f_add_row(t, row, "Price structure", structTxt, structStrong, structManual)
-            row += 1
-            volTxt = not na(volRatio) ? str.tostring(volRatio, "#.##") + "x BASE" : "N/A"
-            volStateTxt = volumeHealthy ? "HEALTHY (" + volTxt + ")" : "LOW (" + volTxt + ")"
-            f_add_row(t, row, "Volume behavior", volStateTxt, volumeHealthy, false)
-            row += 1
-            levelTxt = hasKeyLevels ? "S:" + str.tostring(pivotLow, format.mintick) + " R:" + str.tostring(pivotHigh, format.mintick) : "NO CLEAR PIVOT LEVELS"
-            f_add_row(t, row, "Key levels / structure points", levelTxt, hasKeyLevels, false)
-            row += 1
-            if ctxStock4H or ctxStock1H
-                mtfTxt = mtfAlignedStrong ? "ALIGNED (STRONG)" : mtfAlignedWeak ? "ALIGNED (WEAK)" : "NOT ALIGNED"
-                f_add_row(t, row, "Daily alignment (MTF)", mtfTxt, mtfAlignedStrong, mtfAlignedWeak)
-                row += 1
-            if ctxStock1H
-                vwapTxt = close > vwapSession ? "ABOVE VWAP" : close < vwapSession ? "BELOW VWAP" : "AT VWAP"
-                vwapPass = thesisBull ? close >= vwapSession : thesisBear ? close <= vwapSession : false
-                f_add_row(t, row, "VWAP context (secondary)", vwapTxt, vwapPass, false)
-                row += 1
+            if not summaryOnly
+                setHeader(r, "--- STRUCTURE ---")
+                r += 1
+                setRow(r, "Structure", structureTxt)
+                r += 1
+                setRow(r, "200 MA Filter", bias200Txt)
+                r += 1
+                setRow(r, "Major S/R", majorSRDisplayTxt)
+                r += 1
+                setRow(r, "Structure Cleanliness", cleanlinessTxt)
+                r += 1
 
-            // Location
-            f_add_header(t, row, "Location", "")
-            row += 1
-            f_add_row(t, row, "Location near key level", nearKeyLevel ? "NEAR LEVEL" : "MID-RANGE", nearKeyLevel, false)
-            row += 1
-            extTxt = not na(extAtr) ? str.tostring(extAtr, "#.##") + "x ATR from EMA20" : "N/A"
-            f_add_row(t, row, "Not extended", notExtended ? "YES (" + extTxt + ")" : "EXTENDED (" + extTxt + ")", notExtended, false)
-            row += 1
+                setHeader(r, "--- MOMENTUM ---")
+                r += 1
+                setRow(r, "RSI Regime", rsiTxt)
+                r += 1
+                setRow(r, "MACD Regime", macdTxt)
+                r += 1
 
-            // Risk Definition
-            f_add_header(t, row, "Risk Definition", "")
-            row += 1
-            f_add_row(t, row, "Thesis direction", thesisDir, thesisBull or thesisBear, false)
-            row += 1
-            f_add_row(t, row, "Setup direction (options)", setupSideTxt, thesisBull or thesisBear, false)
-            row += 1
-            riskTxt = riskDefined ? "Stop@" + str.tostring(invalidation, format.mintick) + " | Risk " + str.tostring(riskDist, format.mintick) : "UNDEFINED"
-            f_add_row(t, row, "Risk definition / invalidation", riskTxt, riskDefined, false)
-            row += 1
+                setHeader(r, "--- RISK / OVERNIGHT ---")
+                r += 1
+                setRowStatus(r, "ATR / Volatility", volTxt, volatilityBgColorNow)
+                r += 1
+                setRowStatus(r, "Overnight Risk", overnightTxt, overnightBgColorNow)
+                r += 1
+                setRow(r, "Follow-through", followTxt)
+                r += 1
 
-            // Reward Justification
-            f_add_header(t, row, "Reward Justification", "")
-            row += 1
-            rrTxt = not na(rr) ? "1:" + str.tostring(rr, "#.##") + " (Target " + str.tostring(targetLvl, format.mintick) + ")" : "N/A"
-            f_add_row(t, row, "Reward justification (R:R)", rrTxt, rrAccept, false)
-            row += 1
+                if not compact
+                    setHeader(r, "--- DETAILS ---")
+                    r += 1
+                    setRow(r, "MA Shape", maShapeTxt)
+                    r += 1
+                    setRow(r, "20 EMA", rel20Txt)
+                    r += 1
+                    setRow(r, "50 MA", rel50Txt)
+                    r += 1
+                    setRow(r, "MA Cross Frequency", maCrossDisplayTxt)
+                    r += 1
+                    setRow(r, "20 EMA Pullback Respect", pullbackRespectTxt)
+                    r += 1
+                    setRow(r, "Extension", extensionDisplayTxt)
+                    r += 1
+                    setRow(r, "RSI Structure", rsiStructTxt)
+                    r += 1
+                    setRow(r, "RSI Divergence", rsiDivTxt)
+                    r += 1
+                    setRow(r, "MACD Flip State", macdFlipTxt)
+                    r += 1
+                    setRow(r, "Volume", volumeTxt)
+                    r += 1
+                    setRow(r, "Breakout Volume", breakoutVolTxt)
+                    r += 1
+                    setRow(r, "ATR Change", atrChangeDisplayTxt)
+                    r += 1
+                    setRow(r, "Overnight Details", overnightDetailDisplayTxt)
+                    r += 1
+                    setRow(r, "Failed Breakouts", failedDisplayTxt)
+                    r += 1
+                    setRow(r, "Chaos Detail", chaosDisplayTxt)
+                    r += 1
 
-            // Block + final outputs
-            f_add_header(t, row, "Scoring Block", "Value")
-            row += 1
-            marketScoreTxt = str.tostring(marketScore, "#.##") + "/20"
-            f_add_row(t, row, "Market Alignment", marketScoreTxt, marketScore >= minMarketScoreReq, false)
-            row += 1
-            f_add_row(t, row, "Stock Behavior", str.tostring(behaviorScore) + "/20", behaviorScore >= 15, false)
-            row += 1
-            f_add_row(t, row, "Location", str.tostring(locationScore) + "/20", locationScore >= 10, false)
-            row += 1
-            f_add_row(t, row, "Risk Definition", str.tostring(riskScore) + "/20", riskScore >= 10, false)
-            row += 1
-            f_add_row(t, row, "Reward Justification", str.tostring(rewardScore) + "/20", rewardScore >= 10, false)
-            row += 1
-
-            table.cell(t, 0, row, "TOTAL SCORE", text_color=color.white, bgcolor=color.new(color.navy, 65), text_halign=text.align_left)
-            table.cell(t, 1, row, str.tostring(score, "#.##") + "/100", text_color=color.white, bgcolor=color.new(color.navy, 65), text_halign=text.align_left)
-            row += 1
-
-            table.cell(t, 0, row, "GRADE (A/B/C/D)", text_color=color.white, bgcolor=gradeColor, text_halign=text.align_left)
-            table.cell(t, 1, row, grade, text_color=color.white, bgcolor=gradeColor, text_halign=text.align_left)
-            row += 1
-
-            table.cell(t, 0, row, "SIZE DECISION", text_color=color.white, bgcolor=sizeColor, text_halign=text.align_left)
-            table.cell(t, 1, row, sizeDecision, text_color=color.white, bgcolor=sizeColor, text_halign=text.align_left)
+                setHeader(r, "--- SCORE ---")
+                r += 1
+                setRow(r, "Subscores", subscoreDisplayTxt)
+                r += 1
+                setRow(r, "Score A Structure", scoreADisplayTxt)
+                r += 1
+                setRow(r, "Score B Momentum", scoreBDisplayTxt)
+                r += 1
+                setRow(r, "Score C Volume", scoreCDisplayTxt)
+                r += 1
+                setRow(r, "Score D Vol/ON", scoreDDisplayTxt)
+                r += 1
+                setRow(r, "Score E Behavior", scoreEDisplayTxt)
+                r += 1
+// Optional: no plots (document says prefer text output)
+// If you ever want to visually debug: uncomment these
+//plot(ema20, "EMA20")
+//plot(sma50, "SMA50")
+//plot(sma200, "SMA200")
