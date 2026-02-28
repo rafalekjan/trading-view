@@ -374,6 +374,8 @@ goNoGo = not hardStopActive and overallRank >= 3
 decisionTxt = goNoGo ? "GO" : "NO-GO"
 proceedTxt = not goNoGo ? "NO (wait for unlock)" : riskModeTxt == "NORMAL" ? "YES" : "YES (reduced/selective)"
 riskPlanTxt = riskModeTxt == "NORMAL" ? "FULL" : riskModeTxt == "REDUCED" ? "HALF" : "NO TRADE"
+riskPlanSev = riskPlanTxt == "FULL" ? 2 : riskPlanTxt == "HALF" ? 1 : 0
+riskModePlanTxt = riskModeTxt + " / " + riskPlanTxt
 
 topBlockerTxt =
      hardVol ? "Volatility EXTREME" :
@@ -437,10 +439,13 @@ decisionSev = goNoGo ? 2 : 0
 overallSev = overallRank == 4 ? 2 : overallRank == 3 ? 1 : 0
 riskModeSev = riskModeTxt == "NORMAL" ? 2 : riskModeTxt == "REDUCED" ? 1 : 0
 proceedSev = not goNoGo ? 0 : riskModeTxt == "NORMAL" ? 2 : 1
+riskModePlanSev = math.min(riskModeSev, riskPlanSev)
 blockersSev = topBlockerTxt == "None" ? 2 : 0
 warningsSev = warning1Txt == "None" ? 2 : 1
 waitForSev = topBlockerTxt == "None" and warning1Txt == "None" ? 2 : 1
 qualitySev = str.contains(qualityTxt, "A/B") ? 2 : str.contains(qualityTxt, "B/C") ? 1 : 0
+overallQualitySev = math.min(overallSev, qualitySev)
+overallQualityTxt = overallDisplayTxt + " | " + qualityTxt
 nextStepSev = proceedSev
 volSev = hardVol ? 0 : atrPct >= atrPctHigh ? 1 : 2
 overnightSev = hardOvernight ? 0 : gapCount >= math.max(1, gapCountWarn - 2) ? 1 : 2
@@ -456,7 +461,7 @@ var int rowsActive = 0
 isSummaryMode = tableMode == "Summary"
 isFullMode = tableMode == "Full"
 
-rowsSummary = 12
+rowsSummary = 9
 rowsCompactExtra = 16
 rowsFullExtra = 19
 rowsTarget = isSummaryMode ? rowsSummary : (isFullMode ? rowsSummary + rowsCompactExtra + rowsFullExtra : rowsSummary + rowsCompactExtra)
@@ -531,21 +536,15 @@ if barstate.islast
         r += 1
         setRowStatus(r, "Decision", decisionSev, decisionTxt)
         r += 1
-        setRowStatus(r, "Overall", overallSev, overallDisplayTxt)
+        setRowStatus(r, "Overall / Quality", overallQualitySev, overallQualityTxt)
         r += 1
-        setRowStatus(r, "Risk Mode", riskModeSev, riskModeTxt)
-        r += 1
-        setRowStatus(r, "Proceed", proceedSev, proceedTxt)
+        setRowStatus(r, "Risk Mode / Plan", riskModePlanSev, riskModePlanTxt)
         r += 1
         setRowStatus(r, "Top Blocker", blockersSev, topBlockerTxt)
         r += 1
         setRowStatus(r, "Warnings", warningsSev, warningsTxt)
         r += 1
         setRowStatus(r, "Wait For", waitForSev, waitForTxt)
-        r += 1
-        setRowStatus(r, "Risk Plan", proceedSev, riskPlanTxt)
-        r += 1
-        setRowStatus(r, "Trade Quality", qualitySev, qualityTxt)
         r += 1
         setRowStatus(r, "Next Step", nextStepSev, nextStepTxt)
         r += 1

@@ -578,6 +578,12 @@ riskPlanTxt = hardDefensive or not goNoGo ? "NO TRADE" : (softDefensive or riskM
 riskPlanSeverity = riskPlanTxt == "FULL" ? 2 : riskPlanTxt == "HALF" ? 1 : 0
 marketQualityTxt = tradeableTxt
 marketQualitySeverity = hardDefensive ? 0 : goNoGo ? (softDefensive ? 1 : 2) : 0
+riskModeSeverity = riskModeEff == "NORMAL" ? 2 : riskModeEff == "REDUCED" ? 1 : 0
+riskModePlanTxt = riskModeSummaryTxt + " / " + riskPlanTxt
+riskModePlanSeverity = math.min(riskModeSeverity, riskPlanSeverity)
+overallSeverity = overallRank == 4 ? 2 : overallRank == 3 ? 1 : 0
+overallQualityTxt = overallSummaryTxt + " | " + marketQualityTxt
+overallQualitySeverity = math.min(overallSeverity, marketQualitySeverity)
 
 confidenceRank = badCount >= 3 ? 0 : badCount <= 2 ? 1 : 1
 confidenceRank := badCount == 0 and warnCount <= 2 ? 2 : confidenceRank
@@ -595,8 +601,8 @@ pos =
      position.top_right
 
 // Table instance with runtime-configurable frame/border visibility.
-rowsSupportedSummaryOnly = 12
-rowsSupportedSummary = summaryOnly ? rowsSupportedSummaryOnly : 24
+rowsSupportedSummaryOnly = 9
+rowsSupportedSummary = summaryOnly ? rowsSupportedSummaryOnly : 21
 rowsSupportedScoreBreakdown = summaryOnly ? 0 : 2
 rowsSupportedDetail = summaryOnly ? 0 : (not compact ? 16 : 0)
 rowsSupported = rowsSupportedSummary + rowsSupportedScoreBreakdown + rowsSupportedDetail
@@ -621,7 +627,6 @@ goodBgColorNow = color.new(color.green, statusAlphaNow)
 warnBgColorNow = color.new(color.orange, statusAlphaNow)
 badBgColorNow = color.new(color.red, statusAlphaNow)
 decisionBgColorNow = goNoGo ? goodBgColorNow : badBgColorNow
-proceedBgColorNow = proceedRank == 2 ? goodBgColorNow : proceedRank == 1 ? warnBgColorNow : badBgColorNow
 hardStopBgColorNow = hardDefensive ? badBgColorNow : goodBgColorNow
 softStopBgColorNow = softDefensive ? warnBgColorNow : goodBgColorNow
 overallBgColorNow = overallRank == 4 ? goodBgColorNow : overallRank == 3 ? warnBgColorNow : overallRank == 2 ? warnBgColorNow : badBgColorNow
@@ -636,6 +641,8 @@ confidenceBgColorNow = confidenceRank == 2 ? goodBgColorNow : confidenceRank == 
 nextStepBgColorNow = hardDefensive ? badBgColorNow : softDefensive ? warnBgColorNow : goNoGo ? goodBgColorNow : badBgColorNow
 volatilityBgColorNow = atrPct >= atrPctVolExtreme ? badBgColorNow : isVolatile ? warnBgColorNow : goodBgColorNow
 overnightBgColorNow = overnightRisk ? badBgColorNow : goodBgColorNow
+riskModePlanBgColorNow = riskModePlanSeverity == 2 ? goodBgColorNow : riskModePlanSeverity == 1 ? warnBgColorNow : badBgColorNow
+overallQualityBgColorNow = overallQualitySeverity == 2 ? goodBgColorNow : overallQualitySeverity == 1 ? warnBgColorNow : badBgColorNow
 
 setRow(_r, _k, _v) =>
     table.cell(t, 0, _r, _k, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
@@ -687,21 +694,15 @@ if barstate.islast
             r += 1
             setRowStatus(r, "Decision", decisionSummaryTxt, decisionBgColorNow)
             r += 1
-            setRowStatus(r, "Overall", overallSummaryTxt, overallBgColorNow)
+            setRowStatus(r, "Overall / Quality", overallQualityTxt, overallQualityBgColorNow)
             r += 1
-            setRowStatus(r, "Risk Mode", riskModeSummaryTxt, riskModeBgColorNow)
-            r += 1
-            setRowStatus(r, "Proceed", proceedTxt, proceedBgColorNow)
+            setRowStatus(r, "Risk Mode / Plan", riskModePlanTxt, riskModePlanBgColorNow)
             r += 1
             setRowStatus(r, "Top Blocker", topBlockerSummaryTxt, blockersBgColorNow)
             r += 1
             setRowStatus(r, "Warnings", warningsTxt, warningsBgColorNow)
             r += 1
             setRowStatus(r, "Wait For", waitForTxt, waitForBgColorNow)
-            r += 1
-            setRowStatus(r, "Risk Plan", riskPlanTxt, riskPlanBgColorNow)
-            r += 1
-            setRowStatus(r, "Trade Quality", marketQualityTxt, marketQualityBgColorNow)
             r += 1
             setRowStatus(r, "Next Step", nextStepTxt, nextStepBgColorNow)
             r += 1
