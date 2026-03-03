@@ -10,7 +10,6 @@ showNumbers = input.bool(false, "Show numbers (debug)", group="Table")
 visibilityPct = input.int(100, "Visibility 0-100", minval=0, maxval=100, group="Table")
 fontSizeOpt = input.string("Tiny", "Font size", options=["Tiny","Small","Normal"], group="Table")
 tablePos    = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group="Table")
-compactText = input.bool(false, "Compact text", group="Table")
 tableMode   = input.string("Full", "Table mode", options=["Summary","Compact","Full"], group="Table")
 showFrame   = input.bool(true, "Show table frame", group="Table")
 showBorders = input.bool(true, "Show cell borders", group="Table")
@@ -18,9 +17,14 @@ frameWidthInp = input.int(1, "Frame width", minval=0, maxval=5, group="Table")
 borderWidthInp = input.int(1, "Cell border width", minval=0, maxval=5, group="Table")
 frameColorInp = input.color(color.new(color.white, 0), "Frame color", group="Table")
 borderColorInp = input.color(color.new(color.white, 0), "Cell border color", group="Table")
+summaryCaseOpt = input.string("Original", "Summary text case", options=["Original","UPPER","lower"], group="Table")
+summaryGoodInp = input.color(color.new(color.green, 0), "Summary GOOD bg", group="Table")
+summaryWarnInp = input.color(color.new(color.orange, 0), "Summary WARN bg", group="Table")
+summaryBadInp  = input.color(color.new(color.red, 0), "Summary BAD bg", group="Table")
 
 // Structure / pivots
 pivotLR     = input.int(3, "Swing pivot L/R", minval=1, maxval=20, group="Structure")
+pivotTolAtr = input.float(0.15, "Swing tolerance (ATR, wick filter)", minval=0.0, step=0.05, group="Structure")
 majorPivotLR= input.int(10, "Major pivot L/R (key levels)", minval=3, maxval=50, group="Structure")
 lookKeyLvls = input.int(252, "Key levels lookback (e.g., 52w)", minval=50, maxval=1000, group="Structure")
 
@@ -88,8 +92,6 @@ pos = tablePos == "Top Left" ? position.top_left : tablePos == "Bottom Left" ? p
 slopePct(src, len) => nz(100.0 * (src - src[len]) / src[len])
 isFlat(v) => math.abs(v) < flatSlopePct
 
-fmtTxt(a, b) => compactText ? a : (a + " â€” " + b)
-
 //â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 // Backend calculations
 //â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
@@ -133,20 +135,25 @@ if not na(pl)
     lastPL := pl
 
 haveSwings = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL)
+pivotTol = atr * pivotTolAtr
 
-hh = haveSwings and (lastPH > prevPH)
-lh = haveSwings and (lastPH < prevPH)
-hl = haveSwings and (lastPL > prevPL)
-ll = haveSwings and (lastPL < prevPL)
+hh = haveSwings and (lastPH > prevPH + pivotTol)
+lh = haveSwings and (lastPH < prevPH - pivotTol)
+hl = haveSwings and (lastPL > prevPL + pivotTol)
+ll = haveSwings and (lastPL < prevPL - pivotTol)
+hEq = haveSwings and not hh and not lh
+lEq = haveSwings and not hl and not ll
+bullStruct = haveSwings and hh and (hl or lEq)
+bearStruct = haveSwings and ll and (lh or hEq)
 
-structureTxt = not haveSwings ? "Structure N/A (waiting for swings)" : (hh and hl) ? "Bull structure (HH+HL)" : (lh and ll) ? "Bear structure (LH+LL)" : "Overlapping / unclear (chop)"
+structureTxt = not haveSwings ? "Structure N/A (waiting for swings)" : bullStruct ? "Bull structure (HH+HL)" : bearStruct ? "Bear structure (LH+LL)" : "Overlapping / unclear (chop)"
 
 // Direction clarity (non-negotiable)
-dirTxt = not haveSwings ? "Direction N/A" : (hh and hl) ? "Direction = BULL" : (lh and ll) ? "Direction = BEAR" : "Direction unclear (no-trade bias)"
+dirTxt = not haveSwings ? "Direction N/A" : bullStruct ? "Direction = BULL" : bearStruct ? "Direction = BEAR" : "Direction unclear (no-trade bias)"
 
 // Structure integrity (is trend thesis still valid?)
 // Bull thesis invalid if break last swing low; bear thesis invalid if break last swing high.
-structIntact = (hh and hl) ? (close > lastPL) : (lh and ll) ? (close < lastPH) : false
+structIntact = bullStruct ? (close > lastPL) : bearStruct ? (close < lastPH) : false
 
 integrityTxt = not haveSwings ? "Integrity N/A" : structIntact ? "Structure intact" : "Structure broken (thesis invalid)"
 
@@ -222,7 +229,7 @@ bearDiv = haveSwings and haveRsiSwings and (lastPH > prevPH) and (lastRsiPH < pr
 divTxt = not (haveSwings and haveRsiSwings) ? "Divergence N/A" : bullDiv ? "Bull divergence warning" : bearDiv ? "Bear divergence warning" : "No divergence warning"
 
 // RSI vs structure conflict
-rsiConflict = (hh and hl and rsi < 50) or (lh and ll and rsi > 50)
+rsiConflict = (bullStruct and rsi < 50) or (bearStruct and rsi > 50)
 rsiConflictTxt = rsiConflict ? "RSI contradicts structure â†’ caution" : "RSI aligned (no conflict flag)"
 
 // MACD momentum + flipiness (chop)
@@ -247,8 +254,8 @@ breakBelow = haveSwings and close < lastPL
 breakVolTxt = not haveSwings ? "Breakout N/A" : breakAbove ? (volume >= volMA * breakVolMult ? "Breakout up + volume confirms" : "Breakout up BUT weak volume") : breakBelow ? (volume >= volMA * breakVolMult ? "Breakdown + volume confirms" : "Breakdown BUT weak volume") : "No active swing breakout"
 
 // Pullback volume quality (volume dries up on pullback = healthier trend)
-pullbackBarBull = haveSwings and hh and hl and close < close[1] and close >= ema20
-pullbackBarBear = haveSwings and lh and ll and close > close[1] and close <= ema20
+pullbackBarBull = bullStruct and close < close[1] and close >= ema20
+pullbackBarBear = bearStruct and close > close[1] and close <= ema20
 pullbackBar = pullbackBarBull or pullbackBarBear
 pullbackVolLookback = 10
 pullbackBarsCount = math.sum(pullbackBar ? 1.0 : 0.0, pullbackVolLookback)
@@ -303,11 +310,20 @@ riskShort= (atr > 0 and not na(invalShort)) ? (invalShort - close) : na
 riskDefLong  = not na(riskLong)  and riskLong > 0 and (riskLong/atr <= maxStopAtr)
 riskDefShort = not na(riskShort) and riskShort > 0 and (riskShort/atr <= maxStopAtr)
 
-riskDefTxt = not haveSwings ? "Risk definition N/A" : (hh and hl) ? (riskDefLong ? "Risk definable (invalidation at last swing low)" : "Risk NOT clean (stop too wide/unclear)") : (lh and ll) ? (riskDefShort ? "Risk definable (invalidation at last swing high)" : "Risk NOT clean (stop too wide/unclear)") : "Risk definition weak (no clear direction)"
+riskDefTxt = not haveSwings ? "Risk definition N/A" : bullStruct ? (riskDefLong ? "Risk definable (invalidation at last swing low)" : "Risk NOT clean (stop too wide/unclear)") : bearStruct ? (riskDefShort ? "Risk definable (invalidation at last swing high)" : "Risk NOT clean (stop too wide/unclear)") : "Risk definition weak (no clear direction)"
 
 // Reward target: next level (52w or major pivot) in trend direction
-targetLong = math.min(nz(lastMajorH, hi52), hi52)
-targetShort= math.max(nz(lastMajorL, lo52), lo52)
+longLvl1 = (not na(lastPH) and lastPH > close) ? lastPH : na
+longLvl2 = (not na(lastMajorH) and lastMajorH > close) ? lastMajorH : na
+longLvl3 = hi52 > close ? hi52 : na
+longTmp = na(longLvl1) ? longLvl2 : na(longLvl2) ? longLvl1 : math.min(longLvl1, longLvl2)
+targetLong = na(longTmp) ? longLvl3 : na(longLvl3) ? longTmp : math.min(longTmp, longLvl3)
+
+shortLvl1 = (not na(lastPL) and lastPL < close) ? lastPL : na
+shortLvl2 = (not na(lastMajorL) and lastMajorL < close) ? lastMajorL : na
+shortLvl3 = lo52 < close ? lo52 : na
+shortTmp = na(shortLvl1) ? shortLvl2 : na(shortLvl2) ? shortLvl1 : math.max(shortLvl1, shortLvl2)
+targetShort= na(shortTmp) ? shortLvl3 : na(shortLvl3) ? shortTmp : math.max(shortTmp, shortLvl3)
 
 rewardLong  = (not na(targetLong))  ? (targetLong - close) : na
 rewardShort = (not na(targetShort)) ? (close - targetShort) : na
@@ -315,7 +331,7 @@ rewardShort = (not na(targetShort)) ? (close - targetShort) : na
 rrLong  = (not na(riskLong)  and riskLong  > 0 and not na(rewardLong))  ? (rewardLong / riskLong) : na
 rrShort = (not na(riskShort) and riskShort > 0 and not na(rewardShort)) ? (rewardShort / riskShort) : na
 
-rrTxt = not haveSwings ? "Reward N/A" : (hh and hl) ? (na(rrLong) ? "RR N/A" : rrLong >= minRR_Strong ? "Reward strong (3:1+)" : rrLong >= minRR_Accept ? "Reward acceptable (2:1+)" : "Reward weak (<2:1)") : (lh and ll) ? (na(rrShort) ? "RR N/A" : rrShort >= minRR_Strong ? "Reward strong (3:1+)" : rrShort >= minRR_Accept ? "Reward acceptable (2:1+)" : "Reward weak (<2:1)") : "Reward unclear (no direction)"
+rrTxt = not haveSwings ? "Reward N/A" : bullStruct ? (na(rrLong) ? "RR N/A" : rrLong >= minRR_Strong ? "Reward strong (3:1+)" : rrLong >= minRR_Accept ? "Reward acceptable (2:1+)" : "Reward weak (<2:1)") : bearStruct ? (na(rrShort) ? "RR N/A" : rrShort >= minRR_Strong ? "Reward strong (3:1+)" : rrShort >= minRR_Accept ? "Reward acceptable (2:1+)" : "Reward weak (<2:1)") : "Reward unclear (no direction)"
 
 // Final â€śtrade qualityâ€ť label (text-only)
 volHardStop = atrPct >= atrPctExtreme or (not na(atrJump) and atrJump >= atrJumpMult)
@@ -329,8 +345,8 @@ doNothing = noDir or volHardStop or badOvernight or (badLocation and badExtended
 
 qualityTxt = doNothing ? "DO NOTHING (cash valid)" : (not structIntact) ? "C/D (structure broken)" : (badExtended or badLocation) ? "B/C (location/extended caution)" : (badMomentum) ? "B/C (momentum caution)" : "A/B (supportive daily context)"
 
-riskDefOk = (hh and hl and riskDefLong) or (lh and ll and riskDefShort)
-rrWeak = (hh and hl and (na(rrLong) or rrLong < minRR_Accept)) or (lh and ll and (na(rrShort) or rrShort < minRR_Accept))
+riskDefOk = (bullStruct and riskDefLong) or (bearStruct and riskDefShort)
+rrWeak = (bullStruct and (na(rrLong) or rrLong < minRR_Accept)) or (bearStruct and (na(rrShort) or rrShort < minRR_Accept))
 
 hardNoDir = noDir
 hardStruct = haveSwings and not structIntact
@@ -345,34 +361,58 @@ warnMomentum = badMomentum
 warnRiskDef = not riskDefOk
 warnRR = rrWeak
 warnUnstable = not na(atrJump) and atrJump >= atrJumpMult
-warnWeakVolume = priceUp and not volUp
-warnPullback = (hh and hl and not pullbackVolHealthy) or (lh and ll and not pullbackVolHealthy)
+warnWeakVolume = (bullStruct and priceUp and not volUp) or (bearStruct and (not priceUp) and not volUp)
+warnPullback = (bullStruct and not pullbackVolHealthy) or (bearStruct and not pullbackVolHealthy)
 warnChaos = (sloppyCount >= sloppyWarnCount or outsideCount >= math.ceil(sloppyWarnCount / 2))
 
-overallPenalty =
-     (hardNoDir ? 35.0 : 0.0) +
-     (hardStruct ? 35.0 : 0.0) +
-     (hardVol ? 30.0 : 0.0) +
-     (hardOvernight ? 25.0 : 0.0) +
-     (warnLocation ? 12.0 : 0.0) +
-     (warnExtended ? 12.0 : 0.0) +
-     (warnMomentum ? 15.0 : 0.0) +
-     (warnRiskDef ? 20.0 : 0.0) +
-     (warnRR ? 15.0 : 0.0) +
-     (warnUnstable ? 10.0 : 0.0) +
-     (warnWeakVolume ? 8.0 : 0.0) +
-     (warnPullback ? 10.0 : 0.0) +
-     (warnChaos ? 10.0 : 0.0)
-overallScore = math.max(0.0, math.min(100.0, 100.0 - overallPenalty))
+// Score model aligned with SPY 1D: subscore buckets A-E summed to 0..100.
+isTrendUp = bullStruct
+isTrendDown = bearStruct
+trendAlignedMAs = (isTrendUp and ema20Slope > 0 and sma50Slope > 0) or (isTrendDown and ema20Slope < 0 and sma50Slope < 0)
+scoreA = ((isTrendUp or isTrendDown) ? 15.0 : 0.0) +
+     (trendAlignedMAs ? 10.0 : 0.0) +
+     ((structIntact and not warnChop) ? 10.0 : structIntact ? 5.0 : 0.0) -
+     (warnChop ? 15.0 : 0.0) -
+     (badLocation ? 8.0 : 0.0)
+scoreA := math.max(0.0, math.min(35.0, scoreA))
 
-overallRank = hardStopActive ? 1 : overallScore >= 80 ? 4 : overallScore >= 65 ? 3 : overallScore >= 45 ? 2 : 1
+rsiStructBull = haveRsiSwings and lastRsiPL > prevRsiPL
+rsiStructBear = haveRsiSwings and lastRsiPH < prevRsiPH
+rsiDirOk = (isTrendUp and rsi > 50) or (isTrendDown and rsi < 50)
+rsiStructOk = (isTrendUp and (rsiStructBull or rsiRecover)) or (isTrendDown and (rsiStructBear or rsiRecover))
+macdDirOk = (isTrendUp and macdLine > macdSignal and macdHist > 0) or (isTrendDown and macdLine < macdSignal and macdHist < 0)
+scoreB = (rsiDirOk ? 8.0 : 0.0) + (rsiStructOk ? 6.0 : 0.0) + (macdDirOk ? 6.0 : 0.0) - ((macdFlipCount >= macdFlipWarn) ? 6.0 : 0.0)
+scoreB := math.max(0.0, math.min(20.0, scoreB))
+
+volTrendOk = (isTrendUp and priceUp and volUp) or (isTrendDown and (not priceUp) and volUp)
+breakoutVolPenalty = (breakAbove and volume < volMA * breakVolMult) or (breakBelow and volume < volMA * breakVolMult)
+breakoutVolOk = (not breakAbove and not breakBelow) or (breakAbove and volume >= volMA * breakVolMult) or (breakBelow and volume >= volMA * breakVolMult)
+scoreC = (volTrendOk ? 5.0 : 0.0) + (breakoutVolOk ? 5.0 : 0.0) - (breakoutVolPenalty ? 5.0 : 0.0)
+scoreC := math.max(0.0, math.min(10.0, scoreC))
+
+isVolatile = atrPct >= atrPctHigh
+scoreD = (atrPct < atrPctHigh ? 10.0 : atrPct < atrPctExtreme ? 4.0 : 0.0) +
+     ((not hardOvernight and not warnUnstable) ? 10.0 : not hardOvernight ? 4.0 : 0.0) -
+     ((isVolatile and atrPct < atrPctExtreme) ? 8.0 : 0.0) -
+     ((hardVol or hardOvernight) ? 15.0 : 0.0)
+scoreD := math.max(0.0, math.min(20.0, scoreD))
+
+scoreE = (pullbackVolHealthy ? 8.0 : 0.0) +
+     ((not warnChaos and not warnPullback) ? 7.0 : (not warnChaos or not warnPullback) ? 3.0 : 0.0) -
+     ((warnChaos or warnPullback) ? 10.0 : 0.0)
+scoreE := math.max(0.0, math.min(15.0, scoreE))
+
+overallScore = math.max(0.0, math.min(100.0, scoreA + scoreB + scoreC + scoreD + scoreE))
+
+overallRank = hardStopActive ? 1 : overallScore >= 80 ? 4 : overallScore >= 60 ? 3 : overallScore >= 40 ? 2 : 1
 overallTxt = overallRank == 4 ? "A TRADEABLE" : overallRank == 3 ? "B SELECTIVE" : overallRank == 2 ? "C DEFENSIVE" : "D NO-TRADE"
 overallDisplayTxt = showNumbers ? overallTxt + " (" + str.tostring(overallScore, "#.##") + "/100)" : overallTxt
 
 riskModeTxt = overallRank == 4 ? "NORMAL" : overallRank == 3 ? "REDUCED" : "DEFENSIVE"
 goNoGo = not hardStopActive and overallRank >= 3
+canProceed4H = not hardStopActive and overallRank >= 3
 decisionTxt = goNoGo ? "GO" : "NO-GO"
-proceedTxt = not goNoGo ? "NO (wait for unlock)" : riskModeTxt == "NORMAL" ? "YES" : "YES (reduced/selective)"
+proceedTxt = not canProceed4H ? "NO (wait for unlock)" : overallRank == 4 ? "YES" : "YES (reduced/selective)"
 riskPlanTxt = riskModeTxt == "NORMAL" ? "FULL" : riskModeTxt == "REDUCED" ? "HALF" : "NO TRADE"
 riskPlanSev = riskPlanTxt == "FULL" ? 2 : riskPlanTxt == "HALF" ? 1 : 0
 riskModePlanTxt = riskModeTxt + " / " + riskPlanTxt
@@ -432,7 +472,7 @@ waitForTxt =
      topBlockerTxt == "Price extended" ? "Wait: pullback toward 20EMA/50SMA or base" :
      "No unlock condition needed"
 
-rrValue = (hh and hl) ? rrLong : (lh and ll) ? rrShort : na
+rrValue = bullStruct ? rrLong : bearStruct ? rrShort : na
 rrDisplayTxt = showNumbers and not na(rrValue) ? rrTxt + " (" + str.tostring(rrValue, "#.##") + "x)" : rrTxt
 
 decisionSev = goNoGo ? 2 : 0
@@ -446,12 +486,18 @@ waitForSev = topBlockerTxt == "None" and warning1Txt == "None" ? 2 : 1
 qualitySev = str.contains(qualityTxt, "A/B") ? 2 : str.contains(qualityTxt, "B/C") ? 1 : 0
 overallQualitySev = math.min(overallSev, qualitySev)
 overallQualityTxt = overallDisplayTxt + " | " + qualityTxt
-nextStepSev = proceedSev
+nextStepSev = not canProceed4H ? 0 : overallRank == 4 ? 2 : 1
 volSev = hardVol ? 0 : atrPct >= atrPctHigh ? 1 : 2
 overnightSev = hardOvernight ? 0 : gapCount >= math.max(1, gapCountWarn - 2) ? 1 : 2
 riskDefSev = not haveSwings ? 1 : riskDefOk ? 2 : 0
 rrSev = not haveSwings ? 1 : warnRR ? 0 : 2
-nextStepTxt = not goNoGo ? "Wait for unlock conditions" : riskModeTxt == "NORMAL" ? "Proceed to setup planning" : "Proceed with reduced risk"
+nextStepTxt = not canProceed4H ? "Do not proceed to 4H yet" : overallRank == 4 ? "Proceed to 4H planning" : "Proceed to 4H (reduced/selective)"
+scoreSummaryTxt = str.tostring(overallScore, "#.##") + "/100"
+directionSev = not haveSwings ? 1 : (bullStruct or bearStruct) ? 2 : 0
+rsSev = na(benchClose) ? 1 : rsSlope > 0 ? 2 : rsSlope < 0 ? 0 : 1
+locationSev = not haveSwings ? 1 : (extended20 or extended50) ? 1 : nearStructure ? 2 : 1
+topIssueSev = topBlockerTxt == "None" ? 2 : (topBlockerTxt == "Momentum conflict" or topBlockerTxt == "Chaos high / pullbacks not controlled" or topBlockerTxt == "Price extended") ? 1 : 0
+locationSummaryTxt = (extended20 or extended50) ? locationTxt + " | " + extendedTxt : locationTxt
 
 //â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 // Table lifecycle (create ONLY when eligible)
@@ -461,7 +507,7 @@ var int rowsActive = 0
 isSummaryMode = tableMode == "Summary"
 isFullMode = tableMode == "Full"
 
-rowsSummary = 9
+rowsSummary = 12
 rowsCompactExtra = 16
 rowsFullExtra = 19
 rowsTarget = isSummaryMode ? rowsSummary : (isFullMode ? rowsSummary + rowsCompactExtra + rowsFullExtra : rowsSummary + rowsCompactExtra)
@@ -482,29 +528,38 @@ statusAlphaNow = int(math.min(95, visAlphaNow + 35))
 goodBgColorNow = color.new(color.green, statusAlphaNow)
 warnBgColorNow = color.new(color.orange, statusAlphaNow)
 badBgColorNow = color.new(color.red, statusAlphaNow)
+summaryGoodBgColorNow = color.new(summaryGoodInp, statusAlphaNow)
+summaryWarnBgColorNow = color.new(summaryWarnInp, statusAlphaNow)
+summaryBadBgColorNow = color.new(summaryBadInp, statusAlphaNow)
+decisionBgColorNow = goNoGo ? goodBgColorNow : badBgColorNow
+overallBgColorNow = overallRank == 4 ? goodBgColorNow : overallRank == 3 ? warnBgColorNow : overallRank == 2 ? warnBgColorNow : badBgColorNow
+blockersBgColorNow = blockersSev == 2 ? goodBgColorNow : blockersSev == 1 ? warnBgColorNow : badBgColorNow
+warningsBgColorNow = warningsSev == 2 ? goodBgColorNow : warningsSev == 1 ? warnBgColorNow : badBgColorNow
+waitForBgColorNow = waitForSev == 2 ? goodBgColorNow : waitForSev == 1 ? warnBgColorNow : badBgColorNow
+riskModePlanBgColorNow = riskModePlanSev == 2 ? goodBgColorNow : riskModePlanSev == 1 ? warnBgColorNow : badBgColorNow
+overallQualityBgColorNow = overallQualitySev == 2 ? goodBgColorNow : overallQualitySev == 1 ? warnBgColorNow : badBgColorNow
 
 bgFromSev(_sev) =>
     _sev == 2 ? goodBgColorNow : _sev == 1 ? warnBgColorNow : badBgColorNow
 
-statusTag(_sev) =>
-    _sev == 2 ? "✅" : _sev == 1 ? "⚠️" : "❌"
+bgFromSummarySev(_sev) =>
+    _sev == 2 ? summaryGoodBgColorNow : _sev == 1 ? summaryWarnBgColorNow : summaryBadBgColorNow
+
+summaryCase(_txt) =>
+    summaryCaseOpt == "UPPER" ? str.upper(_txt) : summaryCaseOpt == "lower" ? str.lower(_txt) : _txt
 
 setRow(_r, _k, _v) =>
     table.cell(t, 0, _r, _k, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
-    table.cell(t, 1, _r, "-", text_halign=text.align_center, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
-    table.cell(t, 2, _r, _v, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
+    table.cell(t, 1, _r, _v, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
 
 setHeader(_r, _txt) =>
     table.cell(t, 0, _r, _txt, text_halign=text.align_left, text_color=textColorNow, bgcolor=sectionBgColorNow, text_size=textSizeNow)
     table.cell(t, 1, _r, "", text_halign=text.align_left, text_color=textColorNow, bgcolor=sectionBgColorNow, text_size=textSizeNow)
-    table.cell(t, 2, _r, "", text_halign=text.align_left, text_color=textColorNow, bgcolor=sectionBgColorNow, text_size=textSizeNow)
-    table.merge_cells(t, 0, _r, 2, _r)
+    table.merge_cells(t, 0, _r, 1, _r)
 
-setRowStatus(_r, _k, _sev, _v) =>
-    _bg = bgFromSev(_sev)
+setRowStatus(_r, _k, _v, _bg) =>
     table.cell(t, 0, _r, _k, text_halign=text.align_left, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
-    table.cell(t, 1, _r, statusTag(_sev), text_halign=text.align_center, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
-    table.cell(t, 2, _r, _v, text_halign=text.align_left, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
+    table.cell(t, 1, _r, _v, text_halign=text.align_left, text_color=emphTextColorNow, bgcolor=_bg, text_size=textSizeNow)
 
 if barstate.islast
     if not panelEnabled
@@ -516,7 +571,7 @@ if barstate.islast
         if na(t) or rowsActive != rowsTarget
             if not na(t)
                 table.delete(t)
-            t := table.new(pos, 3, rowsTarget, frame_width=1, border_width=1, frame_color=frameColorInp, border_color=borderColorInp)
+            t := table.new(pos, 2, rowsTarget, frame_width=1, border_width=1, frame_color=frameColorInp, border_color=borderColorInp)
             rowsActive := rowsTarget
 
         table.set_position(t, pos)
@@ -534,19 +589,25 @@ if barstate.islast
         r += 1
         setHeader(r, "--- SUMMARY ---")
         r += 1
-        setRowStatus(r, "Decision", decisionSev, decisionTxt)
+        setRowStatus(r, summaryCase("Edge?"), summaryCase(overallDisplayTxt), bgFromSummarySev(overallRank == 4 ? 2 : overallRank >= 2 ? 1 : 0))
         r += 1
-        setRowStatus(r, "Overall / Quality", overallQualitySev, overallQualityTxt)
+        setRowStatus(r, summaryCase("Direction"), summaryCase(dirTxt), bgFromSummarySev(directionSev))
         r += 1
-        setRowStatus(r, "Risk Mode / Plan", riskModePlanSev, riskModePlanTxt)
+        setRowStatus(r, summaryCase("RS vs Market"), summaryCase(rsTxt), bgFromSummarySev(rsSev))
         r += 1
-        setRowStatus(r, "Top Blocker", blockersSev, topBlockerTxt)
+        setRowStatus(r, summaryCase("Location"), summaryCase(locationSummaryTxt), bgFromSummarySev(locationSev))
         r += 1
-        setRowStatus(r, "Warnings", warningsSev, warningsTxt)
+        setRowStatus(r, summaryCase("Risk Definition"), summaryCase(riskDefTxt), bgFromSummarySev(riskDefSev))
         r += 1
-        setRowStatus(r, "Wait For", waitForSev, waitForTxt)
+        setRowStatus(r, summaryCase("Reward / RR"), summaryCase(rrDisplayTxt), bgFromSummarySev(rrSev))
         r += 1
-        setRowStatus(r, "Next Step", nextStepSev, nextStepTxt)
+        setRowStatus(r, summaryCase("Top Issue"), summaryCase(topBlockerTxt), bgFromSummarySev(topIssueSev))
+        r += 1
+        setRowStatus(r, summaryCase("Wait For"), summaryCase(waitForTxt), bgFromSummarySev(waitForSev))
+        r += 1
+        setRowStatus(r, summaryCase("Next Step"), summaryCase(nextStepTxt), bgFromSummarySev(nextStepSev))
+        r += 1
+        setRowStatus(r, summaryCase("Score"), summaryCase(scoreSummaryTxt), bgFromSummarySev(overallRank == 4 ? 2 : overallRank >= 2 ? 1 : 0))
         r += 1
 
         if not isSummaryMode
@@ -576,13 +637,13 @@ if barstate.islast
 
             setHeader(r, "--- RISK / OVERNIGHT ---")
             r += 1
-            setRowStatus(r, "Volatility", volSev, volTxt)
+            setRow(r, "Volatility", volTxt)
             r += 1
-            setRowStatus(r, "Overnight", overnightSev, overnightTxt)
+            setRow(r, "Overnight", overnightTxt)
             r += 1
-            setRowStatus(r, "Risk Definition", riskDefSev, riskDefTxt)
+            setRow(r, "Risk Definition", riskDefTxt)
             r += 1
-            setRowStatus(r, "Reward / RR", rrSev, rrDisplayTxt)
+            setRow(r, "Reward / RR", rrDisplayTxt)
             r += 1
 
             if isFullMode

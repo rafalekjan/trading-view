@@ -1,0 +1,338 @@
+Poniżej masz analizę **ModMark Blueprint wyłącznie pod moduł 15m “options”** (czyli **options day trading / intraday**, nie swing). Oparłem się na tekście wyciągniętym z PDF (w Twoim pliku PDF są elementy, które utrudniają klasyczne “wyszukiwanie/cytowanie” przez narzędzia, więc podaję **konkretne strony i fragmenty**, żebyś mógł łatwo zweryfikować w dokumencie).
+
+---
+
+## Rola skryptu 15m w systemie ModMark (options)
+
+W Blueprint 15m pojawia się jako **execution & timing** dla day trade’ów (obok 5m), a nie jako narzędzie do “ustalania kierunku” od zera.
+
+**Na czym ma się skupić 15m:**
+
+* “kiedy dokładnie wejść” + “czy momentum jest czyste czy poszarpane”
+* potwierdzanie reakcji na kluczowych poziomach
+* nieprzekraczanie biasu z wyższych TF (15m nie ma “zmieniać narracji”)
+  ➡️ To jest opisane wprost w sekcji o lower timeframe: 5m–15m to timing, a nie predykcja/korekta biasu. (str. 40)
+
+Dodatkowo Blueprint opisuje konkretny proces **options day trades**:
+
+* **Krok 1: Market Bias na SPY/QQQ na 5m + 15m**
+* pytania kontrolne: trend up/down/chop, VWAP hold/reject, momentum clean/choppy
+* “No bias = no trade” (str. 60)
+
+---
+
+## Co dokładnie skrypt 15m ma “odtworzyć” na TradingView
+
+### 1) “Market Bias (SPY/QQQ 5m + 15m)” — ale Ty robisz moduł 15m
+
+Blueprint sugeruje, że bias intraday oceniasz na SPY/QQQ w 5m i 15m. (str. 60)
+
+**W module 15m w TV** sensownie jest zrobić:
+
+* bias na **bieżącym symbolu** (jeśli jesteś na SPY lub QQQ), albo
+* (lepiej) opcję `Source = SPY / QQQ / Both`, żeby 15m panel mógł zawsze pokazać *kontekst rynku* nawet gdy jesteś na tickerze.
+  To spina się z Twoim założeniem: skrypt ma “przekazać stan marketu/tickera”.
+
+**Wynik ma być prosty:**
+
+* `INTRADAY BIAS: BULL / BEAR / NONE (CHOP)`
+  z jasno wyświetloną regułą: **No bias = no trade** (str. 60)
+
+### 2) VWAP: “holding vs rejecting”
+
+Wprost w checklist’cie dla day trade options: “Are we holding or rejecting VWAP?” (str. 60)
+
+**Skrypt 15m powinien więc pokazywać:**
+
+* `VWAP status: Above & holding / Below & rejecting / Around VWAP (chop risk)`
+* flagę `VWAP chop zone` jeśli cena “mieli” wokół VWAP (to w praktyce często koreluje z midday chop, którego Blueprint każe unikać). (str. 60)
+
+### 3) Momentum quality: “clean vs choppy”
+
+Blueprint rozróżnia “clean momentum” vs “choppy” jako warunek w ogóle rozważenia day trade. (str. 60)
+
+**W TV (15m) to powinno wyjść jako:**
+
+* `Momentum: CLEAN / MIXED / CHOPPY`
+* dodatkowa flaga: `Momentum stalls` (bo Blueprint mówi: jeśli day trade nie działa szybko, to jest zły). (str. 60)
+
+### 4) Volume: “elevated” jako warunek
+
+Blueprint: day trade options tylko gdy volume jest podniesione. (str. 60)
+
+**Skrypt 15m:**
+
+* `Volume: Elevated / Normal / Low`
+* “go/no-go” zależne od tego pola (ale uwaga: to ma być filtr jakości, nie trigger wejścia)
+
+### 5) Time windows (kontekst dnia)
+
+Blueprint bardzo jasno:
+
+* najlepsze: open (pierwsze 60–90 min), “high-volume continuation”, czyste breakouts/breakdowns
+* unikać: midday chop, low-volume drift, late-day gambling (str. 60)
+
+**To jest ważne w module 15m**, bo on ma “podjąć decyzję” w day tradingu.
+W TV da się to zrobić jako informacja:
+
+* `Session phase: OPEN / MIDDAY / LATE`
+* `Window quality: GOOD / AVOID`
+  (na podstawie czasu giełdy; dla Europy/Warszawy trzeba mapować na czas NYSE, ale to już implementacja)
+
+---
+
+## Minimalna specyfikacja “co ma pokazywać” moduł 15m (panel + status)
+
+Żeby spełnić Twoje wymaganie “pomaga w decyzji + komunikuje stan”:
+
+**Panel (table) — minimum:**
+
+1. `Intraday Bias (15m)` → BULL / BEAR / NONE
+2. `VWAP` → Holding / Rejecting / Chop zone
+3. `Momentum quality` → Clean / Mixed / Choppy
+4. `Volume` → Elevated / Normal / Low
+5. `Time window` → Good / Avoid
+6. `Decision` (jedna linia):
+
+   * `TRADEABLE` jeśli bias jest i (momentum clean) i (volume elevated) i (window good)
+   * `NO TRADE` jeśli “no bias” lub “chop” lub zły window
+     To odtwarza “No bias = no trade” + warunki z checklisty. (str. 60)
+
+---
+
+## Granice odpowiedzialności modułu 15m (żeby nie łamać Blueprint)
+
+Blueprint mówi wprost (str. 40, str. 28):
+
+* 15m ma robić **timing/confirmation**
+* nie ma “przewidywać kierunku”
+* nie ma “override’ować” wyższego TF
+* daily/wyższy TF ustawia kierunek; lower TF to wejście
+
+Czyli: moduł 15m może dawać **intraday bias**, ale powinien też pokazywać ostrzeżenie typu:
+
+* “Lower TF is timing — don’t override higher TF bias” (to jest dokładnie sens z dokumentu, str. 40)
+
+---
+
+
+
+Bardzo dobre pytanie — i nie, **to nie wszystko**.
+W 15m z Blueprint jest jeszcze kilka rzeczy, które są łatwe do przeoczenia, a są kluczowe dla options day trading.
+
+Poniżej masz **pełną mapę celów 15m**, bez skracania.
+
+---
+
+# 🎯 Główne cele TF 15m w ModMark (Options)
+
+15m **nie jest kierunkowy jak 1D** i **nie jest precyzyjnym triggerem jak 1m/5m**.
+
+To jest **TF decyzyjny dla intraday execution quality**.
+
+Można go sprowadzić do 4 głównych celów:
+
+---
+
+## 1️⃣ Cel #1 – Określić czy w ogóle jest warte grania (Tradeability Filter)
+
+15m ma odpowiedzieć:
+
+> Czy dzisiaj jest środowisko do day trade options, czy to będzie strata czasu?
+
+Blueprint jasno mówi:
+
+* No bias = no trade
+* Chop = no trade
+* Low volume drift = no trade
+* Midday chop = avoid
+
+To znaczy, że 15m jest:
+
+### 🔴 Filtr “czy grać w ogóle”
+
+Nie:
+
+* gdzie wejść
+* jak wejść
+* jaki strike
+
+Tylko:
+
+* czy środowisko daje edge
+
+To jest kluczowa rola.
+
+---
+
+## 2️⃣ Cel #2 – Jakość momentum (Clean vs Choppy)
+
+To jest często pomijane.
+
+15m ma ocenić:
+
+* czy świece są ekspansywne i kierunkowe
+* czy ruch ma follow-through
+* czy momentum jest poszarpane
+* czy struktura jest overlapping
+
+To jest **diagnostyka jakości ruchu**, nie kierunku.
+
+Dlaczego to ważne przy options?
+
+Bo:
+
+* options potrzebują szybkiego ruchu
+* brak momentum = theta + spread zjada pozycję
+
+15m ma ocenić:
+
+> Czy ruch ma “velocity”, czy jest to mieląca konsolidacja?
+
+---
+
+## 3️⃣ Cel #3 – VWAP control (bardzo ważne)
+
+W Blueprint VWAP to intraday kontrola:
+
+* reclaim = bullish pressure
+* rejection = bearish pressure
+* chop around VWAP = no edge
+
+15m ma:
+
+* pokazać kto kontroluje dzień
+* wykryć VWAP flip
+* ostrzec przed VWAP churn
+
+To jest kluczowe dla options intraday.
+
+---
+
+## 4️⃣ Cel #4 – Synchronizacja z wyższym TF
+
+15m ma być:
+
+* zgodny z 1D / 4H
+* nie może ich negować
+
+Czyli jego rola to:
+
+### Potwierdzenie kierunku z wyższego TF
+
+albo
+
+### Wykrycie, że dziś intraday idzie wbrew HTF (czyli caution)
+
+To bardzo ważne — bo Blueprint wyraźnie mówi, że lower TF nie ma zmieniać narracji.
+
+---
+
+# 📌 Co mogło zostać pominięte wcześniej?
+
+Tak — 3 elementy:
+
+---
+
+## 🔎 A) “Speed of Failure” (bardzo ważne dla options)
+
+Blueprint mówi:
+
+> Jeśli day trade nie działa szybko, to jest zły.
+
+To oznacza, że 15m powinien mierzyć:
+
+* czy breakout ma natychmiastowy follow-through
+* czy momentum gaśnie po 1–2 świecach
+
+To nie jest klasyczny wskaźnik — to diagnostyka jakości.
+
+Można to ująć jako:
+
+* Momentum Persistence
+* Breakout Continuation Score
+
+---
+
+## 🔎 B) “Session Context”
+
+15m ma wiedzieć:
+
+* czy to open drive
+* czy midday drift
+* czy late-day squeeze
+
+To jest osobna warstwa:
+
+* nie tylko bias
+* ale *kiedy* bias ma edge
+
+---
+
+## 🔎 C) Risk Compression vs Expansion
+
+15m powinien rozpoznawać:
+
+* expanding range day
+* compressing range day
+
+Bo:
+
+* expanding = dobre dla options
+* compressing = theta killer
+
+To nie było wcześniej wyraźnie wyartykułowane, ale wynika z logiki Blueprint.
+
+---
+
+# 🧠 Prawdziwa rola 15m w jednym zdaniu
+
+15m odpowiada na pytanie:
+
+> Czy intraday środowisko daje velocity i directional control potrzebne dla options?
+
+Nie:
+
+* gdzie wejść dokładnie
+* jaki strike
+* czy to swing
+
+Tylko:
+
+* czy dziś masz edge
+
+---
+
+# ⚖️ Co NIE jest celem 15m
+
+❌ Nie wybiera kontraktu
+❌ Nie ustala długoterminowego biasu
+❌ Nie przewiduje rynku
+❌ Nie zastępuje 1D
+❌ Nie jest scalp TF
+
+---
+
+# 🧩 Strukturalnie 15m powinien mieć 5 warstw w skrypcie
+
+1. Bias intraday
+2. VWAP control
+3. Momentum quality
+4. Volume condition
+5. Session quality
+
+I dopiero z tego:
+
+* Tradeable / No Trade / Defensive
+
+---
+
+# 🧭 Najważniejszy cel 15m (esencja Blueprint)
+
+Jeśli miałbym wybrać tylko jeden:
+
+> Chronić Cię przed graniem w chop i low-momentum środowisku.
+
+Bo to jest największy zabójca options intraday.
+
+---

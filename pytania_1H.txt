@@ -1,0 +1,159 @@
+Poniżej masz interpretację **kryteriów wyboru/akceptacji tickera** wg autora – ale zawężoną do roli, jaką **wykres 1H** ma pełnić w jego frameworku: **„Middle timeframe = Structure & Planning”** (tu projektujesz trade: strefa wejścia, logika stopa, cele; jeśli 1H jest „messy”, nie schodzisz niżej). 
+
+## 1) Główne pytanie: na jakie pytania ma odpowiadać wykres (1H)?
+
+Autor podkreśla, że **myśli „w pytaniach, nie w prognozach”** i trade jest ważny tylko, jeśli umiesz odpowiedzieć jasno na kluczowe punkty. 
+
+Na 1H wykres ma Ci odpowiedzieć (wprost, bez „może”):
+
+1. **Czy struktura jest czysta i czytelna – co tu jest grane? (trend / range / breakout-breakdown)**
+   Jeśli nie umiesz tego nazwać prosto (i/lub w 1 zdaniu), to wg autora to *nie jest czysty wykres* i nie powinien przejść dalej.
+
+2. **Gdzie dokładnie „chcę się zaangażować” (strefa wejścia) na 1H?**
+   To jest dosłownie zadanie 1H w hierarchii: wskazać *pullback / konsolidację / kontynuację trendu / obszar, gdzie ryzyko da się zdefiniować*. 
+
+3. **Jaki poziom ma znaczenie i jak cena reaguje przy poziomie?** (hold / reject / break&hold)
+   Autor wymaga reakcji na poziomie, nie „dotknięcia”.
+
+4. **Gdzie jestem „w błędzie” (invalidation) – konkretna cena, nie emocja?**
+   Stop ma wynikać z unieważnienia tezy (struktura/poziom), a brak klarownego invalidation = brak trade.
+
+5. **Czy istnieją logiczne targety i czy reward realnie uzasadnia ryzyko?**
+   Wymóg: target ma być logiczny (S/R, range, measured move), a R:R ma być *co najmniej akceptowalne* (autor podaje regułę kciuka 2:1+ jako „acceptable”, 3:1+ jako „strong”).
+
+6. **Czy wolumen i momentum wspierają to, co widzę na cenie?**
+   Na 1H ma być widać: wolumen rośnie na ruchu w kierunku tezy, maleje na pullbackach; gdy wolumen przeczy cenie – czekasz.
+
+7. **Czy ten ticker „zachowuje się dobrze” (clean behavior), czy jest chaotyczny/iluzoryczny?**
+   Autor filtruje tickery po: clean strukturze, respektowaniu poziomów, spójności wolumenu i unikaniu erratycznych ruchów/false breakoutów.
+
+---
+
+## 2) „Mierzalne” warunki akceptacji tickera na 1H (checklista YES/NO)
+
+Poniżej masz checklistę zrobioną tak, żeby każdy punkt dało się **odhaczyć** (tak/nie), zgodnie z zasadą autora: *jeśli jeden filtr odpada – trade odpada*. 
+
+### A) Struktura i czytelność (1H)
+
+* **Potrafię sklasyfikować strukturę na 1H jako**: trend / range / breakout-breakdown. Jeśli nie → **NO TRADE**.
+* **Wykres jest „clean”**: brak ciągłych whipsawów i chaosu; poziomy są „obvious” i cena je respektuje (a nie sieka w obie strony).
+* **Jeśli struktura na 1H jest messy** → nie schodzę na niższe TF (autor: 1H to „projektowanie”, nie „szukanie wymówek na 5m”). 
+
+### B) Poziom i „location” (1H)
+
+* Mam zaznaczony **konkretny poziom / strefę**, przy której cena ma sensowny „punkt decyzji” (S/R, granice konsolidacji, okolice MA jako konfluencja).
+* Cena jest **blisko struktury**, a nie „w środku niczego” / po dużym wybiciu (extended). Jeśli jest extended → czekam.
+
+### C) Potwierdzenie wejścia (1H jako TF potwierdzający dla swingów)
+
+* Na poziomie widzę **reakcję**: hold / rejection / break&hold (nie wejście „bo dotknęło”). 
+* Widzę **potwierdzenie struktury**: dla longa (higher low → wybicie minor high / konsolidacja → kontynuacja), dla shorta (lower high → wybicie minor low / failure na oporze). 
+
+### D) Ryzyko (invalidation) – warunek twardy
+
+* Mam wpisaną **cenę invalidation** (gdzie teza przestaje mieć sens), a stop wynika ze struktury (np. poniżej wsparcia/swing low lub powyżej oporu/swing high), nie z „bólu w $”.
+* Jeśli nie potrafię zdefiniować ryzyka „czysto”, trade jest automatycznie **C/D** (czyli praktycznie do pominięcia). 
+* Zasada „non-negotiable”: **nigdy nie wchodzę bez zdefiniowanego ryzyka** i **nie przesuwam stopa, żeby nie mieć racji**. 
+
+### E) Reward / sens transakcji (R:R)
+
+* Mam **logiczny Target 1** (np. kolejny S/R / granica range), zanim kliknę wejście. Jeśli nie mam targetu → brak trade.
+* Liczę R:R (od entry do targetu vs od entry do stopa) i spełniam regułę autora:
+
+  * **< 2:1 = low quality**,
+  * **≥ 2:1 = acceptable**,
+  * **≥ 3:1 = strong**. 
+
+### F) Wolumen / momentum (1H)
+
+* Na świecach w kierunku tezy widzę **wzrost udziału (volume)**, a na pullbackach **spadek**; jeśli wolumen „kłóci się” z ruchem ceny → czekam / odrzucam.
+
+### G) Dyskwalifikatory (NO TRADE) – szybkie odrzucenie
+
+Odrzucasz ticker natychmiast, jeśli:
+
+* nie da się opisać trade’a **jednym zdaniem** (brak prostoty = brak jakości), 
+* setup opiera się na „nadziei”, jest bez poziomu albo bez invalidation,
+* wykres jest choppy/bez follow-through lub cena ignoruje poziomy (whipsaw).
+
+---
+
+## 3) Dwa „wymogi wejściowe” zanim w ogóle oceniasz 1H (akceptacja tickera jako instrumentu)
+
+To nie jest stricte 1H, ale autor traktuje to jako **warunek akceptacji tickera** (czy w ogóle wolno go rozważać):
+
+* **Płynność akcji jest mierzalna**: autor podaje próg *średniego dziennego wolumenu 10–20M akcji+* oraz „smooth candles, not jumpy”. 
+* **Opcje muszą być płynne**: tight bid/ask (mała luka), real OI i real volume; jeśli spready są szerokie lub chain jest „thin” → ticker wypada z listy.
+
+---
+2. **Relatywna siła/słabość tickera vs rynek + zachowanie na poziomach (jako kryterium wyboru tickera)**
+   To jest osobny etap filtra decyzyjnego: ticker ma być „stronger/weaker than market”, respektować poziomy i mieć wolumen wspierający ruch — inaczej pass. 
+
+3. **“Location” jako twardy wymóg (extended / middle of nowhere = nie)**
+   Autor bardzo jasno: jeśli cena jest „extended” albo “w środku niczego”, to czekasz — to jest kryterium odrzutu. 
+
+4. **Wymóg kolejności (workflow), czyli: reakcja → struktura → wolumen/momentum → dopiero plan (entry/stop/target) i wejście po potwierdzeniu**
+   W dokumencie to jest opisane jako proces “no anticipation”: nie wchodzisz na dotknięciu poziomu; czekasz na reakcję + potwierdzenie struktury + zgodność wolumenu/momentum, a dopiero potem musisz mieć z góry entry/stop/target.
+
+---
+
+Pewnie — najwygodniej zrobić **tabelę decyzyjną w 2 warstwach**: (1) *bramki YES/NO (gating)*, które **dyskwalifikują trade, jeśli choć jedna jest „NIE”**, oraz (2) *metryki planu* (entry/stop/target/RR/ATR), żeby wszystko było mierzalne i spójne z workflow autora.
+
+---
+
+## 1) Tabela decyzyjna: BRAMKI (YES/NO) — w kolejności autora
+
+**Zasada działania:** idziesz od góry do dołu. Pierwsze „NIE” = **PASS (brak trade)**.
+
+> Proponowane kolumny: **Etap / Filtr / Pytanie (co ma odpowiedzieć wykres?) / Jak mierzę / Standard (PASS) / Wynik (TAK/NIE) / Dowód (co zaznaczasz)**
+
+| Etap | Filtr (framework)                    | Pytanie, na które ma odpowiedzieć wykres                                     | Jak to mierzysz (mierzalnie)                                                       | Standard PASS (minimalny)                                     | TAK/NIE | Dowód (zrzut/oznaczenie)  |
+| ---- | ------------------------------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------- | ------------------------- |
+| 1    | **Market alignment**                 | Czy rynek jest wspierający (trend/range/chop/vol) dla mojego kierunku?       | Opis 1 zdaniem + klasyfikacja (trend/range/chop/volatile)                          | „Da się opisać jasno” i kierunek nie walczy z rynkiem         |         | SPY/QQQ: struktura + opis |
+| 2    | **Stock behavior**                   | Czy ticker jest RS/RW vs rynek i zachowuje się „clean”?                      | RS/RW: porównanie zachowania vs SPY/QQQ + „respekt poziomów”                       | RS albo RW (nie „idzie jak indeks”) + brak chaosu/whipsaw     |         | 2 wykresy obok + poziomy  |
+| 3    | **Vehicle / liquidity**              | Czy to w ogóle jest trade’owalny „vehicle” (akcja + opcje)?                  | Avg daily volume (liczba) + spread/OI/vol na opcji                                 | Vol akcji **≥ 10–20M** + opcje „tight”, OI/vol obecne         |         | screen z vol + chain      |
+| 4    | **Daily alignment (pre-check)**      | Czy Daily wspiera kierunek? (jeśli nie, nie schodzę)                         | Kierunek Daily + najbliższe S/R                                                    | Daily nie konfliktuje z tezą                                  |         | Daily z S/R               |
+| 5    | **Location (1H)**                    | Czy cena jest „blisko struktury”, a nie „w środku niczego”/extended?         | Odległość od key level + kontekst struktury                                        | Cena przy level/strukturze; brak „chase”                      |         | 1H z zazn. strefą         |
+| 6    | **1H structure clarity**             | Czy na 1H potrafię nazwać strukturę: trend/range/break?                      | Jednoznaczna klasyfikacja                                                          | Jeśli nie umiesz nazwać → PASS                                |         | 1H + opis 1 zdaniem       |
+| 7    | **Key level (1H)**                   | Czy mam „obvious level” i jest punkt decyzji?                                | Cena levela + dlaczego (S/R, range, MA jako konfluencja)                           | Level jest „obvious”; da się wskazać failure point            |         | poziom + adnotacja        |
+| 8    | **Reaction (no anticipation)**       | Czy jest reakcja na level (hold/reject/break&hold), a nie samo „dotknięcie”? | Typ reakcji + świeca/sekcja                                                        | Brak reakcji = WAIT/PASS                                      |         | fragment 1H przy level    |
+| 9    | **Structure confirmation (1H)**      | Czy jest potwierdzenie struktury (HL→break / LH→break itd.)?                 | Zaznaczasz swing HL/LH i „break minor”                                             | Potwierdzenie musi być widoczne                               |         | HL/LH + break             |
+| 10   | **Volume & momentum**                | Czy wolumen/momentum wspiera ruch i nie przeczy cenie?                       | Porównanie wolumenu: impuls vs pullback                                            | Impuls: większy udział; pullback: mniejszy; brak sprzeczności |         | volume bars + opis        |
+| 11   | **Risk definition (non-negotiable)** | Czy wiem dokładnie „gdzie jestem w błędzie” (invalidation)?                  | Konkretna cena invalidation + logika stopa                                         | Brak invalidation = autom. C/D lub PASS                       |         | stop level + uzasadnienie |
+| 12   | **ATR/vol sanity**                   | Czy stop i target są realistyczne vs ATR/vol?                                | ATR (liczba) + stop distance vs typowy ruch                                        | Stop nie jest „za ciasny”; target nie jest „fantazją”         |         | ATR + notatka             |
+| 13   | **Reward justification**             | Czy trade jest wart ryzyka? (RR)                                             | RR do T1 i T2                                                                      | **RR ≥ 2:1** (min), **≥3:1** (mocny)                          |         | obliczenia RR             |
+| 14   | **Clarity test**                     | Czy potrafię opisać trade 1 zdaniem?                                         | Jedno zdanie (teza + level + invalidation + target)                                | Jeśli nie → PASS                                              |         | wpis 1 zdaniem            |
+| 15   | **No-trade overrides**               | Czy ≥2 warunki z „no-trade” są spełnione?                                    | Checkboxy: brak kierunku / niejasny setup / ryzyko wymuszone / emocje / brak planu | Jeśli ≥2 → PASS                                               |         | zaznaczone checkboxy      |
+
+**Skąd te punkty?** Twoje „1H pytania” (struktura/level/reakcja/invalidation/RR/wolumen/clean) są dokładnie tym, co wrzucasz w wiersze 5–14.
+
+---
+
+## 2) Tabela „PLAN” (same liczby) — żeby analiza była mierzalna
+
+To jest druga część, już stricte do wykonania trade’u (wypełniasz tylko, jeśli BRAMKI są na TAK):
+
+| Pole                | Wartość | Jak liczysz / wymóg                          |
+| ------------------- | ------: | -------------------------------------------- |
+| Key level           |         | cena + typ (S/R / range / MA confluence)     |
+| Entry zone          |         | zakres cen (od–do)                           |
+| Trigger             |         | np. break&hold / rejection+continuation      |
+| Invalidation (Stop) |         | **konkretna cena** (gdzie teza jest błędna)  |
+| Target 1            |         | logiczny poziom (S/R/range)                  |
+| Target 2            |         | kolejny logiczny poziom                      |
+| RR do T1            |         | (T1-entry) / (entry-stop)                    |
+| RR do T2            |         | (T2-entry) / (entry-stop)                    |
+| ATR                 |         | wartość ATR (żeby ocenić realizm)            |
+| Stop vs ATR         |         | opis: „realistyczny / za ciasny”             |
+| Volatility note     |         | „wysoka → mniejszy size”                     |
+| Grade (A/B/C/D)     |         | na podstawie kompletności i jakości warunków |
+
+---
+
+## 3) (Opcjonalnie) Jak zamienić to na „Grade A/B/C/D” bez zgadywania
+
+Autor mówi, że trade quality ma być oceniane **przed wejściem** (A/B/C/D). Żeby to ustandaryzować w tabeli, możesz dodać jedną kolumnę „Waga / Score” (np. 0–2) dla punktów 5–14, ale **tylko jako Twoja operacjonalizacja** (autor nie narzuca punktacji liczbowej).
+
+---
+
+Jeśli chcesz, w kolejnym kroku mogę to przepisać w gotowy **szablon do Excela/Google Sheets** (z walidacją TAK/NIE, automatycznym RR i automatycznym PASS gdy pierwsze „NIE”).

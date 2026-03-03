@@ -10,8 +10,7 @@ showNumbers     = input.bool(false, "Show numbers", group="Table")
 visibilityPct   = input.int(100, "Visibility 0-100", minval=0, maxval=100, group="Table")
 fontSizeOpt     = input.string("Tiny", "Font size", options=["Tiny","Small","Normal"], group="Table")
 tablePos        = input.string("Top Right", "Table position", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group="Table")
-compact         = input.bool(false, "Compact rows", group="Table")
-summaryOnly     = input.bool(false, "Summary only", group="Table")
+tableMode       = input.string("Full", "Table mode", options=["Summary","Compact","Full"], group="Table")
 showWhenUnsupported = input.bool(false, "Show status on unsupported chart", group="Table")
 showFrame       = input.bool(true, "Show table frame", group="Table")
 showBorders     = input.bool(true, "Show cell borders", group="Table")
@@ -19,9 +18,14 @@ frameWidthInp   = input.int(1, "Frame width", minval=0, maxval=5, group="Table")
 borderWidthInp  = input.int(1, "Cell border width", minval=0, maxval=5, group="Table")
 frameColorInp   = input.color(color.new(color.white, 0), "Frame color", group="Table")
 borderColorInp  = input.color(color.new(color.white, 0), "Cell border color", group="Table")
+summaryCaseOpt  = input.string("Original", "Summary text case", options=["Original","UPPER","lower"], group="Table")
+summaryGoodInp  = input.color(color.new(color.green, 0), "Summary GOOD bg", group="Table")
+summaryWarnInp  = input.color(color.new(color.orange, 0), "Summary WARN bg", group="Table")
+summaryBadInp   = input.color(color.new(color.red, 0), "Summary BAD bg", group="Table")
 
 // Thresholds (backend only; text output uses them)
 leftRight       = input.int(3, "Swing pivot L/R", minval=1, maxval=20, group="Detection")
+pivotTolAtr     = input.float(0.15, "Swing tolerance (ATR, wick filter)", minval=0.0, step=0.05, group="Detection")
 maSlopeLen      = input.int(10, "MA slope lookback", minval=2, maxval=100, group="Detection")
 flatSlopePct    = input.float(0.08, "MA flat slope threshold (%)", minval=0.0, step=0.01, group="Detection")  // per lookback, in %
 maCrossLookback = input.int(20, "MA cross lookback", minval=5, maxval=200, group="Detection")
@@ -138,16 +142,21 @@ if not na(pl)
     lastPL := pl
 
 haveSwings = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL)
+pivotTol = atr * pivotTolAtr
 
-hh = haveSwings and (lastPH > prevPH)
-lh = haveSwings and (lastPH < prevPH)
-hl = haveSwings and (lastPL > prevPL)
-ll = haveSwings and (lastPL < prevPL)
+hh = haveSwings and (lastPH > prevPH + pivotTol)
+lh = haveSwings and (lastPH < prevPH - pivotTol)
+hl = haveSwings and (lastPL > prevPL + pivotTol)
+ll = haveSwings and (lastPL < prevPL - pivotTol)
+hEq = haveSwings and not hh and not lh
+lEq = haveSwings and not hl and not ll
+bullStruct = haveSwings and hh and (hl or lEq)
+bearStruct = haveSwings and ll and (lh or hEq)
 
 structureTxt =
      not haveSwings ? "N/A (waiting for swings)" :
-     (hh and hl) ? "HH + HL (bullish structure)" :
-     (lh and ll) ? "LH + LL (bearish structure)" :
+     bullStruct ? "HH + HL (bullish structure)" :
+     bearStruct ? "LH + LL (bearish structure)" :
      "Overlapping / unclear (chop risk)"
 
 // Major S/R map (52W + major pivots)
@@ -238,7 +247,7 @@ rsiHL = rsiHaveSwings and lastRsiPL > prevRsiPL
 rsiLH = rsiHaveSwings and lastRsiPH < prevRsiPH
 rsiRecoverBull = ta.lowest(rsi, rsiStructLen) < 50 and rsi > 50
 rsiRecoverBear = ta.highest(rsi, rsiStructLen) > 50 and rsi < 50
-rsiConflict = (hh and hl and rsiLH) or (lh and ll and rsiHL)
+rsiConflict = (bullStruct and rsiLH) or (bearStruct and rsiHL)
 rsiStructTxt =
      not rsiHaveSwings ? "RSI structure unavailable" :
      rsiConflict ? "RSI conflicts with price structure (caution)" :
@@ -323,8 +332,8 @@ breakoutVolTxt =
      "No active breakout"
 
 // Market regime (3 regimes from blueprint: Trending / Choppy / Volatile)
-isTrendUp   = haveSwings and hh and hl and (ema20Slope > 0) and (sma50Slope > 0) and not (ema20Flat or sma50Flat)
-isTrendDown = haveSwings and lh and ll and (ema20Slope < 0) and (sma50Slope < 0) and not (ema20Flat or sma50Flat)
+isTrendUp   = bullStruct and (ema20Slope > 0) and (sma50Slope > 0) and not (ema20Flat or sma50Flat)
+isTrendDown = bearStruct and (ema20Slope < 0) and (sma50Slope < 0) and not (ema20Flat or sma50Flat)
 isChoppy    = (not haveSwings) ? false : (structureTxt == "Overlapping / unclear (chop risk)") or (ema20Flat and sma50Flat) or ((failedUp + failedDn) >= 3) or maCrossChoppy or macdFlipChoppy or near200
 atrChangePct = atr[atrChangeLen] != 0.0 ? 100.0 * (atr - atr[atrChangeLen]) / atr[atrChangeLen] : 0.0
 atrUnstable = math.abs(atrChangePct) >= atrJumpPct
@@ -531,6 +540,8 @@ issuePullbackControl = (isTrendUp and not bullRespects20) or (isTrendDown and no
 
 topIssueTxt = issueVol ? "Volatility EXTREME" : issueOvernight ? "Overnight risk elevated" : issueChop ? "CHOP conditions" : issueNoDir ? "Structure unclear / no trend" : issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : issueExtended ? "Price extended" : "No major issue"
 topIssueSeverity = issueVol or issueOvernight or issueChop or issueNoDir ? 0 : issueMomentum or issueChaos or issueExtended ? 1 : 2
+topBlockerTxt = topIssueTxt
+topBlockerSeverity = topIssueSeverity
 secondaryIssueTxt = topIssueTxt == "No major issue" ? "None" :
      topIssueTxt != "Overnight risk elevated" and issueOvernight ? "Overnight risk elevated" :
      topIssueTxt != "CHOP conditions" and issueChop ? "CHOP conditions" :
@@ -547,7 +558,7 @@ secondaryBlockerTxt = primaryBlockerTxt != "Overnight risk elevated" and issueOv
      primaryBlockerTxt != "Structure unclear / no trend" and issueNoDir ? "Structure unclear / no trend" :
      "None"
 blockersTxt = primaryBlockerTxt == "None" ? (softDefensive ? "No hard blocker (soft-stop active)" : "None") : (secondaryBlockerTxt == "None" ? primaryBlockerTxt : primaryBlockerTxt + " | " + secondaryBlockerTxt)
-blockersSeverity = primaryBlockerTxt == "None" ? (softDefensive ? 1 : 2) : 0
+blockersSeverity = topBlockerSeverity
 
 warningPrimaryTxt = issueMomentum ? "Momentum conflict" : issueChaos ? "Chaos high" : issuePullbackControl ? "Pullbacks not controlled" : issueExtended ? "Price extended" : "None"
 warningSecondaryTxt = warningPrimaryTxt != "Chaos high" and issueChaos ? "Chaos high" :
@@ -557,7 +568,6 @@ warningSecondaryTxt = warningPrimaryTxt != "Chaos high" and issueChaos ? "Chaos 
      "None"
 warningsTxt = warningPrimaryTxt == "None" ? "None" : (warningSecondaryTxt == "None" ? warningPrimaryTxt : warningPrimaryTxt + " | " + warningSecondaryTxt)
 warningsSeverity = warningPrimaryTxt == "None" ? 2 : 1
-topBlockerSummaryTxt = primaryBlockerTxt == "None" ? (softDefensive ? "No hard blocker (soft-stop active)" : "None") : primaryBlockerTxt
 
 waitForTxt =
      issueVol ? "Wait: volatility cools down" :
@@ -589,7 +599,12 @@ confidenceRank = badCount >= 3 ? 0 : badCount <= 2 ? 1 : 1
 confidenceRank := badCount == 0 and warnCount <= 2 ? 2 : confidenceRank
 confidenceTxt = confidenceRank == 2 ? "HIGH" : confidenceRank == 1 ? "MED" : "LOW"
 
-nextStepTxt = hardDefensive ? "Stop: hard defensive" : not goNoGo ? "Stop: market not supportive" : softDefensive ? "Proceed with reduced/selective risk" : "Proceed to stock selection"
+marketSupportSeverity = hardDefensive ? 0 : softDefensive ? 1 : 2
+marketSupportTxt = marketSupportSeverity == 2 ? "SUPPORTIVE ✅" : marketSupportSeverity == 1 ? "SELECTIVE ⚠️" : "DEFENSIVE ❌"
+canProceedTickers = marketSupportSeverity == 2
+nextStepTxt = canProceedTickers ? "Proceed to ticker analysis" : "Do nothing"
+regimeSeverity = atrPct >= atrPctVolExtreme ? 0 : isChoppy or isVolatile ? 1 : 2
+biasSeverity = na(sma200) ? 1 : near200 ? 1 : 2
 
 //â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
 // Table
@@ -601,11 +616,12 @@ pos =
      position.top_right
 
 // Table instance with runtime-configurable frame/border visibility.
-rowsSupportedSummaryOnly = 9
-rowsSupportedSummary = summaryOnly ? rowsSupportedSummaryOnly : 21
-rowsSupportedScoreBreakdown = summaryOnly ? 0 : 2
-rowsSupportedDetail = summaryOnly ? 0 : (not compact ? 16 : 0)
-rowsSupported = rowsSupportedSummary + rowsSupportedScoreBreakdown + rowsSupportedDetail
+isSummaryMode = tableMode == "Summary"
+isFullMode = tableMode == "Full"
+rowsSummary = 10
+rowsCompactExtra = 12
+rowsFullExtra = 16
+rowsSupported = isSummaryMode ? rowsSummary : (isFullMode ? rowsSummary + rowsCompactExtra + rowsFullExtra : rowsSummary + rowsCompactExtra)
 rowsUnsupported = showWhenUnsupported ? 5 : 0
 rowsTarget = ctxEligible ? rowsSupported : rowsUnsupported
 panelEnabled = showTable and rowsTarget > 0
@@ -626,23 +642,33 @@ statusAlphaNow = int(math.min(95, visAlphaNow + 35))
 goodBgColorNow = color.new(color.green, statusAlphaNow)
 warnBgColorNow = color.new(color.orange, statusAlphaNow)
 badBgColorNow = color.new(color.red, statusAlphaNow)
+summaryGoodBgColorNow = color.new(summaryGoodInp, statusAlphaNow)
+summaryWarnBgColorNow = color.new(summaryWarnInp, statusAlphaNow)
+summaryBadBgColorNow = color.new(summaryBadInp, statusAlphaNow)
 decisionBgColorNow = goNoGo ? goodBgColorNow : badBgColorNow
 hardStopBgColorNow = hardDefensive ? badBgColorNow : goodBgColorNow
 softStopBgColorNow = softDefensive ? warnBgColorNow : goodBgColorNow
 overallBgColorNow = overallRank == 4 ? goodBgColorNow : overallRank == 3 ? warnBgColorNow : overallRank == 2 ? warnBgColorNow : badBgColorNow
-riskModeBgColorNow = riskModeEff == "NORMAL" ? goodBgColorNow : riskModeEff == "REDUCED" ? warnBgColorNow : badBgColorNow
+riskModeBgColorNow = riskModeEff == "NORMAL" ? summaryGoodBgColorNow : riskModeEff == "REDUCED" ? summaryWarnBgColorNow : summaryBadBgColorNow
 checklistBgColorNow = healthPct >= 75 ? goodBgColorNow : healthPct >= 55 ? warnBgColorNow : badBgColorNow
-blockersBgColorNow = blockersSeverity == 2 ? goodBgColorNow : blockersSeverity == 1 ? warnBgColorNow : badBgColorNow
+blockersBgColorNow = blockersSeverity == 2 ? summaryGoodBgColorNow : blockersSeverity == 1 ? summaryWarnBgColorNow : summaryBadBgColorNow
 warningsBgColorNow = warningsSeverity == 2 ? goodBgColorNow : warningsSeverity == 1 ? warnBgColorNow : badBgColorNow
-waitForBgColorNow = waitForSeverity == 2 ? goodBgColorNow : waitForSeverity == 1 ? warnBgColorNow : badBgColorNow
+waitForBgColorNow = waitForSeverity == 2 ? summaryGoodBgColorNow : waitForSeverity == 1 ? summaryWarnBgColorNow : summaryBadBgColorNow
 riskPlanBgColorNow = riskPlanSeverity == 2 ? goodBgColorNow : riskPlanSeverity == 1 ? warnBgColorNow : badBgColorNow
 marketQualityBgColorNow = marketQualitySeverity == 2 ? goodBgColorNow : marketQualitySeverity == 1 ? warnBgColorNow : badBgColorNow
 confidenceBgColorNow = confidenceRank == 2 ? goodBgColorNow : confidenceRank == 1 ? warnBgColorNow : badBgColorNow
-nextStepBgColorNow = hardDefensive ? badBgColorNow : softDefensive ? warnBgColorNow : goNoGo ? goodBgColorNow : badBgColorNow
+nextStepBgColorNow = canProceedTickers ? summaryGoodBgColorNow : summaryBadBgColorNow
 volatilityBgColorNow = atrPct >= atrPctVolExtreme ? badBgColorNow : isVolatile ? warnBgColorNow : goodBgColorNow
 overnightBgColorNow = overnightRisk ? badBgColorNow : goodBgColorNow
 riskModePlanBgColorNow = riskModePlanSeverity == 2 ? goodBgColorNow : riskModePlanSeverity == 1 ? warnBgColorNow : badBgColorNow
 overallQualityBgColorNow = overallQualitySeverity == 2 ? goodBgColorNow : overallQualitySeverity == 1 ? warnBgColorNow : badBgColorNow
+marketSupportBgColorNow = marketSupportSeverity == 2 ? summaryGoodBgColorNow : marketSupportSeverity == 1 ? summaryWarnBgColorNow : summaryBadBgColorNow
+regimeBgColorNow = regimeSeverity == 2 ? summaryGoodBgColorNow : regimeSeverity == 1 ? summaryWarnBgColorNow : summaryBadBgColorNow
+biasBgColorNow = biasSeverity == 2 ? summaryGoodBgColorNow : biasSeverity == 1 ? summaryWarnBgColorNow : summaryBadBgColorNow
+scoreSummaryBgColorNow = overallRank == 4 ? summaryGoodBgColorNow : overallRank >= 2 ? summaryWarnBgColorNow : summaryBadBgColorNow
+
+summaryCase(_txt) =>
+    summaryCaseOpt == "UPPER" ? str.upper(_txt) : summaryCaseOpt == "lower" ? str.lower(_txt) : _txt
 
 setRow(_r, _k, _v) =>
     table.cell(t, 0, _r, _k, text_halign=text.align_left, text_color=textColorNow, bgcolor=rowBgColorNow, text_size=textSizeNow)
@@ -692,22 +718,24 @@ if barstate.islast
             r += 1
             setHeader(r, "--- SUMMARY ---")
             r += 1
-            setRowStatus(r, "Decision", decisionSummaryTxt, decisionBgColorNow)
+            setRowStatus(r, summaryCase("Market Support"), summaryCase(marketSupportTxt), marketSupportBgColorNow)
             r += 1
-            setRowStatus(r, "Overall / Quality", overallQualityTxt, overallQualityBgColorNow)
+            setRowStatus(r, summaryCase("Regime"), summaryCase(regimeTxt), regimeBgColorNow)
             r += 1
-            setRowStatus(r, "Risk Mode / Plan", riskModePlanTxt, riskModePlanBgColorNow)
+            setRowStatus(r, summaryCase("Bias"), summaryCase(bias200Txt), biasBgColorNow)
             r += 1
-            setRowStatus(r, "Top Blocker", topBlockerSummaryTxt, blockersBgColorNow)
+            setRowStatus(r, summaryCase("Top Issue"), summaryCase(topBlockerTxt), blockersBgColorNow)
             r += 1
-            setRowStatus(r, "Warnings", warningsTxt, warningsBgColorNow)
+            setRowStatus(r, summaryCase("Wait For"), summaryCase(waitForTxt), waitForBgColorNow)
             r += 1
-            setRowStatus(r, "Wait For", waitForTxt, waitForBgColorNow)
+            setRowStatus(r, summaryCase("Risk Mode"), summaryCase(riskModeSummaryTxt), riskModeBgColorNow)
             r += 1
-            setRowStatus(r, "Next Step", nextStepTxt, nextStepBgColorNow)
+            setRowStatus(r, summaryCase("Next Step"), summaryCase(nextStepTxt), nextStepBgColorNow)
+            r += 1
+            setRowStatus(r, summaryCase("Score"), summaryCase(scoreTxt), scoreSummaryBgColorNow)
             r += 1
 
-            if not summaryOnly
+            if not isSummaryMode
                 setHeader(r, "--- STRUCTURE ---")
                 r += 1
                 setRow(r, "Structure", structureTxt)
@@ -728,14 +756,14 @@ if barstate.islast
 
                 setHeader(r, "--- RISK / OVERNIGHT ---")
                 r += 1
-                setRowStatus(r, "ATR / Volatility", volTxt, volatilityBgColorNow)
+                setRow(r, "ATR / Volatility", volTxt)
                 r += 1
-                setRowStatus(r, "Overnight Risk", overnightTxt, overnightBgColorNow)
+                setRow(r, "Overnight Risk", overnightTxt)
                 r += 1
                 setRow(r, "Follow-through", followTxt)
                 r += 1
 
-                if not compact
+                if isFullMode
                     setHeader(r, "--- DETAILS ---")
                     r += 1
                     setRow(r, "MA Shape", maShapeTxt)
@@ -746,7 +774,7 @@ if barstate.islast
                     r += 1
                     setRow(r, "MA Cross Frequency", maCrossDisplayTxt)
                     r += 1
-                    setRow(r, "20 EMA Pullback Respect", pullbackRespectTxt)
+                    setRow(r, "20EMA Pullback", pullbackRespectTxt)
                     r += 1
                     setRow(r, "Extension", extensionDisplayTxt)
                     r += 1
@@ -768,11 +796,6 @@ if barstate.islast
                     r += 1
                     setRow(r, "Chaos Detail", chaosDisplayTxt)
                     r += 1
-
-                setHeader(r, "--- SCORE ---")
-                r += 1
-                setRow(r, "Score Total", scoreTotalDisplayTxt)
-                r += 1
 // Optional: no plots (document says prefer text output)
 // If you ever want to visually debug: uncomment these
 //plot(ema20, "EMA20")
