@@ -1,0 +1,484 @@
+﻿//@version=6
+indicator("Market 1D (SPY/QQQ) Options UI Table (PUT/CALL) - Blueprint", overlay=true, max_labels_count=500, max_lines_count=500)
+
+//------------------------------------------------------------------------------
+// Inputs
+//------------------------------------------------------------------------------
+groupUI   = "UI"
+uiShow    = input.bool(true, "Show table", group=groupUI)
+uiOpacity = input.int(10, "Table visibility (0=solid, 100=invisible)", minval=0, maxval=100, group=groupUI)
+uiShowDetails = input.bool(true, "Show DETAILS section", group=groupUI)
+uiTextSize = input.string("small", "Text size", options=["tiny","small","normal","large"], group=groupUI)
+uiShowHintWhenHidden = input.bool(false, "Show hint when hidden", group=groupUI)
+
+groupMode = "Mode"
+modeShowBoth = input.bool(true, "Show both PUT & CALL", group=groupMode)
+modeFocus = input.string("BOTH", "Focus", options=["BOTH","CALL","PUT"], group=groupMode)
+
+groupTF = "Timeframe gating"
+onlyOn1D = input.bool(true, "Render table only on 1D", group=groupTF)
+onlyOnSPYQQQ = input.bool(true, "Render table only on SPY & QQQ", group=groupTF)
+
+groupBench = "Cross-check"
+crossCheckEnabled = input.bool(true, "Cross-check SPY vs QQQ (direction confirmation)", group=groupBench)
+rsLen = input.int(20, "Slope length", minval=5, group=groupBench)
+
+groupStructure = "Structure detection"
+pivLen = input.int(5, "Pivot length (swing points)", minval=2, maxval=20, group=groupStructure)
+
+groupFilters = "Filters / Thresholds"
+atrLen = input.int(14, "ATR length", minval=1, group=groupFilters)
+adxLen = input.int(14, "ADX length", minval=3, group=groupFilters)
+adxTrend = input.float(20.0, "ADX trend threshold", minval=5, step=1, group=groupFilters)
+chaosOverlapThresh = input.float(0.55, "Chop/Chaos: overlap ratio threshold", minval=0.1, maxval=0.9, step=0.05, group=groupFilters)
+unstableTrAtr = input.float(2.2, "Unstable: TR spike >= x ATR", minval=1.0, step=0.1, group=groupFilters)
+
+ma20Len = input.int(20, "EMA length (fast)", minval=1, group=groupFilters)
+ma50Len = input.int(50, "SMA length (mid)", minval=1, group=groupFilters)
+ma200Len = input.int(200, "SMA length (slow)", minval=1, group=groupFilters)
+
+bbLen = input.int(20, "BB length (regime proxy)", minval=5, group=groupFilters)
+bbMult = input.float(2.0, "BB stdev", minval=0.5, step=0.1, group=groupFilters)
+
+rsiLen = input.int(14, "RSI length", minval=1, group=groupFilters)
+rsiBullFloor = input.float(50.0, "RSI bullish floor", minval=1, maxval=99, step=1, group=groupFilters)
+rsiBearCeil  = input.float(50.0, "RSI bearish ceiling", minval=1, maxval=99, step=1, group=groupFilters)
+
+minSpaceAtr = input.float(2.0, "Space to next level >= x ATR", minval=0.5, step=0.25, group=groupFilters)
+minRR = input.float(2.0, "RR >= ", minval=0.5, step=0.25, group=groupFilters)
+stopBufAtr = input.float(0.25, "Stop buffer (x ATR)", minval=0.0, step=0.05, group=groupFilters)
+
+extendedAtr = input.float(2.0, "Extended if distance to EMA20 > x ATR", minval=0.5, step=0.25, group=groupFilters)
+climaxBars = input.int(4, "Climax check window (bars)", minval=2, maxval=10, group=groupFilters)
+climaxTrAtr = input.float(2.0, "Climax: TR >= x ATR", minval=1.0, step=0.1, group=groupFilters)
+
+groupGrading = "Grading"
+gradeA = input.int(80, "Grade A threshold", minval=0, maxval=100, group=groupGrading)
+gradeB = input.int(65, "Grade B threshold", minval=0, maxval=100, group=groupGrading)
+gradeC = input.int(50, "Grade C threshold", minval=0, maxval=100, group=groupGrading)
+
+//------------------------------------------------------------------------------
+// Helpers
+//------------------------------------------------------------------------------
+is1D = timeframe.isdaily
+ticker = syminfo.ticker
+isSPYQQQ = (ticker == "SPY") or (ticker == "QQQ")
+
+f_txtSize(_s) =>
+    if _s == "tiny"
+        size.tiny
+    else if _s == "small"
+        size.small
+    else if _s == "normal"
+        size.normal
+    else
+        size.large
+
+txtSize = f_txtSize(uiTextSize)
+
+f_c(_col) => color.new(_col, uiOpacity)
+
+colOk  = f_c(color.lime)
+colBad = f_c(color.red)
+colNA  = f_c(color.gray)
+colHdr = f_c(color.silver)
+colBg  = f_c(color.black)
+colSep = f_c(color.new(color.gray, math.min(100, uiOpacity + 40)))
+
+f_statusColor(_ok, _na) =>
+    _na ? colNA : (_ok ? colOk : colBad)
+
+f_boolToText(_ok, _na) =>
+    _na ? "-" : (_ok ? "YES" : "NO")
+
+f_grade(_score) =>
+    if _score >= gradeA
+        "A"
+    else if _score >= gradeB
+        "B"
+    else if _score >= gradeC
+        "C"
+    else
+        "D"
+
+f_score(_ok, _w) => _ok ? _w : 0
+
+f_rollSum(_src, _len) =>
+    float _sum = 0.0
+    for i = 0 to _len - 1
+        _sum += nz(_src[i], 0.0)
+    _sum
+
+//------------------------------------------------------------------------------
+// Data
+//------------------------------------------------------------------------------
+atr = ta.atr(atrLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+tr  = ta.tr(true)
+
+ema20  = ta.ema(close, ma20Len)
+sma50  = ta.sma(close, ma50Len)
+sma200 = ta.sma(close, ma200Len)
+
+rsi = ta.rsi(close, rsiLen)
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+
+// BB regime proxy
+basis = ta.sma(close, bbLen)
+dev = bbMult * ta.stdev(close, bbLen)
+bbU = basis + dev
+bbL = basis - dev
+bbWidth = (bbU - bbL) / math.max(1e-10, basis)
+bbWidthMA = ta.sma(bbWidth, bbLen)
+isCompression = bbWidth < bbWidthMA
+isExpansion = bbWidth > bbWidthMA
+
+// Structure pivots
+ph = ta.pivothigh(high, pivLen, pivLen)
+pl = ta.pivotlow(low, pivLen, pivLen)
+
+var float lastPH = na
+var float prevPH = na
+var float lastPL = na
+var float prevPL = na
+
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
+
+bullStructure = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH > prevPH and lastPL > prevPL
+bearStructure = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH < prevPH and lastPL < prevPL
+
+// Chop/chaos overlap proxy
+rng = high - low
+prevRng = high[1] - low[1]
+overlap = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1]))
+overlapRatio = (rng > 0 and prevRng > 0) ? (overlap / math.min(rng, prevRng)) : na
+isChop = (adx < (adxTrend - 2)) and not na(overlapRatio) and overlapRatio > chaosOverlapThresh
+
+// Unstable volatility proxy
+trSpike = tr >= unstableTrAtr * atr
+stdev10 = ta.stdev(close, 10)
+stdev50 = ta.stdev(close, 50)
+isUnstable = trSpike or (stdev10 > 1.5 * stdev50)
+
+// Climax candles proxy (overnight risk)
+climaxSpikeSrc = (ta.tr(true) >= climaxTrAtr * atr) ? 1.0 : 0.0
+climaxCount = f_rollSum(climaxSpikeSrc, climaxBars)
+hasClimax = climaxCount >= 2
+
+// Bias clarity
+bullBias = close > sma200 and ema20 > ema20[5] and sma50 > sma50[5]
+bearBias = close < sma200 and ema20 < ema20[5] and sma50 < sma50[5]
+neutralBias = not bullBias and not bearBias
+
+// Regime
+isTrend = adx >= adxTrend and not isChop and not isUnstable
+isRange = (adx < adxTrend) and isChop
+regimeTxt = isUnstable ? "VOLATILE" : isTrend ? "TREND" : isRange ? "CHOP" : "MIXED"
+
+// Location health
+nearestSupport = lastPL
+nearestResist  = lastPH
+
+distTo20 = math.abs(close - ema20)
+distTo50 = math.abs(close - sma50)
+distTo200 = math.abs(close - sma200)
+nearMA = (distTo20 <= 1.0*atr) or (distTo50 <= 1.0*atr) or (distTo200 <= 1.0*atr)
+
+distToSupport = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
+distToResist  = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
+nearSupport = not na(distToSupport) and distToSupport <= 1.0*atr
+nearResist  = not na(distToResist)  and distToResist  <= 1.0*atr
+
+extended = distTo20 > extendedAtr * atr
+
+// Structure supports multi-day move
+structureSupportsMoveBull = bullStructure and (isTrend or (isCompression and isExpansion))
+structureSupportsMoveBear = bearStructure and (isTrend or (isCompression and isExpansion))
+
+// Volatility controlled
+volControlled = not isUnstable and not hasClimax
+
+// Momentum supports direction
+momBull = (rsi >= rsiBullFloor) and (macdHist >= 0)
+momBear = (rsi <= rsiBearCeil)  and (macdHist <= 0)
+
+// Overnight permission
+overnightOK = volControlled and not extended and not neutralBias
+
+// Space / reward realism
+spaceUp = not na(nearestResist) ? (nearestResist - close) : na
+spaceDn = not na(nearestSupport) ? (close - nearestSupport) : na
+
+spaceUpOK = not na(spaceUp) and spaceUp >= minSpaceAtr * atr
+spaceDnOK = not na(spaceDn) and spaceDn >= minSpaceAtr * atr
+
+// RR proxy
+callInvalid = nearestSupport
+putInvalid  = nearestResist
+
+callStop = not na(callInvalid) ? callInvalid - stopBufAtr * atr : na
+putStop  = not na(putInvalid)  ? putInvalid  + stopBufAtr * atr : na
+
+callRisk = not na(callStop) ? math.abs(close - callStop) : na
+putRisk  = not na(putStop)  ? math.abs(putStop - close) : na
+
+callReward = not na(nearestResist) ? math.max(0.0, nearestResist - close) : na
+putReward  = not na(nearestSupport)? math.max(0.0, close - nearestSupport) : na
+
+callRR = (not na(callRisk) and callRisk > 0 and not na(callReward)) ? (callReward / callRisk) : na
+putRR  = (not na(putRisk)  and putRisk  > 0 and not na(putReward))  ? (putReward  / putRisk)  : na
+
+callHasRR = not na(callRR) and callRR >= minRR
+putHasRR  = not na(putRR)  and putRR  >= minRR
+
+// Index supports RS/RW stocks (context)
+supportsStocks = isTrend and volControlled and not neutralBias
+
+// Regime change risk warnings
+crossDnEma20 = ta.crossunder(close, ema20)
+crossUpEma20 = ta.crossover(close, ema20)
+crossDnMacd0 = ta.crossunder(macdHist, 0)
+crossUpMacd0 = ta.crossover(macdHist, 0)
+lost20Bull = crossDnEma20 and bullBias
+lost20Bear = crossUpEma20 and bearBias
+momFlip = crossDnMacd0 or crossUpMacd0
+regimeChangeRisk = (lost20Bull or lost20Bear) or (adx < (adxTrend - 3) and isTrend[10]) or (momFlip and (isTrend == false))
+
+// Cross-check: SPY vs QQQ confirmation
+otherSymbol = ticker == "SPY" ? "QQQ" : "SPY"
+otherClose = request.security(otherSymbol, timeframe.period, close)
+crossRatio = close / otherClose
+crossSlope = ta.linreg(crossRatio, rsLen, 0) - ta.linreg(crossRatio, rsLen, 1)
+crossOkBull = not crossCheckEnabled or crossSlope >= 0
+crossOkBear = not crossCheckEnabled or crossSlope <= 0
+
+//------------------------------------------------------------------------------
+// Scoring weights (sum = 100)
+//------------------------------------------------------------------------------
+w1=18, w2=14, w3=14, w4=10, w5=8, w6=12, w7=10, w8=6, w9=5, w10=3
+
+// Conditions by direction (PUT = bearish, CALL = bullish)
+callQ1 = (regimeTxt == "TREND") or (regimeTxt == "MIXED" and not isChop and not isUnstable)
+putQ1  = callQ1
+
+callQ2 = bullBias and crossOkBull
+putQ2  = bearBias and crossOkBear
+
+callQ3 = structureSupportsMoveBull
+putQ3  = structureSupportsMoveBear
+
+callQ4 = volControlled
+putQ4  = volControlled
+
+callQ5 = momBull
+putQ5  = momBear
+
+callQ6 = overnightOK
+putQ6  = overnightOK
+
+callQ7 = (not extended) and (nearMA or nearSupport or isCompression)
+putQ7  = (not extended) and (nearMA or nearResist  or isCompression)
+
+callQ8 = supportsStocks
+putQ8  = supportsStocks
+
+callQ9 = (spaceUpOK or callHasRR)
+putQ9  = (spaceDnOK or putHasRR)
+
+callQ10 = not regimeChangeRisk
+putQ10  = not regimeChangeRisk
+
+callScore = f_score(callQ1, w1)
+callScore := callScore + f_score(callQ2, w2)
+callScore := callScore + f_score(callQ3, w3)
+callScore := callScore + f_score(callQ4, w4)
+callScore := callScore + f_score(callQ5, w5)
+callScore := callScore + f_score(callQ6, w6)
+callScore := callScore + f_score(callQ7, w7)
+callScore := callScore + f_score(callQ8, w8)
+callScore := callScore + f_score(callQ9, w9)
+callScore := callScore + f_score(callQ10, w10)
+
+putScore = f_score(putQ1, w1)
+putScore := putScore + f_score(putQ2, w2)
+putScore := putScore + f_score(putQ3, w3)
+putScore := putScore + f_score(putQ4, w4)
+putScore := putScore + f_score(putQ5, w5)
+putScore := putScore + f_score(putQ6, w6)
+putScore := putScore + f_score(putQ7, w7)
+putScore := putScore + f_score(putQ8, w8)
+putScore := putScore + f_score(putQ9, w9)
+putScore := putScore + f_score(putQ10, w10)
+
+//------------------------------------------------------------------------------
+// Table rendering (Top Right)
+//------------------------------------------------------------------------------
+var int COL_METRIC = 0
+var int COL_PUT    = 1
+var int COL_CALL   = 2
+
+f_setCell(_t, _row, _col, _txt, _bg, _tc) =>
+    table.cell(_t, _col, _row, _txt, text_color=_tc, bgcolor=_bg, text_size=txtSize)
+
+f_clearTable(_t, _rows) =>
+    for r = 0 to _rows - 1
+        for c = 0 to 2
+            f_setCell(_t, r, c, "", color.new(color.black, 100), color.new(color.white, 100))
+
+f_hdrRow(_t, _r, _title) =>
+    f_setCell(_t, _r, COL_METRIC, _title, colHdr, f_c(color.black))
+    f_setCell(_t, _r, COL_PUT,    "PUT",   colHdr, f_c(color.black))
+    f_setCell(_t, _r, COL_CALL,   "CALL",  colHdr, f_c(color.black))
+
+f_sectionRow(_t, _r, _title) =>
+    f_setCell(_t, _r, COL_METRIC, _title, colSep, f_c(color.white))
+    f_setCell(_t, _r, COL_PUT,    "",     colSep, f_c(color.white))
+    f_setCell(_t, _r, COL_CALL,   "",     colSep, f_c(color.white))
+
+f_metricRow(_t, _r, _name, _putTxt, _putCol, _callTxt, _callCol) =>
+    f_setCell(_t, _r, COL_METRIC, _name, colBg, f_c(color.white))
+    f_setCell(_t, _r, COL_PUT,    _putTxt,  _putCol, f_c(color.white))
+    f_setCell(_t, _r, COL_CALL,   _callTxt, _callCol, f_c(color.white))
+
+f_valueRow(_t, _r, _name, _putVal, _callVal) =>
+    f_setCell(_t, _r, COL_METRIC, _name, colBg, f_c(color.white))
+    f_setCell(_t, _r, COL_PUT,  _putVal, colBg, f_c(color.white))
+    f_setCell(_t, _r, COL_CALL, _callVal, colBg, f_c(color.white))
+
+showPut  = modeShowBoth ? true : (modeFocus == "PUT")
+showCall = modeShowBoth ? true : (modeFocus == "CALL")
+
+f_applyColVisibility(_t, _r) =>
+    if not showPut
+        f_setCell(_t, _r, COL_PUT, "", color.new(color.black, 100), color.new(color.white, 100))
+    if not showCall
+        f_setCell(_t, _r, COL_CALL, "", color.new(color.black, 100), color.new(color.white, 100))
+
+f_checkRow(_t, _r, _name, _w, _putOk, _callOk, _putNa, _callNa) =>
+    _putTxt = f_boolToText(_putOk, _putNa) + " (" + str.tostring(_w) + ")"
+    _calTxt = f_boolToText(_callOk, _callNa) + " (" + str.tostring(_w) + ")"
+    f_metricRow(_t, _r, _name, _putTxt, f_statusColor(_putOk, _putNa), _calTxt, f_statusColor(_callOk, _callNa))
+    f_applyColVisibility(_t, _r)
+
+var table t = table.new(position.top_right, 3, 1, border_width=1)
+maxRows = 40
+if barstate.isfirst
+    t := table.new(position.top_right, 3, maxRows, border_width=1)
+
+render = uiShow and (not onlyOn1D or is1D) and (not onlyOnSPYQQQ or isSPYQQQ)
+
+if not render
+    f_clearTable(t, maxRows)
+    if uiShowHintWhenHidden and uiShow
+        hint = not is1D ? "Switch to 1D" : (not isSPYQQQ ? "Market table only for SPY/QQQ" : "Hidden")
+        f_setCell(t, 0, COL_METRIC, hint, colBg, f_c(color.orange))
+else
+    row = 0
+    f_hdrRow(t, row, "MARKET 1D (SPY/QQQ) - SWING OPTIONS UI")
+    f_applyColVisibility(t, row)
+    row += 1
+
+    // SUMMARY
+    f_sectionRow(t, row, "SUMMARY")
+    row += 1
+
+    putGrade  = f_grade(putScore)
+    callGrade = f_grade(callScore)
+
+    f_metricRow(t, row, "Total score (0-100)", str.tostring(putScore), colBg, str.tostring(callScore), colBg)
+    f_applyColVisibility(t, row)
+    row += 1
+
+    f_metricRow(t, row, "Grade", putGrade, colBg, callGrade, colBg)
+    f_applyColVisibility(t, row)
+    row += 1
+
+    biasTxt = bullBias ? "BULL" : bearBias ? "BEAR" : "NEUTRAL"
+    f_metricRow(t, row, "Regime / Bias", regimeTxt + " / " + biasTxt, colBg, regimeTxt + " / " + biasTxt, colBg)
+    f_applyColVisibility(t, row)
+    row += 1
+
+    locPut  = putQ7 ? "OK" : (extended ? "EXT" : "MID")
+    locCall = callQ7 ? "OK" : (extended ? "EXT" : "MID")
+    f_metricRow(t, row, "Location health", locPut, f_statusColor(putQ7, false), locCall, f_statusColor(callQ7, false))
+    f_applyColVisibility(t, row)
+    row += 1
+
+    rrPutTxt  = not na(putRR)  ? str.tostring(putRR, "#.##")  : "-"
+    rrCallTxt = not na(callRR) ? str.tostring(callRR, "#.##") : "-"
+    f_metricRow(t, row, "RR (pivot proxy)", rrPutTxt, f_statusColor(putHasRR, na(putRR)), rrCallTxt, f_statusColor(callHasRR, na(callRR)))
+    f_applyColVisibility(t, row)
+    row += 1
+
+    // DETAILS
+    if uiShowDetails
+        row += 1
+        f_sectionRow(t, row, "DETAILS (10 checks)")
+        row += 1
+
+        f_checkRow(t, row, "1) Market regime supports swing", w1, putQ1, callQ1, false, false)
+        row += 1
+        f_checkRow(t, row, "2) Direction / bias is clear", w2, putQ2, callQ2, false, false)
+        row += 1
+        f_checkRow(t, row, "3) Structure supports multi-day", w3, putQ3, callQ3, false, false)
+        row += 1
+        f_checkRow(t, row, "4) Volatility controlled", w4, putQ4, callQ4, false, false)
+        row += 1
+        f_checkRow(t, row, "5) Momentum supports direction", w5, putQ5, callQ5, false, false)
+        row += 1
+        f_checkRow(t, row, "6) Overnight permission", w6, putQ6, callQ6, false, false)
+        row += 1
+        f_checkRow(t, row, "7) Location is healthy", w7, putQ7, callQ7, false, false)
+        row += 1
+        f_checkRow(t, row, "8) Index supports RS/RW stocks", w8, putQ8, callQ8, false, false)
+        row += 1
+        f_checkRow(t, row, "9) Reward realistic (space/RR)", w9, putQ9, callQ9, (na(spaceDn) and na(putRR)), (na(spaceUp) and na(callRR)))
+        row += 1
+        f_checkRow(t, row, "10) No regime change warning", w10, putQ10, callQ10, false, false)
+        row += 1
+
+        row += 1
+        f_sectionRow(t, row, "DETAILS: values")
+        row += 1
+
+        f_valueRow(t, row, "ATR / ADX / TR", str.tostring(atr, "#.####") + " / " + str.tostring(adx, "#.##") + " / " + str.tostring(tr, "#.####"),
+                                  str.tostring(atr, "#.####") + " / " + str.tostring(adx, "#.##") + " / " + str.tostring(tr, "#.####"))
+        f_applyColVisibility(t, row)
+        row += 1
+
+        f_valueRow(t, row, "RSI / MACD hist", str.tostring(rsi, "#.##") + " / " + str.tostring(macdHist, "#.####"),
+                                    str.tostring(rsi, "#.##") + " / " + str.tostring(macdHist, "#.####"))
+        f_applyColVisibility(t, row)
+        row += 1
+
+        f_valueRow(t, row, "20/50/200 MA", str.tostring(ema20, "#.####") + " / " + str.tostring(sma50, "#.####") + " / " + str.tostring(sma200, "#.####"),
+                                   str.tostring(ema20, "#.####") + " / " + str.tostring(sma50, "#.####") + " / " + str.tostring(sma200, "#.####"))
+        f_applyColVisibility(t, row)
+        row += 1
+
+        f_valueRow(t, row, "Nearest S / R", (na(nearestSupport) ? "-" : str.tostring(nearestSupport, "#.####")) + " / " + (na(nearestResist) ? "-" : str.tostring(nearestResist, "#.####")),
+                                   (na(nearestSupport) ? "-" : str.tostring(nearestSupport, "#.####")) + " / " + (na(nearestResist) ? "-" : str.tostring(nearestResist, "#.####")))
+        f_applyColVisibility(t, row)
+        row += 1
+
+        spTxt = na(spaceDn) ? "-" : str.tostring(spaceDn, "#.####")
+        scTxt = na(spaceUp) ? "-" : str.tostring(spaceUp, "#.####")
+        f_valueRow(t, row, "Space to level (DN/UP)", spTxt, scTxt)
+        f_applyColVisibility(t, row)
+        row += 1
+
+        f_valueRow(t, row, "Cross-check slope (" + otherSymbol + ")", str.tostring(crossSlope, "#.######"), str.tostring(crossSlope, "#.######"))
+        f_applyColVisibility(t, row)
+        row += 1
+
+    // Clear remaining unused rows
+    if row < maxRows
+        for r = row to maxRows - 1
+            for c = 0 to 2
+                f_setCell(t, r, c, "", color.new(color.black, 100), color.new(color.white, 100))

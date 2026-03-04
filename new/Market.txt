@@ -1,0 +1,321 @@
+Na podstawie frameworku z **ModMark Blueprint** (sekcje o market regime, trade quality, swing framework oraz grading A/B/C/D setupów), wykres **SPY/QQQ na interwale 1D** dla swing options ma odpowiedzieć na bardzo konkretne pytania strukturalne — nie predykcyjne.
+
+Poniżej masz dokładnie, jakie pytania powinien rozstrzygać 1D oraz jakie odpowiedzi są **oczekiwane vs nieoczekiwane** w kontekście swing tradingu opcyjnego.
+
+---
+
+# 🎯 ROLA 1D (SPY/QQQ) W SWING OPTIONS
+
+Interwał dzienny ma odpowiedzieć na jedno nadrzędne pytanie:
+
+> **Czy środowisko rynkowe wspiera trzymanie pozycji przez kilka dni?**
+
+To wynika bezpośrednio z zasady:
+
+* Market Alignment jest pierwszym filtrem
+* Swing trading działa najlepiej w trendzie
+* Chop i niepewność obniżają jakość setupu
+
+
+---
+
+# 🔎 KLUCZOWE PYTANIA, NA KTÓRE MA ODPOWIEDZIEĆ SPY/QQQ 1D
+
+---
+
+## 1️⃣ Jaki jest obecny market regime?
+
+**Pytanie:**
+
+* Czy rynek jest w trendzie, w chopie, czy w podwyższonej zmienności?
+
+### ✅ OCZEKIWANE (sprzyjające swingom):
+
+**Trending market**
+
+* Higher highs / higher lows (dla calli)
+* Lower highs / lower lows (dla putów)
+* Średnie kroczące nachylone kierunkowo
+* Kontrolowane pullbacki
+* RSI utrzymuje strefy trendowe (np. >50 w trendzie wzrostowym)
+
+To środowisko A-setupów dla swingów.
+
+### ❌ NIEOCZEKIWANE (obniżają jakość swingów):
+
+**Chop**
+
+* Nakładające się świece
+* Fałszywe wybicia
+* Cena przecina 20/50 MA w obie strony
+* RSI w środku zakresu bez kierunku
+
+W chopie:
+
+* swing quality spada do B/C
+* size powinien być redukowany
+* często najlepszą decyzją jest brak trade’u
+
+---
+
+## 2️⃣ Czy kierunek jest jasny i nienegocjowalny?
+
+**Pytanie:**
+
+* Czy bias jest klarowny (bullish / bearish), czy „może”?
+
+Blueprint jasno mówi:
+
+> „Maybe” is not a direction. 
+
+### ✅ OCZEKIWANE:
+
+* Cena powyżej 200 MA → long bias
+* Cena poniżej 200 MA → short bias
+* Struktura zgodna z kierunkiem
+* Brak konfliktu strukturalnego
+
+### ❌ NIEOCZEKIWANE:
+
+* Cena wokół 200 MA
+* Breakout bez follow-through
+* Silne wahania kierunku co kilka dni
+* Sprzeczne sygnały (trend + dywergencja + brak momentum)
+
+---
+
+## 3️⃣ Czy struktura wspiera trzymanie pozycji kilka dni?
+
+Swing options wymagają:
+
+* Kontynuacji
+* Przestrzeni do ruchu
+* Realistycznego targetu
+
+**Pytanie:**
+
+* Czy istnieje logiczna ścieżka do kolejnego poziomu?
+
+### ✅ OCZEKIWANE:
+
+* Przestrzeń do następnego daily resistance/support
+* Trend continuation po pullbacku
+* Konsolidacja przed wybiciem
+* Momentum wspierające ruch
+
+### ❌ NIEOCZEKIWANE:
+
+* Cena pod silnym oporem
+* Brak przestrzeni (reward < 2:1)
+* Extended move bez pullbacku
+* 3–4 duże świece z rzędu (ryzyko retracementu)
+
+---
+
+## 4️⃣ Czy zmienność jest kontrolowana?
+
+Opcje reagują silnie na zmienność.
+
+**Pytanie:**
+
+* Czy zmienność sprzyja swingowi, czy wymaga defensywy?
+
+### ✅ OCZEKIWANE:
+
+* ATR stabilny
+* Ruchy kontrolowane
+* Pullbacki logiczne
+* Brak news-driven chaosu
+
+### ❌ NIEOCZEKIWANE:
+
+* Nagłe 3–5% dzienne świece
+* Gap up → gap down
+* Szerokie range bez struktury
+* Ekspansja zmienności po długim trendzie
+
+W wysokiej zmienności:
+
+* size ↓
+* holding time ↓
+* wymagane lepsze location
+
+---
+
+## 5️⃣ Czy momentum wspiera swing?
+
+**Pytanie:**
+
+* Czy momentum potwierdza kierunek, czy słabnie?
+
+### ✅ OCZEKIWANE:
+
+* RSI trzyma strefę trendową
+* MACD rozszerza histogram
+* Volume rośnie przy ruchu kierunkowym
+
+### ❌ NIEOCZEKIWANE:
+
+* Dywergencja przy kluczowym oporze
+* RSI traci 50 w trendzie wzrostowym
+* Słabe volume przy wybiciu
+
+To często sygnał, że:
+
+* swing może mieć mniejszy follow-through
+* warto szybciej skalować
+
+---
+
+# 🔎 6) Czy rynek daje „prawo do trzymania ryzyka overnight”?
+
+Blueprint jasno podkreśla:
+
+> Jeśli środowisko nie wspiera trzymania ryzyka overnight, redukuję size lub zostaję w gotówce. 
+
+To oznacza, że 1D powinien odpowiedzieć:
+
+### ❓ Czy rynek jest stabilny strukturalnie na tyle, by:
+
+* trzymać pozycję przez noc?
+* przetrwać potencjalny gap?
+* zaakceptować normalny pullback bez paniki?
+
+### ✅ Oczekiwane:
+
+* trend z kontrolowanymi korektami
+* brak parabolicznych ruchów
+* brak świec typu „climax”
+* brak ekstremalnego sentymentu
+
+### ❌ Nieoczekiwane:
+
+* blow-off top
+* panic sell
+* 3–4 świece o ekstremalnym zakresie
+* ruch napędzany jednym newsem
+
+To bardzo ważne przy swing options, bo:
+
+* gap może zabić R:R
+* theta działa niezależnie od kierunku
+
+---
+
+# 🔎 7) Czy indeks jest „lokacyjnie zdrowy”?
+
+Wcześniej mówiliśmy o trendzie, ale nie o *location* w ujęciu daily.
+
+Blueprint mówi wyraźnie:
+
+> Good trades start at good prices. 
+
+Na 1D SPY/QQQ musisz odpowiedzieć:
+
+### ❓ Czy rynek jest:
+
+* przy wsparciu?
+* w środku range?
+* pod oporem?
+* po extended move?
+
+### ✅ Oczekiwane dla swing calli:
+
+* pullback do 20/50 MA w trendzie
+* retest breakout level
+* konsolidacja przed wybiciem
+
+### ❌ Nieoczekiwane:
+
+* cena 5–8 dni bez pullbacku
+* RSI ekstremalne
+* cena przy wieloletnim oporze
+* wejście „w powietrzu”
+
+To wpływa bezpośrednio na:
+
+* jakość strike selection
+* potrzebny DTE
+* sizing
+
+---
+
+# 🔎 8) Czy indeks potwierdza czy zaburza relative strength stocków?
+
+Blueprint kładzie nacisk na:
+
+* Relative Strength / Weakness względem rynku 
+
+1D SPY/QQQ powinien odpowiedzieć:
+
+### ❓ Czy:
+
+* rynek wspiera rotację?
+* rynek tłumi wszystko?
+* rynek ciągnie wszystko jednocześnie?
+
+### Przykład:
+
+Jeśli:
+
+* SPY 1D jest w silnym trendzie wzrostowym
+  → long stocki mają tailwind
+
+Jeśli:
+
+* SPY 1D jest słaby i łamie strukturę
+  → nawet mocne stocki mogą nie dać follow-through
+
+To często pomijany element.
+
+---
+
+# 🔎 9) Czy reward jest realistyczny w skali indeksu?
+
+To jest subtelne, ale bardzo ważne.
+
+Czasami:
+
+* stock wygląda świetnie
+* ale SPY jest 1–2% od dużego daily resistance
+
+Wtedy:
+
+Index capuje upside.
+
+Swing options wymagają:
+
+* przestrzeni strukturalnej
+* realistycznej ścieżki
+
+Jeśli SPY ma 1% do oporu, a Twój stock potrzebuje 4% ruchu,
+to:
+
+* prawdopodobieństwo maleje
+* reward staje się teoretyczny
+
+---
+
+# 🔎 10) Czy nie ma zmiany regime w trakcie?
+
+Bardzo ważne przy swingach:
+
+1D musi odpowiedzieć:
+
+* czy trend nadal jest trendem?
+* czy zaczyna się przejście do chop?
+
+Pierwsze sygnały zmiany:
+
+* utrata 20 EMA
+* utrata 50 MA
+* RSI traci strefę trendową
+* struktura przestaje robić HH/HL
+
+To często moment:
+
+* skalowania
+* zmniejszania size
+* nie otwierania nowych swingów
+
+---

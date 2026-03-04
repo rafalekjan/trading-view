@@ -1,0 +1,106 @@
+Poniżej przypisuję **wagi do 10 pytań z Twojego etapu Stock 1D**, patrząc wyłącznie pod kątem **options swing (7–14 DTE)** i ryzyka *theta + brak follow-through*.
+Największą wagę dostają elementy: **struktura + lokalizacja + invalidation + przestrzeń do ruchu**.
+
+---
+
+## 📊 Wagi (suma = 100)
+
+### 1️⃣ Jaka jest struktura rynku? (trend / range / breakout / breakdown)
+
+**Waga: 20**
+
+➡ Fundament całej analizy.
+Bez jednoznacznej struktury nie ma biasu kierunkowego ani edge.
+
+---
+
+### 2️⃣ Czy wykres jest czysty i czytelny?
+
+**Waga: 10**
+
+➡ Jeśli struktura jest „brudna”, rośnie ryzyko chop → theta death.
+Ważne, ale wtórne wobec samej struktury.
+
+---
+
+### 3️⃣ Gdzie aktualnie jesteśmy (lokalizacja względem S/R)?
+
+**Waga: 15**
+
+➡ Lokalizacja decyduje o RR i sensowności opcji.
+Trend w środku range ≠ trend na wsparciu.
+
+---
+
+### 4️⃣ Czy istnieje jasny poziom invalidation?
+
+**Waga: 15**
+
+➡ Brak invalidation = brak kontroli ryzyka.
+Dla opcji to krytyczne (czas działa przeciwko Tobie).
+
+---
+
+### 5️⃣ Czy jest miejsce do kolejnego poziomu (next obstacle)?
+
+**Waga: 15**
+
+➡ Najważniejsze pytanie pod follow-through.
+Jeśli opór jest 2% wyżej – opcja może nie zdążyć zapracować.
+
+---
+
+### 6️⃣ Czy RR realistycznie wynosi min. 2:1?
+
+**Waga: 10**
+
+➡ Wynikowa zmienna zależna od lokalizacji + obstacle + invalidation.
+Nieco niższa waga, bo to pochodna innych punktów.
+
+---
+
+### 7️⃣ Czy ticker wykazuje relative strength / weakness vs indeks?
+
+**Waga: 5**
+
+➡ Edge wzmacniający, ale nie kluczowy przy czystej strukturze.
+
+---
+
+### 8️⃣ Czy widać potencjał follow-through (czy nie oddaje ruchów)?
+
+**Waga: 5**
+
+➡ Historyczna charakterystyka ruchu.
+Ważne dla opcji, ale pomocnicze wobec struktury.
+
+---
+
+### 9️⃣ Czy da się opisać wykres jednym zdaniem?
+
+**Waga: 3**
+
+➡ Metryka mentalna – dobra jako filtr, ale mniej obiektywna.
+
+---
+
+### 🔟 Ogólna jakość struktury (A/B/C/D)
+
+**Waga: 2**
+
+➡ To raczej wynik syntetyczny niż oddzielne kryterium.
+
+---
+
+# 📌 Podsumowanie hierarchii ważności
+
+**Najważniejsze (65% całości):**
+
+* Struktura
+* Lokalizacja
+* Invalidation
+* Przestrzeń do ruchu
+
+To są cztery filary daily pod options swing.
+
+Reszta (35%) to filtry jakości i wzmacniacze edge.

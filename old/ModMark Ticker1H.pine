@@ -1,0 +1,993 @@
+//@version=6
+indicator("ModMark Stock 1H", overlay=true, max_labels_count=50)
+
+//------------------------------------------------------------------------------
+// Inputs
+//------------------------------------------------------------------------------
+groupTable = "Table"
+showTable     = input.bool(true, "Show table", group=groupTable)
+visibilityPct = input.int(85, "Visibility (0-100)", minval=0, maxval=100, group=groupTable)
+tablePos      = input.string("Top Right", "Position", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group=groupTable)
+tableMode     = input.string("Summary", "Mode", options=["Summary","Compact","Full"], group=groupTable)
+showNumbers   = input.bool(false, "Show numbers (debug)", group=groupTable)
+fontSizeOpt   = input.string("Tiny", "Font size", options=["Tiny","Small","Normal"], group=groupTable)
+summaryCaseOpt = input.string("Original", "Summary text case", options=["Original","UPPER","lower"], group=groupTable)
+summaryGoodInp = input.color(color.new(color.lime, 0), "Summary GOOD bg", group=groupTable)
+summaryWarnInp = input.color(color.new(color.orange, 0), "Summary WARN bg", group=groupTable)
+summaryBadInp  = input.color(color.new(color.red, 0), "Summary BAD bg", group=groupTable)
+
+groupDetect = "Detection"
+pivotLR      = input.int(3, "Swing pivot L/R (1H)", minval=1, maxval=20, group=groupDetect)
+minorPivotLR = input.int(2, "Minor pivot L/R (confirmation)", minval=1, maxval=10, group=groupDetect)
+maSlopeLen   = input.int(10, "MA slope lookback", minval=2, maxval=100, group=groupDetect)
+flatSlopePct = input.float(0.10, "MA flat slope threshold (%)", minval=0.0, step=0.01, group=groupDetect)
+fastStructLen = input.int(8, "Fast structure lookback (proxy)", minval=3, maxval=50, group=groupDetect)
+
+groupVol = "ATR / Volatility"
+atrLen        = input.int(14, "ATR length", minval=2, group=groupVol)
+atrPctHigh    = input.float(2.0, "ATR% high", minval=0.1, step=0.1, group=groupVol)
+atrPctExtreme = input.float(3.5, "ATR% extreme", minval=0.1, step=0.1, group=groupVol)
+
+groupLoc = "Location / Extended"
+nearLevelAtr = input.float(1.0, "Near structure if within ATR *", minval=0.1, step=0.1, group=groupLoc)
+extATR_20     = input.float(2.0, "Extended if |price-20EMA| >= ATR *", minval=0.5, step=0.1, group=groupLoc)
+extATR_50     = input.float(2.5, "Extended if |price-50SMA| >= ATR *", minval=0.5, step=0.1, group=groupLoc)
+extATR_Key    = input.float(2.0, "Extended if |price-key level| >= ATR *", minval=0.5, step=0.1, group=groupLoc)
+
+groupMom = "RSI / MACD"
+rsiLen     = input.int(14, "RSI length", minval=2, group=groupMom)
+rsiPivotLR = input.int(3, "RSI pivot L/R", minval=1, maxval=20, group=groupMom)
+macdFast   = input.int(12, "MACD fast", minval=1, group=groupMom)
+macdSlow   = input.int(26, "MACD slow", minval=2, group=groupMom)
+macdSig    = input.int(9,  "MACD signal", minval=1, group=groupMom)
+macdFlipLB = input.int(60, "MACD flip lookback", minval=10, maxval=300, group=groupMom)
+macdFlipWarn = input.int(12, "MACD flips warn if >=", minval=1, maxval=60, group=groupMom)
+
+groupVolm = "Volume"
+volMaLen       = input.int(20, "Volume MA length", minval=5, group=groupVolm)
+breakVolMult   = input.float(1.2, "Breakout volume confirms if >= volMA *", minval=0.5, step=0.1, group=groupVolm)
+pullbackBars   = input.int(4, "Pullback window bars", minval=2, maxval=20, group=groupVolm)
+
+groupLevels = "Respect / Follow-through"
+followBars     = input.int(2, "Follow-through bars", minval=1, maxval=10, group=groupLevels)
+failedLB       = input.int(60, "Failed breakout lookback", minval=10, maxval=400, group=groupLevels)
+failedWarn     = input.int(4, "Failed breakouts warn if >=", minval=1, maxval=30, group=groupLevels)
+
+groupRR = "Risk / Reward"
+maxStopAtr   = input.float(2.0, "Risk definable if stop distance <= ATR *", minval=0.5, step=0.1, group=groupRR)
+minRR_Accept = input.float(2.0, "RR acceptable >=", minval=1.0, step=0.1, group=groupRR)
+minRR_Strong = input.float(3.0, "RR strong >=", minval=1.0, step=0.1, group=groupRR)
+
+groupMTF = "Daily Alignment"
+dailyPivotLR = input.int(3, "Daily swing pivot L/R", minval=1, maxval=20, group=groupMTF)
+
+groupMarket = "Market / Relative Strength"
+marketRef = input.string("AUTO", "Market benchmark", options=["AUTO","SPY","QQQ"], group=groupMarket)
+marketAlignMode = input.string("Loose", "Market alignment mode", options=["Loose","Strict"], group=groupMarket)
+marketPivotLR = input.int(3, "Market swing pivot L/R", minval=1, maxval=20, group=groupMarket)
+rsMode = input.string("Relative Return", "RS mode", options=["Relative Return","Mansfield"], group=groupMarket)
+rsLookback = input.int(20, "RS lookback bars (1H)", minval=5, maxval=200, group=groupMarket)
+rsMinEdgePct = input.float(0.5, "RS edge threshold (%)", minval=0.0, step=0.1, group=groupMarket)
+
+groupLiquidity = "Liquidity Gates"
+liquidityLenD = input.int(20, "Avg daily volume length", minval=5, maxval=200, group=groupLiquidity)
+liquidityMetric = input.string("Dollar", "Liquidity metric", options=["Dollar","Shares"], group=groupLiquidity)
+minAvgDailyVolM = input.float(10.0, "Min avg daily volume (M shares)", minval=0.1, step=0.1, group=groupLiquidity)
+minAvgDailyDollarVolM = input.float(100.0, "Min avg daily dollar vol ($M)", minval=1.0, step=1.0, group=groupLiquidity)
+
+groupWorkflow = "Workflow / Overrides"
+entryZoneAtr = input.float(0.25, "Entry zone half-width (ATR)", minval=0.05, step=0.05, group=groupWorkflow)
+t2RewardMult = input.float(2.0, "Target2 distance multiplier", minval=1.1, step=0.1, group=groupWorkflow)
+clarityMinScore = input.float(65.0, "Clarity gate min score", minval=0.0, maxval=100.0, step=1.0, group=groupWorkflow)
+
+groupScore = "Score Model (penalties/hard stops)"
+scoreProfile = input.string("Balanced", "Score profile", options=["Conservative","Balanced","Aggressive"], group=groupScore)
+impulseBodyAtrMult = input.float(1.0, "Penalty: impulse candle if body >= ATR *", minval=0.5, step=0.1, group=groupScore)
+
+//------------------------------------------------------------------------------
+// Context gating: only 1H and not SPY/QQQ
+//------------------------------------------------------------------------------
+tkr = syminfo.ticker
+isSpy = (tkr == "SPY") or str.contains(syminfo.tickerid, ":SPY")
+isQqq = (tkr == "QQQ") or str.contains(syminfo.tickerid, ":QQQ")
+isSpyQqq = isSpy or isQqq
+
+is1H = timeframe.isminutes and timeframe.multiplier == 60
+ctxEligible = showTable and is1H and not isSpyQqq
+
+//------------------------------------------------------------------------------
+// Helpers
+//------------------------------------------------------------------------------
+pos =
+     tablePos == "Top Left" ? position.top_left :
+     tablePos == "Bottom Left" ? position.bottom_left :
+     tablePos == "Bottom Right" ? position.bottom_right :
+     position.top_right
+
+visPct = math.max(0, math.min(100, visibilityPct))
+bgAlpha = int(math.round(100.0 - visPct))
+txtAlpha = int(math.min(95, bgAlpha + 5))
+bgBase  = color.new(color.black, bgAlpha)
+headBg  = color.new(color.gray, math.min(90, bgAlpha + 10))
+goodBg  = color.new(color.lime,  math.min(85, bgAlpha + 5))
+warnBg  = color.new(color.orange,math.min(85, bgAlpha + 5))
+badBg   = color.new(color.red,   math.min(80, bgAlpha + 0))
+summaryGoodBg = color.new(summaryGoodInp, math.min(85, bgAlpha + 5))
+summaryWarnBg = color.new(summaryWarnInp, math.min(85, bgAlpha + 5))
+summaryBadBg  = color.new(summaryBadInp,  math.min(80, bgAlpha + 0))
+txtCol  = color.new(color.white, txtAlpha)
+textSizeNow = fontSizeOpt == "Tiny" ? size.tiny : fontSizeOpt == "Small" ? size.small : size.normal
+frameCol = color.new(color.gray, bgAlpha)
+borderCol = color.new(color.gray, bgAlpha)
+
+slopePct(src, len) => nz(100.0 * (src - src[len]) / src[len])
+isFlat(v) => math.abs(v) < flatSlopePct
+summaryCase(_txt) => summaryCaseOpt == "UPPER" ? str.upper(_txt) : summaryCaseOpt == "lower" ? str.lower(_txt) : _txt
+fmtPrice(v) => na(v) ? "N/A" : str.tostring(v, format.mintick)
+fmtNum(v) => na(v) ? "N/A" : str.tostring(v, "#.##")
+yn(v) => v ? "YES" : "NO"
+fmtPenalty(_lbl, _v) => _v > 0 ? (_lbl + " -" + fmtNum(_v)) : ""
+
+//------------------------------------------------------------------------------
+// Backend calculations (1H)
+//------------------------------------------------------------------------------
+ema20  = ta.ema(close, 20)
+sma50  = ta.sma(close, 50)
+sma200 = ta.sma(close, 200)
+
+ema20Slope = slopePct(ema20, maSlopeLen)
+sma50Slope = slopePct(sma50, maSlopeLen)
+
+ema20Flat = isFlat(ema20Slope)
+sma50Flat = isFlat(sma50Slope)
+
+fastHigh = ta.highest(high[1], fastStructLen)
+fastLow  = ta.lowest(low[1], fastStructLen)
+fastBreakUp = not na(fastHigh) and close > fastHigh
+fastBreakDn = not na(fastLow) and close < fastLow
+fastBullStruct = (ema20Slope > 0 and sma50Slope > 0 and close > ema20) or fastBreakUp
+fastBearStruct = (ema20Slope < 0 and sma50Slope < 0 and close < ema20) or fastBreakDn
+fastStructState =
+     fastBullStruct ? "Structure proxy: BULL (fast)" :
+     fastBearStruct ? "Structure proxy: BEAR (fast)" :
+     "Structure proxy: CHOP"
+
+atr = ta.atr(atrLen)
+atrPct = 100.0 * atr / close
+
+marketTickerId =
+     marketRef == "SPY" ? "AMEX:SPY" :
+     marketRef == "QQQ" ? "NASDAQ:QQQ" :
+     str.contains(syminfo.tickerid, "NASDAQ:") ? "NASDAQ:QQQ" : "AMEX:SPY"
+marketName = str.contains(marketTickerId, "QQQ") ? "QQQ" : "SPY"
+
+f_market_struct() =>
+    mPH = ta.pivothigh(high, marketPivotLR, marketPivotLR)
+    mPL = ta.pivotlow(low,  marketPivotLR, marketPivotLR)
+    var float mLastPH = na
+    var float mPrevPH = na
+    var float mLastPL = na
+    var float mPrevPL = na
+    if not na(mPH)
+        mPrevPH := mLastPH
+        mLastPH := mPH
+    if not na(mPL)
+        mPrevPL := mLastPL
+        mLastPL := mPL
+    mHave = not na(mLastPH) and not na(mPrevPH) and not na(mLastPL) and not na(mPrevPL)
+    mHH = mHave and (mLastPH > mPrevPH)
+    mLH = mHave and (mLastPH < mPrevPH)
+    mHL = mHave and (mLastPL > mPrevPL)
+    mLL = mHave and (mLastPL < mPrevPL)
+    not mHave ? "Market: N/A" : (mHH and mHL) ? "Market: BULL" : (mLH and mLL) ? "Market: BEAR" : "Market: CHOP"
+
+marketState = request.security(marketTickerId, "60", f_market_struct(), barmerge.gaps_off, barmerge.lookahead_off)
+marketClose1H = request.security(marketTickerId, "60", close, barmerge.gaps_off, barmerge.lookahead_off)
+marketAtrPct = request.security(marketTickerId, "60", 100.0 * ta.atr(atrLen) / close, barmerge.gaps_off, barmerge.lookahead_off)
+
+avgDailyShares = request.security(syminfo.tickerid, "D", ta.sma(volume, liquidityLenD), barmerge.gaps_off, barmerge.lookahead_off)
+avgDailyDollar = request.security(syminfo.tickerid, "D", ta.sma(volume * close, liquidityLenD), barmerge.gaps_off, barmerge.lookahead_off)
+avgDailyVolM = avgDailyShares / 1000000.0
+avgDailyDollarVolM = avgDailyDollar / 1000000.0
+stockLiquidityPass =
+     liquidityMetric == "Shares" ?
+     (not na(avgDailyVolM) and avgDailyVolM >= minAvgDailyVolM) :
+     (not na(avgDailyDollarVolM) and avgDailyDollarVolM >= minAvgDailyDollarVolM)
+
+// Swings (structure)
+ph = ta.pivothigh(high, pivotLR, pivotLR)
+pl = ta.pivotlow(low,  pivotLR, pivotLR)
+
+var float lastPH = na
+var float prevPH = na
+var float lastPL = na
+var float prevPL = na
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
+
+haveSwings = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL)
+
+hh = haveSwings and (lastPH > prevPH)
+lh = haveSwings and (lastPH < prevPH)
+hl = haveSwings and (lastPL > prevPL)
+ll = haveSwings and (lastPL < prevPL)
+bullStruct = haveSwings and hh and hl
+bearStruct = haveSwings and lh and ll
+
+structureState =
+     not haveSwings ? "Structure: N/A" :
+     bullStruct ? "Structure: BULL (HH+HL)" :
+     bearStruct ? "Structure: BEAR (LH+LL)" :
+     "Structure: CHOP (overlap)"
+
+directionClear = bullStruct or bearStruct
+waitStructMode = not haveSwings
+structureViewTxt = waitStructMode ? (structureState + " | " + fastStructState) : structureState
+
+marketAlign =
+     not directionClear ? false :
+     marketAlignMode == "Strict" ?
+         ((bullStruct and marketState == "Market: BULL") or (bearStruct and marketState == "Market: BEAR")) :
+         ((bullStruct and marketState != "Market: BEAR") or (bearStruct and marketState != "Market: BULL"))
+marketTxt =
+     marketState == "Market: N/A" ? "Market: N/A" :
+     marketAlign ? ("Market: aligned with " + marketName) :
+     ("Market: conflict with " + marketName)
+
+stockRet = (not na(close[rsLookback]) and close[rsLookback] != 0) ? 100.0 * (close / close[rsLookback] - 1.0) : na
+marketRet = (not na(marketClose1H[rsLookback]) and marketClose1H[rsLookback] != 0) ? 100.0 * (marketClose1H / marketClose1H[rsLookback] - 1.0) : na
+rsRatio = (not na(marketClose1H) and marketClose1H != 0) ? (close / marketClose1H) : na
+rsRatioEma = ta.ema(rsRatio, rsLookback)
+rsMansfield = (not na(rsRatio) and not na(rsRatioEma) and rsRatioEma != 0) ? (100.0 * (rsRatio / rsRatioEma - 1.0)) : na
+rsEdgeRet = (not na(stockRet) and not na(marketRet)) ? (stockRet - marketRet) : na
+rsEdgePct = rsMode == "Mansfield" ? rsMansfield : rsEdgeRet
+rsStrongBull = not na(rsEdgePct) and rsEdgePct >= rsMinEdgePct
+rsStrongBear = not na(rsEdgePct) and rsEdgePct <= -rsMinEdgePct
+rsWeakBull = not na(rsEdgePct) and rsEdgePct > 0 and rsEdgePct < rsMinEdgePct
+rsWeakBear = not na(rsEdgePct) and rsEdgePct < 0 and rsEdgePct > -rsMinEdgePct
+rsAlignedStrong = bullStruct ? rsStrongBull : bearStruct ? rsStrongBear : false
+rsAlignedWeak = bullStruct ? rsWeakBull : bearStruct ? rsWeakBear : false
+rsAlignedAny = rsAlignedStrong or rsAlignedWeak
+rsModeTxt = rsMode == "Mansfield" ? "MANS" : "RET"
+rsTierTxt =
+     na(rsEdgePct) ? "N/A" :
+     rsAlignedStrong ? "STRONG" :
+     rsAlignedWeak ? "WEAK" :
+     "OFFSIDE"
+rsTxt =
+     na(rsEdgePct) ? "RS/RW: N/A" :
+     rsAlignedStrong ? ("RS/RW: aligned STRONG vs " + marketName + " (" + fmtNum(rsEdgePct) + "%)") :
+     rsAlignedWeak ? ("RS/RW: aligned WEAK vs " + marketName + " (" + fmtNum(rsEdgePct) + "%)") :
+     ("RS/RW: not aligned vs " + marketName + " (" + fmtNum(rsEdgePct) + "%)")
+
+// Structure intact (pullback quality)
+structIntact =
+     not haveSwings ? false :
+     bullStruct ? (close > lastPL) :
+     bearStruct ? (close < lastPH) :
+     false
+
+pullbackQualityTxt =
+     not haveSwings ? "Pullback: N/A" :
+     structIntact ? "Pullback: controlled (structure intact)" :
+     "Pullback: breaks structure (quality down)"
+
+// Minor structure confirmation (break minor high/low after HL/LH)
+mPH = ta.pivothigh(high, minorPivotLR, minorPivotLR)
+mPL = ta.pivotlow(low,  minorPivotLR, minorPivotLR)
+var float lastMinorH = na
+var float lastMinorL = na
+if not na(mPH)
+    lastMinorH := mPH
+if not na(mPL)
+    lastMinorL := mPL
+
+confirmLong = bullStruct and not na(lastMinorH) and close > lastMinorH
+confirmShort= bearStruct and not na(lastMinorL) and close < lastMinorL
+
+confirmTxt =
+     not directionClear ? "Potwierdzenie: N/D" :
+     confirmLong ? "Potwierdzenie: byki kontroluja (wybicie minor high)" :
+     confirmShort ? "Potwierdzenie: niedzwiedzie kontroluja (wybicie minor low)" :
+     "Potwierdzenie: brak (czekaj)"
+
+// Location near key level / MAs
+distToLevelATR(_lvl) => (atr > 0 and not na(_lvl)) ? math.abs(close - _lvl) / atr : na
+d1 = distToLevelATR(lastPH)
+d2 = distToLevelATR(lastPL)
+d3 = distToLevelATR(ema20)
+d4 = distToLevelATR(sma50)
+d5 = distToLevelATR(sma200)
+nearest = math.min(math.min(nz(d1, 1e9), nz(d2, 1e9)), math.min(math.min(nz(d3, 1e9), nz(d4, 1e9)), nz(d5, 1e9)))
+
+nearStructure = (atr > 0) and (nearest <= nearLevelAtr)
+locationTxt =
+     not haveSwings ? "Location: N/A" :
+     nearStructure ? "Location: at level/MA (good)" :
+     "Location: middle of nowhere (wait)"
+
+// Extended (no chase)
+dist20ATR = (atr > 0) ? math.abs(close - ema20) / atr : na
+dist50ATR = (atr > 0) ? math.abs(close - sma50) / atr : na
+extended = (not na(dist20ATR) and dist20ATR >= extATR_20) or (not na(dist50ATR) and dist50ATR >= extATR_50)
+extendedTxt = extended ? "Extended: YES (chasing risk)" : "Extended: NO"
+
+// MA context (flat => chop risk)
+maTxt =
+     (ema20Flat and sma50Flat) ? "MA: flat (chop risk)" :
+     (ema20Slope > 0 and sma50Slope > 0) ? "MA: sloped up" :
+     (ema20Slope < 0 and sma50Slope < 0) ? "MA: sloped down" :
+     "MA: mixed (transition)"
+
+bias200Txt =
+     na(sma200) ? "200MA: N/A" :
+     close > sma200 ? "200MA: above (long bias if aligned)" :
+     close < sma200 ? "200MA: below (short bias if aligned)" :
+     "200MA: at (caution)"
+
+// RSI (momentum confirmation)
+rsi = ta.rsi(close, rsiLen)
+rsiRegimeTxt =
+     rsi >= 50 ? "RSI: wspiera byki (>=50)" :
+     rsi <= 40 ? "RSI: wspiera niedzwiedzie (<=40)" :
+     "RSI: mieszane (40-50)"
+
+rsiPH = ta.pivothigh(rsi, rsiPivotLR, rsiPivotLR)
+rsiPL = ta.pivotlow(rsi,  rsiPivotLR, rsiPivotLR)
+var float lastRsiPH = na
+var float prevRsiPH = na
+var float lastRsiPL = na
+var float prevRsiPL = na
+if not na(rsiPH)
+    prevRsiPH := lastRsiPH
+    lastRsiPH := rsiPH
+if not na(rsiPL)
+    prevRsiPL := lastRsiPL
+    lastRsiPL := rsiPL
+haveRsiSwings = not na(lastRsiPH) and not na(prevRsiPH) and not na(lastRsiPL) and not na(prevRsiPL)
+
+rsiSwingTxt =
+     not haveRsiSwings ? "RSI swings: N/A" :
+     (lastRsiPL > prevRsiPL) ? "RSI swings: HL (ok)" :
+     "RSI swings: not HL (caution)"
+
+// MACD (momentum support + avoid chop)
+[macdLine, macdSigLine, macdHist] = ta.macd(close, macdFast, macdSlow, macdSig)
+macdTxt =
+     macdLine > macdSigLine and macdHist > 0 ? "MACD: momentum bycze" :
+     macdLine < macdSigLine and macdHist < 0 ? "MACD: momentum niedzwiedzie" :
+     "MACD: mieszane/plaskie"
+
+macdFlip = ta.cross(macdLine, macdSigLine) ? 1 : 0
+macdFlipCount = math.sum(macdFlip, macdFlipLB)
+macdFlipTxt =
+     macdFlipCount >= macdFlipWarn ? "MACD flips: HIGH (chop risk)" :
+     "MACD flips: OK"
+
+// Volume: impulse confirmation, pullback dries up, breakout participation
+volMA = ta.sma(volume, volMaLen)
+priceUp = close > close[1]
+volUp   = volume > volMA
+
+// Pullback window: down candles with lower vol vs volMA
+pullbackCountBull = math.sum(close < close[1] ? 1 : 0, pullbackBars)
+pullbackCountBear = math.sum(close > close[1] ? 1 : 0, pullbackBars)
+pullbackCount = bullStruct ? pullbackCountBull : bearStruct ? pullbackCountBear : pullbackCountBull
+pullbackNow = pullbackCount >= math.ceil(pullbackBars * 0.6)
+pullbackVolSma = ta.sma(volume, pullbackBars)
+pullbackVolDry = pullbackNow and (pullbackVolSma < volMA)
+volumeImpulse = (bullStruct and priceUp and volUp) or (bearStruct and (not priceUp) and volUp) or ((not bullStruct and not bearStruct) and priceUp and volUp)
+volumeWeak = (bullStruct and priceUp and not volUp) or (bearStruct and (not priceUp) and not volUp) or ((not bullStruct and not bearStruct) and priceUp and not volUp)
+volumeDirOk = (bullStruct and priceUp and volUp) or (bearStruct and (not priceUp) and volUp)
+
+volumeTxt =
+     volumeImpulse ? "Wolumen: impuls potwierdzony" :
+     pullbackVolDry ? "Wolumen: pullback wysycha (zdrowo)" :
+     volumeWeak ? "Wolumen: slabe uczestnictwo (uwaga)" :
+     "Wolumen: mieszany"
+
+// Breakout / follow-through / failed breakouts (respect levels)
+breakAbove = haveSwings and close > lastPH
+breakBelow = haveSwings and close < lastPL
+
+var float bosLevel = na
+var int bosDir = 0
+var int bosBar = na
+if breakAbove
+    bosLevel := lastPH
+    bosDir := 1
+    bosBar := bar_index
+if breakBelow
+    bosLevel := lastPL
+    bosDir := -1
+    bosBar := bar_index
+
+barsSinceBos = na(bosBar) ? na : (bar_index - bosBar)
+ftUpCount = (bosDir == 1 and not na(bosLevel)) ? math.sum(close > bosLevel ? 1.0 : 0.0, followBars) : 0.0
+ftDnCount = (bosDir == -1 and not na(bosLevel)) ? math.sum(close < bosLevel ? 1.0 : 0.0, followBars) : 0.0
+ftUp = (bosDir == 1) and not na(bosLevel) and not na(barsSinceBos) and (barsSinceBos >= followBars - 1) and (ftUpCount == float(followBars))
+ftDn = (bosDir == -1) and not na(bosLevel) and not na(barsSinceBos) and (barsSinceBos >= followBars - 1) and (ftDnCount == float(followBars))
+
+failUpNow = (bosDir == 1) and not na(bosLevel) and close[1] > bosLevel and close < bosLevel
+failDnNow = (bosDir == -1) and not na(bosLevel) and close[1] < bosLevel and close > bosLevel
+failedCount = math.sum((failUpNow or failDnNow) ? 1 : 0, failedLB)
+
+respectTxt =
+     not haveSwings ? "Respekt poziomow: N/D" :
+     (ftUp or ftDn) ? "Respekt poziomow: jest follow-through" :
+     failedCount >= failedWarn ? "Respekt poziomow: duzo falszywych wybic" :
+     "Respekt poziomow: mieszany/neutralny"
+
+breakVolTxt =
+     not haveSwings ? "Breakout: N/A" :
+     breakAbove ? (volume >= volMA * breakVolMult ? "Breakout UP + volume confirms" : "Breakout UP but volume weak") :
+     breakBelow ? (volume >= volMA * breakVolMult ? "Breakdown + volume confirms" : "Breakdown but volume weak") :
+     "Breakout: none"
+
+// ATR/volatility text
+volTxt =
+     atrPct >= atrPctExtreme ? "Zmiennosc: EKSTREMALNA (zmniejsz/unikaj)" :
+     atrPct >= atrPctHigh ? "Zmiennosc: WYSOKA (zmniejsz pozycje)" :
+     "Zmiennosc: kontrolowana"
+
+// Risk definition (invalidation at last swing)
+invalLong  = lastPL
+invalShort = lastPH
+riskLong   = (atr > 0 and not na(invalLong))  ? (close - invalLong) : na
+riskShort  = (atr > 0 and not na(invalShort)) ? (invalShort - close) : na
+riskDefLong  = not na(riskLong)  and riskLong  > 0 and (riskLong/atr <= maxStopAtr)
+riskDefShort = not na(riskShort) and riskShort > 0 and (riskShort/atr <= maxStopAtr)
+
+riskDefTxt =
+     not haveSwings ? "Risk: N/A" :
+     bullStruct ? (riskDefLong ? "Risk: definable (clear invalidation)" : "Risk: not clean (stop too wide)") :
+     bearStruct ? (riskDefShort ? "Risk: definable (clear invalidation)" : "Risk: not clean (stop too wide)") :
+     "Risk: unclear (no structure)"
+
+// Reward justification (next structural target = last swing opposite side)
+swingRange = (not na(lastPH) and not na(lastPL)) ? math.abs(lastPH - lastPL) : na
+targetLongMM = (not na(lastPH) and not na(swingRange)) ? (lastPH + swingRange) : na
+targetShortMM = (not na(lastPL) and not na(swingRange)) ? (lastPL - swingRange) : na
+targetLong  = (not na(lastPH) and lastPH > close) ? lastPH : (breakAbove and not na(targetLongMM) ? targetLongMM : na)
+targetShort = (not na(lastPL) and lastPL < close) ? lastPL : (breakBelow and not na(targetShortMM) ? targetShortMM : na)
+rewardLong  = (not na(targetLong))  ? (targetLong - close) : na
+rewardShort = (not na(targetShort)) ? (close - targetShort) : na
+rrLong  = (not na(riskLong)  and riskLong  > 0 and not na(rewardLong))  ? (rewardLong / riskLong) : na
+rrShort = (not na(riskShort) and riskShort > 0 and not na(rewardShort)) ? (rewardShort / riskShort) : na
+
+// Space to target (compressed between levels)
+spaceOk =
+     not haveSwings ? false :
+     bullStruct ? (not na(rewardLong) and rewardLong > atr) :
+     bearStruct ? (not na(rewardShort) and rewardShort > atr) :
+     false
+spaceTxt =
+     not haveSwings ? "Space: N/A" :
+     spaceOk ? "Space: available (room to target)" :
+     "Space: tight (reward constrained)"
+
+// Daily alignment (1H must not fully conflict with Daily) :contentReference[oaicite:1]{index=1}
+f_daily_struct() =>
+    dPH = ta.pivothigh(high, dailyPivotLR, dailyPivotLR)
+    dPL = ta.pivotlow(low,  dailyPivotLR, dailyPivotLR)
+    var float dLastPH = na
+    var float dPrevPH = na
+    var float dLastPL = na
+    var float dPrevPL = na
+    if not na(dPH)
+        dPrevPH := dLastPH
+        dLastPH := dPH
+    if not na(dPL)
+        dPrevPL := dLastPL
+        dLastPL := dPL
+    dHave = not na(dLastPH) and not na(dPrevPH) and not na(dLastPL) and not na(dPrevPL)
+    dHH = dHave and (dLastPH > dPrevPH)
+    dLH = dHave and (dLastPH < dPrevPH)
+    dHL = dHave and (dLastPL > dPrevPL)
+    dLL = dHave and (dLastPL < dPrevPL)
+    dState = not dHave ? "Daily: N/A" : (dHH and dHL) ? "Daily: BULL" : (dLH and dLL) ? "Daily: BEAR" : "Daily: CHOP"
+    dState
+
+dailyState = request.security(syminfo.tickerid, "D", f_daily_struct(), barmerge.gaps_off, barmerge.lookahead_off)
+
+dailyAlign =
+     (dailyState == "Daily: BULL" and (structureState == "Structure: BEAR (LH+LL)")) ? false :
+     (dailyState == "Daily: BEAR" and (structureState == "Structure: BULL (HH+HL)")) ? false :
+     true
+
+dailyAlignTxt =
+     (dailyState == "Daily: N/A") ? "Daily align: N/A" :
+     dailyAlign ? "Daily align: OK" :
+     "Daily align: CONFLICT (wait)"
+
+stockLiqTxt =
+     liquidityMetric == "Shares" ?
+     ("Stock liquidity: " + (stockLiquidityPass ? "OK" : "LOW") + " (" + fmtNum(avgDailyVolM) + "M shares avg vol)") :
+     ("Stock liquidity: " + (stockLiquidityPass ? "OK" : "LOW") + " ($" + fmtNum(avgDailyDollarVolM) + "M avg $vol)")
+optLiqTxt = "Options liquidity: ignored (not used in model)"
+
+//------------------------------------------------------------------------------
+// Decision layer (1H = Planability + Entry confirmation)
+//------------------------------------------------------------------------------
+riskDefAny = bullStruct ? riskDefLong : bearStruct ? riskDefShort : false
+rrValue = bullStruct ? rrLong : bearStruct ? rrShort : na
+rewardOk = not na(rrValue) and rrValue >= minRR_Accept and spaceOk
+
+momBullOk = bullStruct and rsi >= 50 and macdLine > macdSigLine and macdHist > 0
+momBearOk = bearStruct and rsi <= 40 and macdLine < macdSigLine and macdHist < 0
+momentumOk = momBullOk or momBearOk
+entryTrigger = confirmLong or confirmShort
+followThroughOk = ftUp or ftDn
+breakVolOk = (not breakAbove and not breakBelow) or (breakAbove and volume >= volMA * breakVolMult) or (breakBelow and volume >= volMA * breakVolMult)
+volMomOk = momentumOk and (volumeDirOk or pullbackVolDry)
+
+reactionUp = bullStruct and ((breakAbove and ftUp) or (nearStructure and close > open and close > nz(lastPL, close)))
+reactionDn = bearStruct and ((breakBelow and ftDn) or (nearStructure and close < open and close < nz(lastPH, close)))
+reactionOk = reactionUp or reactionDn
+reactionTxt =
+     not directionClear ? "Reakcja: N/D" :
+     reactionUp ? "Reakcja: hold/reject lub break&hold w gore" :
+     reactionDn ? "Reakcja: hold/reject lub break&hold w dol" :
+     "Reakcja: brak (czekaj)"
+
+float keyLevel = na
+string keyLevelType = "N/A"
+if bullStruct
+    dSL = na(lastPL) ? 1e10 : math.abs(close - lastPL)
+    dE20 = na(ema20) ? 1e10 : math.abs(close - ema20)
+    dS50 = na(sma50) ? 1e10 : math.abs(close - sma50)
+    if dSL <= dE20 and dSL <= dS50
+        keyLevel := lastPL
+        keyLevelType := "S/R swing low"
+    else if dE20 <= dS50
+        keyLevel := ema20
+        keyLevelType := "EMA20 confluence"
+    else
+        keyLevel := sma50
+        keyLevelType := "SMA50 confluence"
+else if bearStruct
+    dSH = na(lastPH) ? 1e10 : math.abs(close - lastPH)
+    dE20 = na(ema20) ? 1e10 : math.abs(close - ema20)
+    dS50 = na(sma50) ? 1e10 : math.abs(close - sma50)
+    if dSH <= dE20 and dSH <= dS50
+        keyLevel := lastPH
+        keyLevelType := "S/R swing high"
+    else if dE20 <= dS50
+        keyLevel := ema20
+        keyLevelType := "EMA20 confluence"
+    else
+        keyLevel := sma50
+        keyLevelType := "SMA50 confluence"
+
+float entryCenterPlan = na
+entryCenterPlan :=
+     bullStruct ? (not na(lastMinorH) ? lastMinorH : keyLevel) :
+     bearStruct ? (not na(lastMinorL) ? lastMinorL : keyLevel) :
+     na
+
+entryZoneLo = not na(entryCenterPlan) ? (entryCenterPlan - atr * entryZoneAtr) : na
+entryZoneHi = not na(entryCenterPlan) ? (entryCenterPlan + atr * entryZoneAtr) : na
+entryZoneTxt = na(entryZoneLo) ? "N/A" : (fmtPrice(entryZoneLo) + " - " + fmtPrice(entryZoneHi))
+triggerPlanTxt =
+     reactionOk and entryTrigger ? "Reaction + structure confirm" :
+     reactionOk ? "Reaction present, waiting confirm" :
+     "No valid reaction yet"
+
+float invalPlan = bullStruct ? invalLong : bearStruct ? invalShort : na
+distKeyATR = (atr > 0 and not na(keyLevel)) ? math.abs(close - keyLevel) / atr : na
+extendedKey = not na(distKeyATR) and distKeyATR >= extATR_Key
+extendedAny = extended or extendedKey
+extendedTxt := extendedAny ? "Extended: YES (chasing risk)" : "Extended: NO"
+
+float target1Plan = bullStruct ? targetLong : bearStruct ? targetShort : na
+if na(target1Plan) and not na(entryCenterPlan)
+    target1Plan := bullStruct ? (entryCenterPlan + atr) : bearStruct ? (entryCenterPlan - atr) : na
+target1Fallback = (bullStruct and na(targetLong)) or (bearStruct and na(targetShort))
+string target1Logic =
+     bullStruct ? ((not na(lastPH) and lastPH > close) ? "Pivot" : (breakAbove and not na(targetLongMM) ? "Measured" : "ATR")) :
+     bearStruct ? ((not na(lastPL) and lastPL < close) ? "Pivot" : (breakBelow and not na(targetShortMM) ? "Measured" : "ATR")) :
+     "N/A"
+t1Dist = (not na(target1Plan) and not na(entryCenterPlan)) ? math.abs(target1Plan - entryCenterPlan) : na
+float target2Plan = (not na(entryCenterPlan) and not na(t1Dist)) ?
+     (bullStruct ? (entryCenterPlan + t1Dist * t2RewardMult) : bearStruct ? (entryCenterPlan - t1Dist * t2RewardMult) : na) :
+     na
+
+riskPlan = (not na(entryCenterPlan) and not na(invalPlan)) ?
+     (bullStruct ? (entryCenterPlan - invalPlan) : bearStruct ? (invalPlan - entryCenterPlan) : na) :
+     na
+rewardT1Plan = (not na(entryCenterPlan) and not na(target1Plan)) ?
+     (bullStruct ? (target1Plan - entryCenterPlan) : bearStruct ? (entryCenterPlan - target1Plan) : na) :
+     na
+rewardT2Plan = (not na(entryCenterPlan) and not na(target2Plan)) ?
+     (bullStruct ? (target2Plan - entryCenterPlan) : bearStruct ? (entryCenterPlan - target2Plan) : na) :
+     na
+rrT1Plan = (not na(riskPlan) and riskPlan > 0 and not na(rewardT1Plan)) ? (rewardT1Plan / riskPlan) : na
+rrT2Plan = (not na(riskPlan) and riskPlan > 0 and not na(rewardT2Plan)) ? (rewardT2Plan / riskPlan) : na
+stopAtrRatioPlan = (not na(riskPlan) and atr > 0) ? (riskPlan / atr) : na
+stopAtrTxt = na(stopAtrRatioPlan) ? "N/A" : (stopAtrRatioPlan <= maxStopAtr ? "realistic" : "too wide") + " (" + fmtNum(stopAtrRatioPlan) + " ATR)"
+volNoteTxt =
+     atrPct >= atrPctExtreme ? "Extreme vol -> avoid/reduce hard" :
+     atrPct >= atrPctHigh ? "High vol -> reduced size" :
+     "Controlled vol -> normal sizing"
+
+// 1H score (0..100): start from 100, then apply penalties.
+bodyAtr = (atr > 0) ? math.abs(close - open) / atr : na
+entryAfterImpulse = not na(bodyAtr) and bodyAtr >= impulseBodyAtrMult
+
+critRiskDef = riskDefAny
+critLocation = nearStructure and not extendedAny
+critStructure = waitStructMode ? true : (directionClear and structIntact)
+critReward = not na(rrT1Plan) and rrT1Plan >= minRR_Accept
+critReaction = reactionOk
+critKeyLevel = not na(keyLevel)
+critConfirm = entryTrigger
+critVolMom = volMomOk
+critRS = rsAlignedAny
+critAtrSanity = not na(stopAtrRatioPlan) and stopAtrRatioPlan <= maxStopAtr and atrPct < atrPctExtreme
+critDaily = (dailyState == "Daily: N/A") or dailyAlign
+critLiq = stockLiquidityPass
+
+wRiskDef = scoreProfile == "Conservative" ? 18.0 : scoreProfile == "Aggressive" ? 12.0 : 15.0
+wLocation = scoreProfile == "Conservative" ? 14.0 : scoreProfile == "Aggressive" ? 9.0 : 12.0
+wStructure = scoreProfile == "Conservative" ? 14.0 : scoreProfile == "Aggressive" ? 9.0 : 12.0
+wReward = scoreProfile == "Conservative" ? 14.0 : scoreProfile == "Aggressive" ? 9.0 : 12.0
+wReaction = scoreProfile == "Conservative" ? 12.0 : scoreProfile == "Aggressive" ? 8.0 : 10.0
+wKeyLevel = scoreProfile == "Conservative" ? 10.0 : scoreProfile == "Aggressive" ? 6.0 : 8.0
+wConfirm = scoreProfile == "Conservative" ? 10.0 : scoreProfile == "Aggressive" ? 6.0 : 8.0
+wVolMom = scoreProfile == "Conservative" ? 8.0 : scoreProfile == "Aggressive" ? 5.0 : 7.0
+wRs = scoreProfile == "Conservative" ? 7.0 : scoreProfile == "Aggressive" ? 4.0 : 6.0
+wAtrSanity = scoreProfile == "Conservative" ? 5.0 : scoreProfile == "Aggressive" ? 3.0 : 4.0
+wDaily = scoreProfile == "Conservative" ? 4.0 : scoreProfile == "Aggressive" ? 2.0 : 3.0
+wLiq = scoreProfile == "Conservative" ? 4.0 : scoreProfile == "Aggressive" ? 2.0 : 3.0
+wMarketChop = scoreProfile == "Conservative" ? 4.0 : scoreProfile == "Aggressive" ? 1.0 : 2.0
+wWeakRR = scoreProfile == "Conservative" ? 6.0 : scoreProfile == "Aggressive" ? 3.0 : 5.0
+wDailyAgainst = scoreProfile == "Conservative" ? 6.0 : scoreProfile == "Aggressive" ? 3.0 : 5.0
+wNoRsEdge = scoreProfile == "Conservative" ? 5.0 : scoreProfile == "Aggressive" ? 2.0 : 4.0
+wVolumeNeutral = scoreProfile == "Conservative" ? 4.0 : scoreProfile == "Aggressive" ? 2.0 : 3.0
+wLooseTarget = scoreProfile == "Conservative" ? 5.0 : scoreProfile == "Aggressive" ? 2.0 : 4.0
+wStopTooClose = scoreProfile == "Conservative" ? 6.0 : scoreProfile == "Aggressive" ? 3.0 : 5.0
+wImpulseEntry = scoreProfile == "Conservative" ? 6.0 : scoreProfile == "Aggressive" ? 3.0 : 5.0
+
+pRiskDef = not critRiskDef ? wRiskDef : 0.0
+pLocation = not critLocation ? wLocation : 0.0
+pStructure = not critStructure ? wStructure : 0.0
+pReward = not critReward ? wReward : 0.0
+pReaction = not critReaction ? wReaction : 0.0
+pKeyLevel = not critKeyLevel ? wKeyLevel : 0.0
+pConfirm = not critConfirm ? wConfirm : 0.0
+pVolMom = not critVolMom ? wVolMom : 0.0
+pRs = not critRS ? wRs : 0.0
+pAtrSanity = not critAtrSanity ? wAtrSanity : 0.0
+pDaily = not critDaily ? wDaily : 0.0
+pLiq = not critLiq ? wLiq : 0.0
+pMarketChop = (marketAlignMode == "Loose" and marketState == "Market: CHOP") ? wMarketChop : 0.0
+
+basePenalty =
+     pRiskDef + pLocation + pStructure + pReward + pReaction + pKeyLevel + pConfirm + pVolMom +
+     pRs + pAtrSanity + pDaily + pLiq + pMarketChop
+
+penWeakRR = not na(rrT1Plan) and rrT1Plan >= 2.0 and rrT1Plan < 2.3 ? wWeakRR : 0.0
+penDailyAgainst = (dailyState != "Daily: N/A") and not dailyAlign ? wDailyAgainst : 0.0
+penNoRsEdge = (not rsAlignedAny) and (not na(rsEdgePct)) ? wNoRsEdge : 0.0
+penVolumeNeutral = (not volumeImpulse) and (not pullbackVolDry) and (not volumeWeak) ? wVolumeNeutral : 0.0
+penLooseTarget = target1Fallback ? wLooseTarget : 0.0
+penStopTooClose = not na(stopAtrRatioPlan) and stopAtrRatioPlan < 0.8 ? wStopTooClose : 0.0
+penImpulseEntry = entryAfterImpulse ? wImpulseEntry : 0.0
+
+totalPenalty =
+     basePenalty + penWeakRR + penDailyAgainst + penNoRsEdge + penVolumeNeutral + penLooseTarget + penStopTooClose + penImpulseEntry
+float top1Val = 0.0
+float top2Val = 0.0
+float top3Val = 0.0
+string top1Lbl = ""
+string top2Lbl = ""
+string top3Lbl = ""
+float[] penVals = array.from(
+     pRiskDef, pLocation, pStructure, pReward, pReaction, pKeyLevel, pConfirm, pVolMom, pRs, pAtrSanity,
+     pDaily, pLiq, pMarketChop, penWeakRR, penDailyAgainst, penNoRsEdge, penVolumeNeutral, penLooseTarget,
+     penStopTooClose, penImpulseEntry)
+string[] penLbls = array.from(
+     "Risk", "Location", "Structure", "Reward", "Reaction", "Key level", "Confirm", "Vol/Mom", "RS", "ATR sanity",
+     "Daily", "Liquidity", "Market CHOP", "Weak RR", "Daily conflict", "No RS edge", "Volume neutral", "Loose target",
+     "Stop too close", "Impulse entry")
+for i = 0 to array.size(penVals) - 1
+    pv = array.get(penVals, i)
+    pl = array.get(penLbls, i)
+    if pv > 0
+        if pv > top1Val
+            top3Val := top2Val
+            top3Lbl := top2Lbl
+            top2Val := top1Val
+            top2Lbl := top1Lbl
+            top1Val := pv
+            top1Lbl := pl
+        else if pv > top2Val
+            top3Val := top2Val
+            top3Lbl := top2Lbl
+            top2Val := pv
+            top2Lbl := pl
+        else if pv > top3Val
+            top3Val := pv
+            top3Lbl := pl
+topPenaltyTxt =
+     top1Val <= 0 ? "none" :
+     fmtPenalty(top1Lbl, top1Val) +
+     (top2Val > 0 ? (" | " + fmtPenalty(top2Lbl, top2Val)) : "") +
+     (top3Val > 0 ? (" | " + fmtPenalty(top3Lbl, top3Val)) : "")
+scoreRaw = 100.0 - totalPenalty
+overallScore = math.max(0.0, math.min(100.0, scoreRaw))
+scoreTxt = str.tostring(overallScore, "#.##") + "/100"
+
+autoThesis =
+     not directionClear ? "No clear 1H structure to describe a trade." :
+     (bullStruct ? "LONG" : "SHORT") + " near " + keyLevelType + " (" + fmtPrice(keyLevel) + "), invalidation " + fmtPrice(invalPlan) + ", T1 " + fmtPrice(target1Plan)
+thesisTxt = autoThesis
+clarityPass = waitStructMode ? true : (directionClear and riskDefAny and not na(rrT1Plan) and overallScore >= clarityMinScore)
+
+gate1Market = marketAlign and marketState != "Market: N/A"
+gate2RS = rsAlignedAny
+gate3Vehicle = stockLiquidityPass
+gate4Daily = dailyAlign
+gate5Location = nearStructure and not extendedAny
+gate6Structure = waitStructMode ? true : (directionClear and structIntact)
+gate7KeyLevel = not na(keyLevel)
+gate8Reaction = reactionOk
+gate9Confirm = entryTrigger
+gate10VolMom = volMomOk
+gate11Risk = riskDefAny
+gate12AtrSanity = not na(stopAtrRatioPlan) and stopAtrRatioPlan <= maxStopAtr and atrPct < atrPctExtreme
+gate13Reward = not na(rrT1Plan) and rrT1Plan >= minRR_Accept
+gate14Clarity = clarityPass
+noTradeCount = waitStructMode ? 0 :
+     ((not directionClear ? 1 : 0) +
+     (not nearStructure ? 1 : 0) +
+     (extendedAny ? 1 : 0) +
+     (not riskDefAny ? 1 : 0) +
+     (failedCount >= failedWarn ? 1 : 0) +
+     (not rewardOk ? 1 : 0))
+noTradeOverride = noTradeCount >= 2
+gate15NoTrade = not noTradeOverride
+
+gate1ValTxt = yn(gate1Market) + " | " + marketState + " / " + marketName
+gate2ValTxt = yn(gate2RS) + " | " + rsModeTxt + "/" + rsTierTxt + ", edge=" + fmtNum(rsEdgePct) + "% vs thr " + fmtNum(rsMinEdgePct) + "%"
+gate2Bg = rsAlignedStrong ? goodBg : rsAlignedWeak ? warnBg : badBg
+gate3ValTxt =
+     liquidityMetric == "Shares" ?
+     (yn(gate3Vehicle) + " | shares=" + fmtNum(avgDailyVolM) + "M / " + fmtNum(minAvgDailyVolM) + "M") :
+     (yn(gate3Vehicle) + " | $vol=" + fmtNum(avgDailyDollarVolM) + "M / " + fmtNum(minAvgDailyDollarVolM) + "M")
+gate4ValTxt = yn(gate4Daily) + " | mode=" + marketAlignMode + ", " + dailyState + " vs " + (bullStruct ? "BULL" : bearStruct ? "BEAR" : "CHOP")
+gate5ValTxt = "HS | " + yn(gate5Location) + " | nearest=" + fmtNum(nearest) + " ATR, extAny=" + (extendedAny ? "YES" : "NO")
+gate6ValTxt = waitStructMode ? "HS | WAIT | insufficient swings, proxy=" + fastStructState : ("HS | " + yn(gate6Structure) + " | " + structureState + ", intact=" + (structIntact ? "YES" : "NO"))
+gate7ValTxt = yn(gate7KeyLevel) + " | " + keyLevelType + " @ " + fmtPrice(keyLevel)
+gate8ValTxt = "HS | " + yn(gate8Reaction) + " | " + reactionTxt
+gate9ValTxt = yn(gate9Confirm) + " | " + confirmTxt
+gate10ValTxt = yn(gate10VolMom) + " | mom=" + (momentumOk ? "OK" : "NO") + ", volDir=" + (volumeDirOk ? "OK" : "NO")
+gate11ValTxt = "HS | " + yn(gate11Risk) + " | inval=" + fmtPrice(invalPlan) + ", riskATR=" + fmtNum(stopAtrRatioPlan)
+gate12ValTxt = yn(gate12AtrSanity) + " | stopATR=" + fmtNum(stopAtrRatioPlan) + " <= " + fmtNum(maxStopAtr) + ", atr%=" + fmtNum(atrPct)
+gate13ValTxt = yn(gate13Reward) + " | RR(T1)=" + fmtNum(rrT1Plan) + " (min " + fmtNum(minRR_Accept) + ")"
+gate14ValTxt = yn(gate14Clarity) + " | score=" + fmtNum(overallScore) + " (min " + fmtNum(clarityMinScore) + ")"
+gate15ValTxt = waitStructMode ? "WAIT | insufficient swings" : (yn(gate15NoTrade) + " | noTradeCount=" + str.tostring(noTradeCount))
+
+gatePassCountRaw =
+     (gate1Market ? 1 : 0) + (gate2RS ? 1 : 0) + (gate3Vehicle ? 1 : 0) + (gate4Daily ? 1 : 0) + (gate5Location ? 1 : 0) +
+     (gate6Structure ? 1 : 0) + (gate7KeyLevel ? 1 : 0) + (gate8Reaction ? 1 : 0) + (gate9Confirm ? 1 : 0) + (gate10VolMom ? 1 : 0) +
+     (gate11Risk ? 1 : 0) + (gate12AtrSanity ? 1 : 0) + (gate13Reward ? 1 : 0) + (gate14Clarity ? 1 : 0) + (gate15NoTrade ? 1 : 0)
+allGatesPass = (not waitStructMode) and gatePassCountRaw == 15
+gatesTxt = waitStructMode ? "WAIT (insufficient swings)" : (str.tostring(gatePassCountRaw) + "/15")
+
+gradeTxt =
+     overallScore >= 85 ? "A" :
+     overallScore >= 70 ? "B" :
+     overallScore >= 55 ? "C" : "PASS"
+
+//------------------------------------------------------------------------------
+// Table rendering (bordered, visibility via alpha)
+//------------------------------------------------------------------------------
+isSummary = tableMode == "Summary"
+isCompact = tableMode == "Compact"
+isFull    = tableMode == "Full"
+
+// Row budget must match rendered rows to avoid out-of-bounds.
+rowsSummary = 4
+rowsCompactExtra = 29
+rowsFullExtra = showNumbers ? 32 : 26
+rowsTarget = isSummary ? rowsSummary : isCompact ? (rowsSummary + rowsCompactExtra) : (rowsSummary + rowsCompactExtra + rowsFullExtra)
+
+var table t = na
+var int lastRows = na
+
+newTable() =>
+    table.new(pos, 2, rowsTarget, border_width=1, frame_width=1, border_color=borderCol, frame_color=frameCol)
+
+setHeader(_r, _txt) =>
+    table.cell(t, 0, _r, _txt, bgcolor=headBg, text_color=txtCol, text_halign=text.align_left, text_size=textSizeNow)
+    table.cell(t, 1, _r, "", bgcolor=headBg, text_size=textSizeNow)
+    table.merge_cells(t, 0, _r, 1, _r)
+
+setRow(_r, _k, _v, _bg) =>
+    table.cell(t, 0, _r, _k, bgcolor=_bg, text_color=txtCol, text_halign=text.align_left, text_size=textSizeNow)
+    table.cell(t, 1, _r, _v, bgcolor=_bg, text_color=txtCol, text_halign=text.align_left, text_size=textSizeNow)
+
+setRowStatus(_r, _k, _v, _bg) =>
+    table.cell(t, 0, _r, _k, bgcolor=_bg, text_color=txtCol, text_halign=text.align_left, text_size=textSizeNow)
+    table.cell(t, 1, _r, _v, bgcolor=_bg, text_color=txtCol, text_halign=text.align_left, text_size=textSizeNow)
+
+if barstate.islast
+    if not ctxEligible
+        if not na(t)
+            table.delete(t)
+            t := na
+            lastRows := na
+    else
+        if na(t) or (lastRows != rowsTarget)
+            if not na(t)
+                table.delete(t)
+            t := newTable()
+            lastRows := rowsTarget
+
+        table.set_frame_color(t, frameCol)
+        table.set_border_color(t, borderCol)
+        table.set_frame_width(t, visPct > 0 ? 1 : 0)
+        table.set_border_width(t, visPct > 0 ? 1 : 0)
+
+        r = 0
+        setHeader(r, "- STOCK 1H (Structure & Planning) -")
+        r += 1
+        setRow(r, "Ticker / TF", tkr + " | " + timeframe.period, bgBase)
+        r += 1
+
+        gatesBg = waitStructMode ? summaryWarnBg : allGatesPass ? summaryGoodBg : summaryBadBg
+        detailDailyBg = dailyState == "Daily: N/A" ? warnBg : dailyAlign ? goodBg : badBg
+        scoreBg = overallScore >= 85 ? summaryGoodBg : overallScore >= 55 ? summaryWarnBg : summaryBadBg
+        targetSpaceDetailTxt = "RR(T1): " + fmtNum(rrT1Plan) + " | " + spaceTxt + " | T1: " + target1Logic
+        targetSpaceDetailBg = gate13Reward ? goodBg : spaceOk ? warnBg : badBg
+        momentumDetailTxt = rsiRegimeTxt + " | " + macdTxt
+        momentumDetailBg = momentumOk ? goodBg : warnBg
+        volumeDetailBg = volMomOk ? goodBg : warnBg
+
+        // SUMMARY: compact decision panel
+        setRowStatus(r, summaryCase("Gates"), summaryCase(gatesTxt), gatesBg)
+        r += 1
+        setRowStatus(r, summaryCase("Score"), summaryCase(scoreTxt), scoreBg)
+        r += 1
+
+        if not isSummary
+            setHeader(r, "- PLAN DETAILS -")
+            r += 1
+            setRow(r, "Structure", structureViewTxt, directionClear ? goodBg : warnBg)
+            r += 1
+            setRow(r, "Pullback Quality", pullbackQualityTxt, waitStructMode ? warnBg : (structIntact ? goodBg : badBg))
+            r += 1
+            setRow(r, "Location", locationTxt, nearStructure and not extendedAny ? goodBg : warnBg)
+            r += 1
+            setRow(r, "Invalidation", riskDefTxt, waitStructMode ? warnBg : (riskDefAny ? goodBg : badBg))
+            r += 1
+            setRow(r, "Target & Space", targetSpaceDetailTxt, targetSpaceDetailBg)
+            r += 1
+
+            setHeader(r, "- ENTRY CONFIRMATION -")
+            r += 1
+            setRow(r, "Reaction", reactionTxt, reactionOk ? goodBg : warnBg)
+            r += 1
+            setRow(r, "Confirmation", confirmTxt, entryTrigger ? goodBg : warnBg)
+            r += 1
+            setRow(r, "Respect / Follow-through", respectTxt, followThroughOk ? goodBg : (failedCount >= failedWarn ? badBg : warnBg))
+            r += 1
+            setRow(r, "Momentum", momentumDetailTxt, momentumDetailBg)
+            r += 1
+            setRow(r, "Volume", volumeTxt, volumeDetailBg)
+            r += 1
+            setRow(r, "Volatility", volTxt, (atrPct >= atrPctExtreme) ? badBg : (atrPct >= atrPctHigh) ? warnBg : goodBg)
+            r += 1
+
+            setHeader(r, "- GATES (YES/NO) -")
+            r += 1
+            setRowStatus(r, "1 Market Alignment", gate1ValTxt, gate1Market ? goodBg : badBg)
+            r += 1
+            setRowStatus(r, "2 RS/RW vs Market", gate2ValTxt, gate2Bg)
+            r += 1
+            setRowStatus(r, "3 Stock Liquidity", gate3ValTxt, gate3Vehicle ? goodBg : badBg)
+            r += 1
+            setRowStatus(r, "4 Daily Alignment", gate4ValTxt, gate4Daily ? goodBg : badBg)
+            r += 1
+            setRowStatus(r, "5 Location (HS)", gate5ValTxt, gate5Location ? goodBg : badBg)
+            r += 1
+            setRowStatus(r, "6 1H Structure (HS)", gate6ValTxt, waitStructMode ? warnBg : (gate6Structure ? goodBg : badBg))
+            r += 1
+            setRowStatus(r, "7 Key Level", gate7ValTxt, gate7KeyLevel ? goodBg : badBg)
+            r += 1
+            setRowStatus(r, "8 Reaction (HS)", gate8ValTxt, gate8Reaction ? goodBg : badBg)
+            r += 1
+            setRowStatus(r, "9 Confirmation", gate9ValTxt, gate9Confirm ? goodBg : badBg)
+            r += 1
+            setRowStatus(r, "10 Vol/Mom", gate10ValTxt, gate10VolMom ? goodBg : badBg)
+            r += 1
+            setRowStatus(r, "11 Invalidation (HS)", gate11ValTxt, waitStructMode ? warnBg : (gate11Risk ? goodBg : badBg))
+            r += 1
+            setRowStatus(r, "12 ATR Sanity", gate12ValTxt, gate12AtrSanity ? goodBg : badBg)
+            r += 1
+            setRowStatus(r, "13 Reward (RR)", gate13ValTxt, gate13Reward ? goodBg : badBg)
+            r += 1
+            setRowStatus(r, "14 Clarity 1-Sentence", gate14ValTxt, waitStructMode ? warnBg : (gate14Clarity ? goodBg : badBg))
+            r += 1
+            setRowStatus(r, "15 No-Trade Override", gate15ValTxt, waitStructMode ? warnBg : (gate15NoTrade ? goodBg : badBg))
+            r += 1
+
+            if isFull
+                setHeader(r, "- CONTEXT / DETAILS -")
+                r += 1
+                setRow(r, "Daily Alignment", dailyAlignTxt, detailDailyBg)
+                r += 1
+                setRow(r, "Market Alignment", marketTxt + " | mATR%=" + fmtNum(marketAtrPct), gate1Market ? goodBg : warnBg)
+                r += 1
+                setRow(r, "RS/RW", rsTxt, gate2Bg)
+                r += 1
+                setRow(r, "Stock Liquidity", stockLiqTxt, stockLiquidityPass ? goodBg : badBg)
+                r += 1
+                setRow(r, "Options Liquidity", optLiqTxt, bgBase)
+                r += 1
+                setRow(r, "Extended", extendedTxt, extendedAny ? warnBg : goodBg)
+                r += 1
+                setRow(r, "MA Context", maTxt, (ema20Flat and sma50Flat) ? warnBg : goodBg)
+                r += 1
+                setRow(r, "200MA Bias", bias200Txt, bgBase)
+                r += 1
+                setRow(r, "RSI Swings", rsiSwingTxt, (rsiSwingTxt == "RSI swings: HL (ok)") ? goodBg : warnBg)
+                r += 1
+                setRow(r, "MACD Flips", macdFlipTxt, (macdFlipCount >= macdFlipWarn) ? warnBg : goodBg)
+                r += 1
+                setRow(r, "Breakout Volume", breakVolTxt, breakVolOk ? goodBg : warnBg)
+                r += 1
+
+                setHeader(r, "- PLAN (NUMERIC) -")
+                r += 1
+                setRow(r, "Key Level", keyLevelType + " @ " + fmtPrice(keyLevel), gate7KeyLevel ? goodBg : warnBg)
+                r += 1
+                setRow(r, "Entry Zone", entryZoneTxt, not na(entryCenterPlan) ? goodBg : warnBg)
+                r += 1
+                setRow(r, "Trigger", triggerPlanTxt, reactionOk and entryTrigger ? goodBg : warnBg)
+                r += 1
+                setRow(r, "Invalidation", fmtPrice(invalPlan), waitStructMode ? warnBg : (gate11Risk ? goodBg : badBg))
+                r += 1
+                setRow(r, "Target 1", fmtPrice(target1Plan) + " (" + target1Logic + ")", not na(target1Plan) ? goodBg : warnBg)
+                r += 1
+                setRow(r, "Target 2", fmtPrice(target2Plan), not na(target2Plan) ? goodBg : warnBg)
+                r += 1
+                setRow(r, "RR to T1", fmtNum(rrT1Plan), gate13Reward ? goodBg : warnBg)
+                r += 1
+                setRow(r, "RR to T2", fmtNum(rrT2Plan), not na(rrT2Plan) and rrT2Plan >= minRR_Strong ? goodBg : warnBg)
+                r += 1
+                setRow(r, "ATR", fmtNum(atr) + " | " + fmtNum(atrPct) + "%", bgBase)
+                r += 1
+                setRow(r, "Stop vs ATR", stopAtrTxt, gate12AtrSanity ? goodBg : warnBg)
+                r += 1
+                setRow(r, "Volatility Note", volNoteTxt, atrPct >= atrPctExtreme ? badBg : atrPct >= atrPctHigh ? warnBg : goodBg)
+                r += 1
+                setRow(r, "Grade (A/B/C/PASS)", gradeTxt, gradeTxt == "A" ? goodBg : gradeTxt == "B" ? goodBg : gradeTxt == "C" ? warnBg : badBg)
+                r += 1
+                setRow(r, "Thesis 1 Sentence", thesisTxt, waitStructMode ? warnBg : (gate14Clarity ? goodBg : warnBg))
+                r += 1
+
+                if showNumbers
+                    setHeader(r, "- DEBUG (optional) -")
+                    r += 1
+                    setRow(r, "ATR% (raw)", "atr%=" + str.tostring(atrPct, "#.##"), bgBase)
+                    r += 1
+                    setRow(r, "Failed Breaks", "count=" + str.tostring(failedCount), bgBase)
+                    r += 1
+                    setRow(r, "MACD Flips", "flips=" + str.tostring(macdFlipCount), bgBase)
+                    r += 1
+                    setRow(r, "Nearest Level", "ATR=" + str.tostring(nearest, "#.##"), bgBase)
+                    r += 1
+                    setRow(r, "Top Penalties", topPenaltyTxt, bgBase)
+                    r += 1
+
+
+
+
+
+

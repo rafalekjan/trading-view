@@ -1,0 +1,139 @@
+Poniżej przypisuję **wagi (suma = 100)** dla 15 pytań z załącznika, bazując wyłącznie na ich znaczeniu strukturalnym dla 1H w swing options 
+
+Priorytet dostały elementy, które:
+
+* definiują **przewagę strukturalną**,
+* określają **invalidation**,
+* decydują o **asymetrii ruchu**,
+* mają największy wpływ na trwałość swingu.
+
+---
+
+# 🎯 Wagi – 1H Structure Evaluation (Suma = 100)
+
+### 1️⃣ Czy struktura jest czysta i czytelna?
+
+**Waga: 14**
+Fundament. Jeśli nie ma czytelnej struktury → wszystko inne traci znaczenie.
+
+---
+
+### 2️⃣ Czy cena jest w logicznej lokalizacji?
+
+**Waga: 12**
+Lokalizacja decyduje o jakości wejścia i asymetrii.
+
+---
+
+### 3️⃣ Czy struktura potwierdza kierunek?
+
+**Waga: 12**
+Bez potwierdzenia kontroli (HH/HL lub LH/LL) swing nie ma podstaw.
+
+---
+
+### 4️⃣ Czy wolumen wspiera ruch?
+
+**Waga: 7**
+Ważny filtr jakości wybicia, ale wtórny wobec struktury.
+
+---
+
+### 5️⃣ Czy ryzyko jest klarowne (invalidation)?
+
+**Waga: 13**
+Kluczowe w options – brak jasnego unieważnienia = brak setupu.
+
+---
+
+### 6️⃣ Czy momentum jest zdrowe (RSI/MACD)?
+
+**Waga: 5**
+Kontekstowe, wspierające – nie decydujące.
+
+---
+
+### 7️⃣ Czy warunki są swing-friendly (nie intraday chaos)?
+
+**Waga: 6**
+Filtr środowiska – eliminuje chaos.
+
+---
+
+### 8️⃣ Czy jest miejsce na realistyczny target?
+
+**Waga: 8**
+Bez przestrzeni nie ma asymetrii.
+
+---
+
+### 9️⃣ Czy stop synchronizuje się z konstrukcją opcji?
+
+**Waga: 6**
+Istotne dla premium, ale wtórne wobec struktury.
+
+---
+
+### 🔟 Czy to A/B setup (grading klarowny)?
+
+**Waga: 5**
+Wynik końcowy – pochodna wcześniejszych punktów.
+
+---
+
+### 1️⃣1️⃣ Czy 1H jest zsynchronizowany z Daily (brak konfliktu)?
+
+**Waga: 4**
+Ważne, ale bardziej filtr kontekstowy niż strukturalny 1H.
+
+---
+
+### 1️⃣2️⃣ Czy widać kompresję vs wyczerpanie?
+
+**Waga: 4**
+Wspiera decyzję o breakout quality.
+
+---
+
+### 1️⃣3️⃣ Czy struktura daje czasowy komfort dla DTE?
+
+**Waga: 2**
+Istotne dla opcji, ale wtórne wobec struktury ceny.
+
+---
+
+### 1️⃣4️⃣ Relatywna siła vs rynek (1H)
+
+**Waga: 1**
+Edge enhancer, nie fundament strukturalny.
+
+---
+
+### 1️⃣5️⃣ Zachowanie ceny przy poziomie (reakcja vs przelot)
+
+**Waga: 11**
+Bardzo ważne – respekt poziomu często decyduje o jakości swingu.
+
+---
+
+# 📊 Podsumowanie wag
+
+| Obszar                                         | Waga    |
+| ---------------------------------------------- | ------- |
+| Struktura & kierunek                           | 38      |
+| Lokalizacja & reakcja                          | 23      |
+| Ryzyko & target                                | 21      |
+| Filtry jakości (wolumen, momentum, środowisko) | 18      |
+| **Suma**                                       | **100** |
+
+---
+
+# 🧠 Najważniejsze pytania (Top 5 według wpływu)
+
+1. Czystość struktury (14)
+2. Klarowne invalidation (13)
+3. Lokalizacja ceny (12)
+4. Potwierdzenie kierunku (12)
+5. Reakcja przy poziomie (11)
+
+Te 5 elementów odpowiada za **62% całkowitej oceny setupu 1H**.

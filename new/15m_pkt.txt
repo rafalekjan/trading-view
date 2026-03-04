@@ -1,0 +1,122 @@
+Poniżej przypisuję **wagi (suma = 100)** dla 9 pytań z Twojego dokumentu 15m — w kontekście swing options oraz roli 15m jako *execution & risk compression layer*.
+Odniesienie do pytań: 
+
+---
+
+# 📊 PRIORYTETY W OCENIE STRUKTURY 15M (SWING OPTIONS)
+
+## 🥇 1️⃣ Czy cena reaguje poprawnie na kluczowy poziom?
+
+**Waga: 20**
+
+To jest absolutny fundament.
+Bez reakcji nie ma struktury, nie ma przewagi, nie ma edge.
+
+Jeśli poziom nie działa → wszystko inne traci sens.
+
+---
+
+## 🥈 2️⃣ Czy struktura na 15m wspiera mój kierunek?
+
+**Waga: 18**
+
+Reakcja bez struktury = przypadek.
+Struktura bez reakcji = brak lokalizacji.
+
+To drugi najważniejszy element.
+
+---
+
+## 🥉 3️⃣ Czy mogę logicznie zdefiniować invalidation?
+
+**Waga: 15**
+
+Opcje wymagają precyzji.
+Jeśli nie ma jasnego punktu błędu → nie ma trade’u.
+
+---
+
+## 4️⃣ Czy wejście zmniejsza ryzyko, a nie je zwiększa?
+
+**Waga: 12**
+
+To pytanie definiuje sens używania 15m.
+Jeśli nie poprawia R względem HTF → 15m jest zbędne.
+
+---
+
+## 5️⃣ Czy cena NIE jest już rozszerzona (extended)?
+
+**Waga: 10**
+
+Bardzo istotne przy opcjach (theta + retrace risk).
+Nieco mniej ważne niż struktura, ale nadal krytyczne.
+
+---
+
+## 6️⃣ Czy korekta jest zdrowa czy agresywna?
+
+**Waga: 9**
+
+Dobre do filtrowania B/C setupów.
+Nie absolutnie kluczowe, ale poprawia jakość.
+
+---
+
+## 7️⃣ Czy wolumen potwierdza ruch?
+
+**Waga: 7**
+
+Ważny, ale pomocniczy.
+Dobry breakout bez wolumenu nadal może działać.
+
+---
+
+## 8️⃣ Czy momentum nie słabnie przed wejściem?
+
+**Waga: 6**
+
+Momentum często jest już częściowo zawarte w strukturze i wolumenie.
+Dodatkowy filtr, ale nie decydujący.
+
+---
+
+## 9️⃣ Czy warunki są zgodne z typem tygodnia?
+
+**Waga: 3**
+
+Najmniej istotne na poziomie 15m.
+To powinno być ustalone wyżej (1D / 4H).
+
+Na 15m to tylko kontekst, nie warunek.
+
+---
+
+# 📌 PODSUMOWANIE WAG (100)
+
+| Pytanie                     | Waga    |
+| --------------------------- | ------- |
+| Reakcja na poziomie         | 20      |
+| Struktura                   | 18      |
+| Invalidation                | 15      |
+| Czy entry zmniejsza ryzyko  | 12      |
+| Overextension               | 10      |
+| Zdrowa vs agresywna korekta | 9       |
+| Wolumen                     | 7       |
+| Momentum                    | 6       |
+| Typ tygodnia                | 3       |
+| **Suma**                    | **100** |
+
+---
+
+# 🎯 Kluczowa obserwacja
+
+Pierwsze 3 pytania = **53% całej oceny**
+
+I to jest poprawne — bo one definiują:
+
+* czy poziom działa
+* czy struktura istnieje
+* czy możesz kontrolować ryzyko
+
+Reszta to „quality enhancers”.

@@ -1,0 +1,457 @@
+﻿//@version=6
+indicator("Stock 15m Options UI Table (PUT/CALL) - Blueprint", overlay=true, max_labels_count=500, max_lines_count=500)
+
+//------------------------------------------------------------------------------
+// Inputs (all user-configurable)
+//------------------------------------------------------------------------------
+groupUI   = "UI"
+uiShow    = input.bool(true, "Show table", group=groupUI)
+uiOpacity = input.int(10, "Table visibility (0=solid, 100=invisible)", minval=0, maxval=100, group=groupUI)
+uiShowDetails = input.bool(true, "Show DETAILS section", group=groupUI)
+uiTextSize = input.string("small", "Text size", options=["tiny","small","normal","large"], group=groupUI)
+uiShowHintWhenNot15m = input.bool(false, "Show hint when not on 15m", group=groupUI)
+
+groupMode = "Mode"
+modeShowBoth = input.bool(true, "Show both PUT & CALL", group=groupMode)
+modeFocus = input.string("BOTH", "Focus", options=["BOTH","CALL","PUT"], group=groupMode)
+
+groupTF = "Timeframe gating"
+onlyOn15m = input.bool(true, "Render table only on 15m", group=groupTF)
+
+groupBench = "HTF context (light)"
+htfTF = input.timeframe("60", "HTF for risk-compression compare", group=groupBench)
+dailyTF = input.timeframe("D", "Daily context TF (week type proxy)", group=groupBench)
+
+groupStructure = "Structure / levels"
+pivLen = input.int(5, "Pivot length (micro swings)", minval=2, maxval=20, group=groupStructure)
+maFastLen = input.int(20, "EMA fast", minval=1, group=groupStructure)
+maMidLen  = input.int(50, "SMA mid", minval=1, group=groupStructure)
+
+groupFilters = "Filters / Thresholds"
+atrLen = input.int(14, "ATR length", minval=1, group=groupFilters)
+volLen = input.int(20, "Volume SMA length", minval=1, group=groupFilters)
+nearLevelAtr = input.float(0.8, "Near level within x ATR", minval=0.1, step=0.1, group=groupFilters)
+volImpulseMult = input.float(1.2, "Impulse vol >= SMA *", minval=0.5, step=0.1, group=groupFilters)
+wickBodyMult = input.float(0.8, "Reaction wick >= x body", minval=0.1, step=0.1, group=groupFilters)
+closePosPct = input.float(0.6, "Reaction close position (0..1)", minval=0.1, maxval=0.9, step=0.05, group=groupFilters)
+
+extendedAtr = input.float(1.5, "Extended if |close-EMA| > x ATR", minval=0.5, step=0.25, group=groupFilters)
+impulseBars = input.int(4, "Overextension: impulse bars window", minval=2, maxval=10, group=groupFilters)
+impulseBodyPct = input.float(0.55, "Impulse: body/range >= ", minval=0.1, maxval=0.95, step=0.05, group=groupFilters)
+
+pullbackWin = input.int(12, "Pullback health window (bars)", minval=5, maxval=50, group=groupFilters)
+aggrRetracePct = input.float(0.6, "Aggressive pullback if retrace >= ", minval=0.2, maxval=0.9, step=0.05, group=groupFilters)
+
+stopBufAtr = input.float(0.20, "Stop buffer (x ATR)", minval=0.0, step=0.05, group=groupFilters)
+riskAtrMax = input.float(2.0, "Max risk (x ATR) for 15m entry", minval=0.5, step=0.25, group=groupFilters)
+
+rsiLen = input.int(14, "RSI length", minval=1, group=groupFilters)
+rsiMid = input.float(50.0, "RSI mid", minval=1, maxval=99, step=1, group=groupFilters)
+
+groupGrading = "Grading"
+gradeA = input.int(80, "Grade A threshold", minval=0, maxval=100, group=groupGrading)
+gradeB = input.int(65, "Grade B threshold", minval=0, maxval=100, group=groupGrading)
+gradeC = input.int(50, "Grade C threshold", minval=0, maxval=100, group=groupGrading)
+
+//------------------------------------------------------------------------------
+// Helpers
+//------------------------------------------------------------------------------
+is15m = timeframe.isminutes and timeframe.multiplier == 15
+
+f_txtSize(_s) =>
+    if _s == "tiny"
+        size.tiny
+    else if _s == "small"
+        size.small
+    else if _s == "normal"
+        size.normal
+    else
+        size.large
+
+txtSize = f_txtSize(uiTextSize)
+
+f_c(_col) => color.new(_col, uiOpacity)
+
+colOk  = f_c(color.lime)
+colBad = f_c(color.red)
+colNA  = f_c(color.gray)
+colHdr = f_c(color.silver)
+colBg  = f_c(color.black)
+colSep = f_c(color.new(color.gray, math.min(100, uiOpacity + 40)))
+
+f_statusColor(_ok, _na) =>
+    _na ? colNA : (_ok ? colOk : colBad)
+
+f_boolToText(_ok, _na) =>
+    _na ? "-" : (_ok ? "YES" : "NO")
+
+f_grade(_score) =>
+    if _score >= gradeA
+        "A"
+    else if _score >= gradeB
+        "B"
+    else if _score >= gradeC
+        "C"
+    else
+        "D"
+
+f_score(_ok, _w) => _ok ? _w : 0
+
+f_rollSum(_src, _len) =>
+    float _sum = 0.0
+    for i = 0 to _len - 1
+        _sum += nz(_src[i], 0.0)
+    _sum
+
+f_adxFromDmi(_len) =>
+    [_diPlus, _diMinus, _adx] = ta.dmi(_len, _len)
+    _adx
+
+//------------------------------------------------------------------------------
+// Data (15m)
+//------------------------------------------------------------------------------
+atr = ta.atr(atrLen)
+volSma = ta.sma(volume, volLen)
+rsi = ta.rsi(close, rsiLen)
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+
+emaFast = ta.ema(close, maFastLen)
+smaMid  = ta.sma(close, maMidLen)
+
+// Micro-structure pivots
+ph = ta.pivothigh(high, pivLen, pivLen)
+pl = ta.pivotlow(low, pivLen, pivLen)
+
+var float lastPH = na
+var float prevPH = na
+var float lastPL = na
+var float prevPL = na
+
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
+
+bullMicro = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH > prevPH and lastPL > prevPL
+bearMicro = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH < prevPH and lastPL < prevPL
+
+nearestSupport = lastPL
+nearestResist  = lastPH
+
+distS = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
+distR = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
+nearSupport = not na(distS) and distS <= nearLevelAtr * atr
+nearResist  = not na(distR) and distR <= nearLevelAtr * atr
+nearMA = math.abs(close - emaFast) <= nearLevelAtr * atr or math.abs(close - smaMid) <= nearLevelAtr * atr
+
+// Candle anatomy
+rng = high - low
+body = math.abs(close - open)
+upperW = high - math.max(open, close)
+lowerW = math.min(open, close) - low
+
+closePos = rng > 0 ? (close - low) / rng : na  // 0 bottom, 1 top
+
+// Reaction definition (measurable)
+reactionLong  = (lowerW >= wickBodyMult * body) and (not na(closePos) and closePos >= closePosPct) and (volume >= volSma)
+reactionShort = (upperW >= wickBodyMult * body) and (not na(closePos) and closePos <= (1 - closePosPct)) and (volume >= volSma)
+
+// Impulse definition
+bodyPct = rng > 0 ? (body / rng) : 0.0
+impulseBull = close > open and bodyPct >= impulseBodyPct and volume >= volSma * volImpulseMult
+impulseBear = close < open and bodyPct >= impulseBodyPct and volume >= volSma * volImpulseMult
+
+// Overextension
+distToEma = math.abs(close - emaFast)
+extended = distToEma > extendedAtr * atr
+impulseSpikeSrc = (impulseBull or impulseBear) ? 1.0 : 0.0
+impulseCount = f_rollSum(impulseSpikeSrc, impulseBars)
+isOverextended = extended or impulseCount >= math.max(3, impulseBars - 1)
+
+// Pullback health (measurable proxies)
+impulseRange = ta.sma((impulseBull or impulseBear) ? rng : 0.0, pullbackWin)
+counterRangeBull = ta.sma(close < open ? rng : 0.0, pullbackWin)
+counterRangeBear = ta.sma(close > open ? rng : 0.0, pullbackWin)
+
+impulseVol = ta.sma((impulseBull or impulseBear) ? volume : 0.0, pullbackWin)
+counterVolBull = ta.sma(close < open ? volume : 0.0, pullbackWin)
+counterVolBear = ta.sma(close > open ? volume : 0.0, pullbackWin)
+
+healthyPullbackBull = counterRangeBull <= 0.9 * impulseRange and counterVolBull <= impulseVol
+healthyPullbackBear = counterRangeBear <= 0.9 * impulseRange and counterVolBear <= impulseVol
+
+lastImpulseMove = math.abs(close - close[pullbackWin])
+retraceMove = math.abs(close - close[math.floor(pullbackWin / 2)])
+aggressiveRetrace = lastImpulseMove > 0 ? (retraceMove / lastImpulseMove) >= aggrRetracePct : false
+
+// Invalidation
+callInvalid = nearestSupport
+putInvalid  = nearestResist
+
+callStop = not na(callInvalid) ? callInvalid - stopBufAtr * atr : na
+putStop  = not na(putInvalid)  ? putInvalid  + stopBufAtr * atr : na
+
+callRisk = not na(callStop) ? math.abs(close - callStop) : na
+putRisk  = not na(putStop)  ? math.abs(putStop - close) : na
+
+callRiskOK = not na(callRisk) and callRisk > 0 and callRisk <= riskAtrMax * atr
+putRiskOK  = not na(putRisk)  and putRisk  > 0 and putRisk  <= riskAtrMax * atr
+
+// Entry reduces risk (risk compression): compare to HTF pivot-based risk
+htfATR = request.security(syminfo.tickerid, htfTF, ta.atr(atrLen))
+htfPL  = request.security(syminfo.tickerid, htfTF, ta.pivotlow(low, pivLen, pivLen))
+htfPH  = request.security(syminfo.tickerid, htfTF, ta.pivothigh(high, pivLen, pivLen))
+
+var float htfLastPL = na
+var float htfLastPH = na
+if not na(htfPL)
+    htfLastPL := htfPL
+if not na(htfPH)
+    htfLastPH := htfPH
+
+htfCallInvalid = htfLastPL
+htfPutInvalid  = htfLastPH
+
+htfCallStop = not na(htfCallInvalid) ? htfCallInvalid - stopBufAtr * htfATR : na
+htfPutStop  = not na(htfPutInvalid)  ? htfPutInvalid  + stopBufAtr * htfATR : na
+
+htfCallRisk = not na(htfCallStop) ? math.abs(close - htfCallStop) : na
+htfPutRisk  = not na(htfPutStop)  ? math.abs(htfPutStop - close) : na
+
+callRiskCompression = callRiskOK and (na(htfCallRisk) or (not na(callRisk) and callRisk < htfCallRisk))
+putRiskCompression  = putRiskOK  and (na(htfPutRisk)  or (not na(putRisk)  and putRisk  < htfPutRisk))
+
+// Volume confirms move
+callVolOk = impulseBull or (healthyPullbackBull and volume >= 0.7 * volSma)
+putVolOk  = impulseBear or (healthyPullbackBear and volume >= 0.7 * volSma)
+
+// Momentum not weakening
+callMomOk = (rsi >= rsiMid) and (macdHist >= 0) and (macdHist >= macdHist[1])
+putMomOk  = (rsi <= rsiMid) and (macdHist <= 0) and (macdHist <= macdHist[1])
+
+// Daily context (week-type proxy): avoid high-vol days; align with daily EMA50
+dATR = request.security(syminfo.tickerid, dailyTF, ta.atr(14))
+dADX = request.security(syminfo.tickerid, dailyTF, f_adxFromDmi(14))
+dClose = request.security(syminfo.tickerid, dailyTF, close)
+dEma50 = request.security(syminfo.tickerid, dailyTF, ta.ema(close, 50))
+dTrend = dADX >= 18 and dClose > dEma50
+dBear  = dADX >= 18 and dClose < dEma50
+dHighVol = dATR > ta.sma(dATR, 20) * 1.2
+
+callWeekOk = (dTrend and not dHighVol) or (not dHighVol)
+putWeekOk  = (dBear  and not dHighVol) or (not dHighVol)
+
+//------------------------------------------------------------------------------
+// 15m Questions & Weights (sum = 100)
+//------------------------------------------------------------------------------
+w1=20, w2=18, w3=15, w4=12, w5=10, w6=9, w7=7, w8=6, w9=3
+
+// Directional checks (CALL bullish, PUT bearish)
+callQ1 = (nearSupport or nearMA) and reactionLong
+putQ1  = (nearResist  or nearMA) and reactionShort
+
+callQ2 = bullMicro
+putQ2  = bearMicro
+
+callQ3 = not na(callInvalid) and not na(callStop) and callRiskOK
+putQ3  = not na(putInvalid)  and not na(putStop)  and putRiskOK
+
+callQ4 = callRiskCompression
+putQ4  = putRiskCompression
+
+callQ5 = not isOverextended
+putQ5  = not isOverextended
+
+callQ6 = healthyPullbackBull and not aggressiveRetrace
+putQ6  = healthyPullbackBear and not aggressiveRetrace
+
+callQ7 = callVolOk
+putQ7  = putVolOk
+
+callQ8 = callMomOk
+putQ8  = putMomOk
+
+callQ9 = callWeekOk
+putQ9  = putWeekOk
+
+callScore = f_score(callQ1, w1)
+callScore := callScore + f_score(callQ2, w2)
+callScore := callScore + f_score(callQ3, w3)
+callScore := callScore + f_score(callQ4, w4)
+callScore := callScore + f_score(callQ5, w5)
+callScore := callScore + f_score(callQ6, w6)
+callScore := callScore + f_score(callQ7, w7)
+callScore := callScore + f_score(callQ8, w8)
+callScore := callScore + f_score(callQ9, w9)
+
+putScore = f_score(putQ1, w1)
+putScore := putScore + f_score(putQ2, w2)
+putScore := putScore + f_score(putQ3, w3)
+putScore := putScore + f_score(putQ4, w4)
+putScore := putScore + f_score(putQ5, w5)
+putScore := putScore + f_score(putQ6, w6)
+putScore := putScore + f_score(putQ7, w7)
+putScore := putScore + f_score(putQ8, w8)
+putScore := putScore + f_score(putQ9, w9)
+
+//------------------------------------------------------------------------------
+// Table rendering (Top Right)
+//------------------------------------------------------------------------------
+var int COL_METRIC = 0
+var int COL_PUT    = 1
+var int COL_CALL   = 2
+
+var table t = table.new(position.top_right, 3, 1, border_width=1)
+
+f_setCell(_row, _col, _txt, _bg, _tc) =>
+    table.cell(t, _col, _row, _txt, text_color=_tc, bgcolor=_bg, text_size=txtSize)
+
+f_clearTable(_rows) =>
+    for r = 0 to _rows - 1
+        for c = 0 to 2
+            f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
+
+maxRows = 40
+if barstate.isfirst
+    t := table.new(position.top_right, 3, maxRows, border_width=1)
+
+f_hdrRow(_r, _title) =>
+    f_setCell(_r, COL_METRIC, _title, colHdr, f_c(color.black))
+    f_setCell(_r, COL_PUT,    "PUT",   colHdr, f_c(color.black))
+    f_setCell(_r, COL_CALL,   "CALL",  colHdr, f_c(color.black))
+
+f_sectionRow(_r, _title) =>
+    f_setCell(_r, COL_METRIC, _title, colSep, f_c(color.white))
+    f_setCell(_r, COL_PUT,    "",     colSep, f_c(color.white))
+    f_setCell(_r, COL_CALL,   "",     colSep, f_c(color.white))
+
+f_metricRow(_r, _name, _putTxt, _putCol, _callTxt, _callCol) =>
+    f_setCell(_r, COL_METRIC, _name, colBg, f_c(color.white))
+    f_setCell(_r, COL_PUT,    _putTxt,  _putCol, f_c(color.white))
+    f_setCell(_r, COL_CALL,   _callTxt, _callCol, f_c(color.white))
+
+f_valueRow(_r, _name, _putVal, _callVal) =>
+    f_setCell(_r, COL_METRIC, _name, colBg, f_c(color.white))
+    f_setCell(_r, COL_PUT,  _putVal, colBg, f_c(color.white))
+    f_setCell(_r, COL_CALL, _callVal,colBg, f_c(color.white))
+
+showPut  = modeShowBoth ? true : (modeFocus == "PUT")
+showCall = modeShowBoth ? true : (modeFocus == "CALL")
+
+f_applyColVisibility(_r) =>
+    if not showPut
+        f_setCell(_r, COL_PUT, "", color.new(color.black, 100), color.new(color.white, 100))
+    if not showCall
+        f_setCell(_r, COL_CALL, "", color.new(color.black, 100), color.new(color.white, 100))
+
+f_checkRow(_r, _name, _w, _putOk, _callOk, _putNa, _callNa) =>
+    _putTxt = f_boolToText(_putOk, _putNa) + " (" + str.tostring(_w) + ")"
+    _calTxt = f_boolToText(_callOk, _callNa) + " (" + str.tostring(_w) + ")"
+    f_metricRow(_r, _name, _putTxt, f_statusColor(_putOk, _putNa), _calTxt, f_statusColor(_callOk, _callNa))
+    f_applyColVisibility(_r)
+
+render = uiShow and (not onlyOn15m or is15m)
+
+if not render
+    f_clearTable(maxRows)
+    if uiShowHintWhenNot15m and uiShow
+        hint = "Switch to 15m to view stock table"
+        f_setCell(0, COL_METRIC, hint, colBg, f_c(color.orange))
+else
+    row = 0
+    f_hdrRow(row, "STOCK 15m - OPTIONS UI")
+    f_applyColVisibility(row)
+    row += 1
+
+    // SUMMARY
+    f_sectionRow(row, "SUMMARY")
+    row += 1
+
+    putGrade  = f_grade(putScore)
+    callGrade = f_grade(callScore)
+
+    f_metricRow(row, "Total score (0-100)", str.tostring(putScore), colBg, str.tostring(callScore), colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Grade", putGrade, colBg, callGrade, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Reaction @ level", putQ1 ? "OK" : "NO", f_statusColor(putQ1, false), callQ1 ? "OK" : "NO", f_statusColor(callQ1, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Structure supports dir", putQ2 ? "YES" : "NO", f_statusColor(putQ2, false), callQ2 ? "YES" : "NO", f_statusColor(callQ2, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Overextended?", isOverextended ? "YES" : "NO", f_statusColor(not isOverextended, false), isOverextended ? "YES" : "NO", f_statusColor(not isOverextended, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    // DETAILS
+    if uiShowDetails
+        row += 1
+        f_sectionRow(row, "DETAILS (9 checks)")
+        row += 1
+
+        f_checkRow(row, "1) Reaction at key level", w1, putQ1, callQ1, false, false)
+        row += 1
+        f_checkRow(row, "2) Micro-structure confirms", w2, putQ2, callQ2, false, false)
+        row += 1
+        f_checkRow(row, "3) Invalidation definable", w3, putQ3, callQ3, na(putInvalid), na(callInvalid))
+        row += 1
+        f_checkRow(row, "4) Entry reduces risk (vs HTF)", w4, putQ4, callQ4, false, false)
+        row += 1
+        f_checkRow(row, "5) Not extended", w5, putQ5, callQ5, false, false)
+        row += 1
+        f_checkRow(row, "6) Pullback healthy", w6, putQ6, callQ6, false, false)
+        row += 1
+        f_checkRow(row, "7) Volume confirms", w7, putQ7, callQ7, false, false)
+        row += 1
+        f_checkRow(row, "8) Momentum not weakening", w8, putQ8, callQ8, false, false)
+        row += 1
+        f_checkRow(row, "9) Week-type alignment (Daily)", w9, putQ9, callQ9, false, false)
+        row += 1
+
+        row += 1
+        f_sectionRow(row, "DETAILS: values")
+        row += 1
+
+        f_valueRow(row, "ATR / VolSMA", str.tostring(atr, "#.####") + " / " + str.tostring(volSma, "#"),
+                             str.tostring(atr, "#.####") + " / " + str.tostring(volSma, "#"))
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "EMA20 / SMA50", str.tostring(emaFast, "#.####") + " / " + str.tostring(smaMid, "#.####"),
+                              str.tostring(emaFast, "#.####") + " / " + str.tostring(smaMid, "#.####"))
+        f_applyColVisibility(row)
+        row += 1
+
+        srTxt = (na(nearestSupport) ? "-" : str.tostring(nearestSupport, "#.####")) + " / " + (na(nearestResist) ? "-" : str.tostring(nearestResist, "#.####"))
+        f_valueRow(row, "Nearest S / R", srTxt, srTxt)
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "Stop (PUT/CALL)", na(putStop) ? "-" : str.tostring(putStop, "#.####"), na(callStop) ? "-" : str.tostring(callStop, "#.####"))
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "Risk (PUT/CALL)", na(putRisk) ? "-" : str.tostring(putRisk, "#.####"), na(callRisk) ? "-" : str.tostring(callRisk, "#.####"))
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "RSI / MACD hist", str.tostring(rsi, "#.##") + " / " + str.tostring(macdHist, "#.####"),
+                                  str.tostring(rsi, "#.##") + " / " + str.tostring(macdHist, "#.####"))
+        f_applyColVisibility(row)
+        row += 1
+
+    // Clear remaining unused rows
+    if row < maxRows
+        for r = row to maxRows - 1
+            for c = 0 to 2
+                f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))

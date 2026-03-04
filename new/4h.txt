@@ -1,0 +1,134 @@
+Poniżej masz **konkretny zestaw pytań**, na które ma odpowiadać **wykres 4H** w podejściu z dokumentu (swing options), oraz co jest **„oczekiwane” vs „nieoczekiwane”** w odczytach/zachowaniu ceny. 
+
+---
+
+## 1) Czy spółka jest relatywnie silna/słaba względem rynku na 4H?
+
+**Pytanie 4H:** „Czy ten ticker **outperformuje / underperformuje** SPY/QQQ na tym samym timeframe?” 
+
+* **Oczekiwane (RS dla long / RW dla short):**
+
+  * *Relative strength (pod long/calle)*: ticker trzyma szczyty, gdy rynek robi pullback; robi wyższe dołki, gdy rynek stoi w miejscu. 
+  * *Relative weakness (pod short/puty)*: ticker łamie wsparcia szybciej niż rynek; nie odbija, gdy rynek odbija. 
+
+* **Nieoczekiwane (ostrzeżenie / „coś się nie zgadza”):**
+
+  * ticker zachowuje się „1:1 jak rynek” (brak przewagi → spada jakość), albo nagle przestaje być RS/RW (np. zaczyna słabnąć, gdy miał być mocny). 
+
+---
+
+## 2) Czy cena reaguje na kluczowy poziom tak, jak powinna (czyli: „czy rynek zachowuje się jak oczekuję”)?
+
+**Pytanie 4H:** „Na poziomie (support/resistance) — czy widzę **holding / rejection** oraz **czy struktura potwierdza kierunek**?”  
+
+* **Oczekiwane:**
+
+  * po dotknięciu poziomu cena **trzyma** (support) albo **odrzuca** (resistance), zamiast przechodzić przez niego bez reakcji; 
+  * struktura na 4H zaczyna „układać się” pod tezę (np. po reakcji na poziomie pojawia się czytelne potwierdzenie strukturalne kierunku, zamiast chaosu). 
+  * w codziennym check-in: rynek i obserwowane tickery **„respect levels”** (szanują poziomy). 
+
+* **Nieoczekiwane:**
+
+  * cena **przecina poziom bez walki** („slices through the level easily”) — to jest sygnał, że pomysł może być błędny / słaby. 
+  * zamiast czytelnej reakcji masz whipsaw, brak follow-through i trudno to opisać prosto (czyli spada „clarity”). 
+
+---
+
+## 3) Czy momentum na 4H potwierdza kierunek? (RSI)
+
+**Pytanie 4H:** „Czy RSI potwierdza, że momentum wspiera mój kierunek, czy zaczyna słabnąć?” (RSI jest używane jako **potwierdzenie momentum**, nie jako sygnał). 
+
+* **Oczekiwane wartości (momentum zgodne z tezą):**
+
+  * w warunkach bullish: RSI ma tendencję **trzymać się powyżej strefy ~40–50**, a pullbacki często kończą się w tej strefie. 
+  * w warunkach bearish: RSI ma tendencję **pozostawać poniżej ~50–60**, a podejścia w górę często w tej strefie zawodzą. 
+  * (dla swingów) RSI na wyższych TF, w tym 4H, daje „czystsze” sygnały momentum. 
+
+* **Nieoczekiwane wartości (ostrzeżenia):**
+
+  * RSI **nie potrafi odzyskać 50** w scenariuszu bullish albo robi niższe szczyty / traci momentum, gdy cena „powinna” ciągnąć. 
+  * dywergencja RSI pojawia się w okolicy istotnego miejsca (to nie jest automatyczny trade, tylko „heads-up”). 
+
+---
+
+## 4) Czy momentum na 4H przyspiesza czy gaśnie? (MACD)
+
+**Pytanie 4H:** „Czy MACD potwierdza kontynuację trendu, czy pokazuje wyraźne słabnięcie momentum?” 
+
+* **Oczekiwane:**
+
+  * momentum na MACD jest **zgodne z kierunkiem** (wzmacnia się, a nie „gaśnie”), a odczyt jest „clean” (bez ciągłego flipowania) — ma potwierdzać conviction, nie go tworzyć. 
+
+* **Nieoczekiwane:**
+
+  * MACD zaczyna pokazywać **wyraźne słabnięcie / zmianę momentum** w momencie, gdy teza zakłada kontynuację; albo MACD i price action mocno się rozjeżdżają (w dokumencie: jeśli się rozjeżdżają, **ufa się cenie**, a MACD traktuje jako ostrzeżenie). 
+
+---
+
+## 5) Czy „ruch ma sens” i czy moje oczekiwania są realistyczne? (Volume / ATR / zmienność)
+
+**Pytanie 4H:** „Czy ruch jest wsparty participation (volume) i czy zasięgi/stop/target są realistyczne wg ATR i zmienności?” 
+
+* **Oczekiwane:**
+
+  * **volume potwierdza**: wzrost ceny + rosnący wolumen = zdrowe; ruch bez wolumenu = ostrożność. 
+  * ATR „uziemia” oczekiwania: jeśli typowy range jest mały, nie zakładasz „cudownego” zasięgu; stop nie jest absurdalnie ciasny względem typowego ruchu. 
+  * przy rosnącej zmienności: traktujesz ją jako **risk multiplier** (często sygnał do ostrożności), a nie automatyczną okazję. 
+
+* **Nieoczekiwane:**
+
+  * „breakout”/ruch kierunkowy bez sensownego wolumenu (większe ryzyko failu); 
+  * zmienność zaczyna gwałtownie rosnąć i przestaje pasować do założeń planu (stop/size robią się nieadekwatne). 
+
+---
+
+## 6) **Jaki jest stan rynku na 4H: trend / range / unstable?**
+
+* **Oczekiwane:** potrafisz opisać rynek jednym zdaniem; jest czytelnie „trending” (HH/HL lub LH/LL) albo klarowny range. 
+* **Nieoczekiwane:** „unstable” (duże świece, erratyczne ruchy, nagłe odwrócenia) albo nie da się tego jasno opisać → w dokumencie to sygnał, by handlować mniej/ostrożniej. 
+
+## 7) **Czy struktura na 4H jest „czysta” i potwierdza kierunek (bez chaosu)?**
+
+* **Oczekiwane:** dla bullish: formuje się **higher low → wybicie ponad minor high → konsolidacja → kontynuacja**; dla bearish analogicznie **lower high → wybicie poniżej minor low → kontynuacja**. 
+* **Nieoczekiwane:** overlapping/whipsaw, „control, not chaos” nie występuje — struktura nie daje się opisać prosto. 
+
+## 8) **Gdzie są kluczowe poziomy na 4H (w tym MA jako confluence), i czy cena je respektuje?**
+   Wcześniej mówiłem o poziomach, ale **pominąłem moving averages jako element „key level”/kontekst**.
+
+* **Oczekiwane:**
+
+  * **20 EMA:** w trendzie cena „respects 20”; pullbacki trzymają (bull) lub zawodzą poniżej (bear). 
+  * **50 MA:** działa jako dynamiczne S/R; brak utrzymania 50 = wątpliwa siła trendu. 
+  * **200 MA:** filtr reżimu (powyżej bias long, poniżej bias short; chop wokół = ostrożnie). 
+* **Nieoczekiwane:** cena zaczyna „mielić” wokół 200 lub nie potrafi utrzymać 50, mimo że teza zakłada trend. 
+
+## 9) **„Gdzie jestem wyraźnie w błędzie?” – ryzyko/inwalidacja ma być oczywista na wykresie**
+   Wspominałem o tym pośrednio, ale warto dopisać jako osobne pytanie 4H (bo w dokumencie to filtr „non-negotiable”). 
+
+* **Oczekiwane:** poziom inwalidacji jest jasny i logiczny („jeśli cena tu dojdzie, teza nie ma sensu”). 
+* **Nieoczekiwane:** odpowiedź brzmi „może” albo stop jest arbitralny/emocjonalny. 
+
+## 10) **Czy reward jest realny i asymetryczny (na bazie kolejnego logicznego poziomu)?**
+   Tego nie dopisałem, a w dokumencie to osobny filtr („Reward Justification”). 
+
+* **Oczekiwane:** target wynika z logicznego poziomu, a R:R spełnia minimum (np. ~2:1+ jako „acceptable”, 3:1+ jako „strong”). 
+* **Nieoczekiwane:** target jest „vague/optimistic” albo wymaga „miracle” — wtedy trade jest dyskwalifikowany/niższej jakości. 
+
+## 11) (Opcjonalnie, jeśli używasz) **FVG jako konfluencja na 4H – ale tylko jako „area of interest”**
+   Nie dopisałem, bo to nie jest „core”, ale dokument to wymienia jako narzędzie kontekstu. 
+
+* **Oczekiwane:** FVG wspiera istniejący setup (trend + struktura + okolice poziomu + wsparcie vol/momentum). 
+* **Nieoczekiwane:** traktowanie FVG jako „gwarantowanego fill” albo trade “w izolacji”. 
+
+---
+## 12) **Czy wykres wygląda “tradeable” (płynność/świece są gładkie, nie jumpy)?**
+
+* **Oczekiwane:** smooth candles, brak dziwnych skoków, zachowanie „czyste”, bez serii fałszywych wybić.  
+* **Nieoczekiwane:** erratyczne ruchy / „jumpy candles” / powtarzalne false breakouts → zwiększone ryzyko egzekucji i niższa jakość.  
+
+## 13) **Czy pullback ma “zdrową” charakterystykę wolumenu (mniej na cofce, więcej na ruchu w kierunku)?**
+
+* **Oczekiwane:** increasing volume na ruchu kierunkowym i reduced volume na pullbackach. 
+* **Nieoczekiwane:** wolumen “pracuje przeciwko” (np. cofki są ciężkie, a ruch w kierunku słaby) → blueprint mówi wprost: wtedy czekasz / nie wymuszasz. 
+---
+14) „Czy cena jest w dobrej lokacji (near structure), czy jest extended / chasing / middle of nowhere?”

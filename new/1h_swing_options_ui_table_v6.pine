@@ -1,0 +1,538 @@
+//@version=6
+indicator("1H Swing Options UI Table (PUT/CALL) - Blueprint", overlay=true, max_labels_count=500, max_lines_count=500)
+
+//------------------------------------------------------------------------------
+// Inputs (all user-configurable)
+//------------------------------------------------------------------------------
+groupUI   = "UI"
+uiShow    = input.bool(true, "Show table", group=groupUI)
+uiOpacity = input.int(10, "Table visibility (0=solid, 100=invisible)", minval=0, maxval=100, group=groupUI)
+uiShowDetails = input.bool(true, "Show DETAILS section", group=groupUI)
+uiTextSize = input.string("small", "Text size", options=["tiny","small","normal","large"], group=groupUI)
+uiShowHintWhenNot1H = input.bool(false, "Show hint when not on 1H", group=groupUI)
+
+groupMode = "Mode"
+modeShowBoth = input.bool(true, "Show both PUT & CALL", group=groupMode)
+modeFocus = input.string("BOTH", "Focus", options=["BOTH","CALL","PUT"], group=groupMode)
+
+groupTF = "Timeframe gating"
+onlyOn1H = input.bool(true, "Render table only on 1H", group=groupTF)
+
+groupBench = "Benchmark / HTF"
+benchSymbol = input.symbol("SPY", "Benchmark symbol (Relative Strength)", group=groupBench)
+htfForAlignment = input.timeframe("D", "HTF for alignment", group=groupBench)
+
+groupStructure = "Structure detection"
+pivLen = input.int(5, "Pivot length (swing points)", minval=2, maxval=20, group=groupStructure)
+lookbackBars = input.int(80, "Lookback bars for structure checks", minval=20, maxval=500, group=groupStructure)
+
+groupFilters = "Filters / Thresholds"
+atrLen = input.int(14, "ATR length", minval=1, group=groupFilters)
+atrLocMult = input.float(0.8, "Location: max distance to key level (x ATR)", minval=0.1, step=0.1, group=groupFilters)
+minRR = input.float(2.0, "Target space: minimum R multiple", minval=0.5, step=0.25, group=groupFilters)
+volLen = input.int(20, "Volume SMA length", minval=1, group=groupFilters)
+volBreakMult = input.float(1.2, "Volume: impulse vol >= SMA *", minval=0.5, step=0.1, group=groupFilters)
+rsiLen = input.int(14, "RSI length", minval=1, group=groupFilters)
+rsiTrendLevel = input.float(50.0, "RSI trend level", minval=1, maxval=99, step=1, group=groupFilters)
+bbLen = input.int(20, "BB length (compression/exhaustion)", minval=5, group=groupFilters)
+bbMult = input.float(2.0, "BB stdev", minval=0.5, step=0.1, group=groupFilters)
+chaosOverlapThresh = input.float(0.55, "Chaos: overlap ratio threshold", minval=0.1, maxval=0.9, step=0.05, group=groupFilters)
+impulseAtrThresh = input.float(2.5, "DTE comfort: last impulse <= x ATR", minval=0.5, step=0.25, group=groupFilters)
+wickRejectionMult = input.float(0.9, "Level reaction: wick >= x body", minval=0.1, step=0.1, group=groupFilters)
+stopBufAtr = input.float(0.25, "Stop buffer (x ATR) beyond invalidation", minval=0.0, step=0.05, group=groupFilters)
+
+groupGrading = "Grading"
+gradeA = input.int(80, "Grade A threshold", minval=0, maxval=100, group=groupGrading)
+gradeB = input.int(65, "Grade B threshold", minval=0, maxval=100, group=groupGrading)
+gradeC = input.int(50, "Grade C threshold", minval=0, maxval=100, group=groupGrading)
+
+//------------------------------------------------------------------------------
+// Helpers
+//------------------------------------------------------------------------------
+is1H = timeframe.isminutes and timeframe.multiplier == 60
+
+f_txtSize(_s) =>
+    if _s == "tiny"
+        size.tiny
+    else if _s == "small"
+        size.small
+    else if _s == "normal"
+        size.normal
+    else
+        size.large
+
+txtSize = f_txtSize(uiTextSize)
+
+f_c(_col) => color.new(_col, uiOpacity)
+
+colOk  = f_c(color.lime)
+colBad = f_c(color.red)
+colNA  = f_c(color.gray)
+colHdr = f_c(color.silver)
+colBg  = f_c(color.black)
+colSep = f_c(color.new(color.gray, math.min(100, uiOpacity + 40)))
+
+f_statusColor(_ok, _na) =>
+    _na ? colNA : (_ok ? colOk : colBad)
+
+f_boolToText(_ok, _na) =>
+    _na ? "-" : (_ok ? "YES" : "NO")
+
+f_grade(_score) =>
+    if _score >= gradeA
+        "A"
+    else if _score >= gradeB
+        "B"
+    else if _score >= gradeC
+        "C"
+    else
+        "D"
+
+//------------------------------------------------------------------------------
+// Data
+//------------------------------------------------------------------------------
+atr = ta.atr(atrLen)
+rsi = ta.rsi(close, rsiLen)
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+
+volSma = ta.sma(volume, volLen)
+
+// Bench relative strength (ratio slope on 1H)
+benchClose = request.security(benchSymbol, timeframe.period, close)
+rs = close / benchClose
+rsSlope = ta.linreg(rs, 14, 0) - ta.linreg(rs, 14, 1)
+
+// HTF alignment: simple HTF trend based on HTF close vs EMA
+htfClose = request.security(syminfo.tickerid, htfForAlignment, close)
+htfEma = request.security(syminfo.tickerid, htfForAlignment, ta.ema(close, 50))
+htfBull = htfClose > htfEma
+htfBear = htfClose < htfEma
+
+// Pivots for structure
+ph = ta.pivothigh(high, pivLen, pivLen)
+pl = ta.pivotlow(low, pivLen, pivLen)
+
+var float lastPH = na
+var float prevPH = na
+var float lastPL = na
+var float prevPL = na
+
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
+
+// Structure direction proxy
+bullStructure = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH > prevPH and lastPL > prevPL
+bearStructure = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH < prevPH and lastPL < prevPL
+
+// Trend/range/breakout proxy using BB + structure
+basis = ta.sma(close, bbLen)
+dev = bbMult * ta.stdev(close, bbLen)
+bbU = basis + dev
+bbL = basis - dev
+bbWidth = (bbU - bbL) / basis
+bbWidthMA = ta.sma(bbWidth, bbLen)
+
+isCompression = bbWidth < bbWidthMA
+isExpansion = bbWidth > bbWidthMA
+
+// Simple range proxy: low directional strength
+[diPlus, diMinus, adx] = ta.dmi(14, 14)
+isRange = adx < 18
+
+// Overlap ratio (chaos filter): overlap of candle ranges vs total range
+rng = high - low
+prevRng = high[1] - low[1]
+overlap = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1]))
+overlapRatio = (rng > 0 and prevRng > 0) ? (overlap / math.min(rng, prevRng)) : na
+isChaos = not na(overlapRatio) and overlapRatio > chaosOverlapThresh and isRange
+
+// Key levels: use last pivot for nearest "structure level"
+nearestSupport = lastPL
+nearestResist  = lastPH
+
+distToSupport = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
+distToResist  = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
+
+nearSupport = not na(distToSupport) and distToSupport <= atrLocMult * atr
+nearResist  = not na(distToResist)  and distToResist  <= atrLocMult * atr
+
+// Rejection at level (wick/body)
+body = math.abs(close - open)
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+bullRejection = body > 0 ? (lowerWick >= wickRejectionMult * body) : false
+bearRejection = body > 0 ? (upperWick >= wickRejectionMult * body) : false
+
+// Impulse + pullback volume proxy
+isBullImpulse = close > open and volume >= volSma * volBreakMult
+isBearImpulse = close < open and volume >= volSma * volBreakMult
+
+// "DTE comfort": last N-bar impulse not too extended vs ATR
+nImpulse = 8
+impulseMove = math.abs(close - close[nImpulse])
+impulseOK = impulseMove <= impulseAtrThresh * atr
+
+// Proposed invalidation levels and stops (structure-based)
+callInvalid = nearestSupport
+putInvalid  = nearestResist
+
+callStop = not na(callInvalid) ? callInvalid - stopBufAtr * atr : na
+putStop  = not na(putInvalid)  ? putInvalid  + stopBufAtr * atr : na
+
+callRisk = not na(callStop) ? math.abs(close - callStop) : na
+putRisk  = not na(putStop)  ? math.abs(putStop - close) : na
+
+// Target space proxy: next pivot opposite side
+callTarget = nearestResist
+putTarget  = nearestSupport
+
+callReward = not na(callTarget) ? math.abs(callTarget - close) : na
+putReward  = not na(putTarget)  ? math.abs(close - putTarget) : na
+
+callRR = (not na(callRisk) and callRisk > 0 and not na(callReward)) ? (callReward / callRisk) : na
+putRR  = (not na(putRisk) and putRisk > 0 and not na(putReward))   ? (putReward / putRisk)  : na
+
+callHasRR = not na(callRR) and callRR >= minRR
+putHasRR  = not na(putRR)  and putRR  >= minRR
+
+// Momentum health
+callMomentumOk = (rsi >= rsiTrendLevel) and (macdHist >= 0)
+putMomentumOk  = (rsi <= (100 - rsiTrendLevel)) and (macdHist <= 0)
+
+// Alignment with HTF
+callAligned = htfBull
+putAligned  = htfBear
+
+// Relative strength
+callRSOk = rsSlope > 0
+putRSOk  = rsSlope < 0
+
+// Structure confirmation (minor breakout proxy): close > prior swing high / close < prior swing low
+callConf = not na(prevPH) and close > prevPH
+putConf  = not na(prevPL) and close < prevPL
+
+// Clean structure & clarity proxy
+structureClear = bullStructure or bearStructure or isRange
+
+// Location logic
+callLocationOk = nearSupport or (nearResist and callConf)  // pullback long or breakout
+putLocationOk  = nearResist  or (nearSupport and putConf)  // pullback short or breakdown
+
+// Level behavior: reaction near level + rejection wick
+callLevelBehavior = (nearSupport and bullRejection) or (nearResist and ta.crossover(close, nearestResist))
+putLevelBehavior  = (nearResist and bearRejection)  or (nearSupport and ta.crossunder(close, nearestSupport))
+
+// Stop sync with options: avoid too tight vs ATR (risk >= 0.5 ATR) and not enormous (<= 4 ATR)
+callStopSync = not na(callRisk) and callRisk >= 0.5 * atr and callRisk <= 4.0 * atr
+putStopSync  = not na(putRisk)  and putRisk  >= 0.5 * atr and putRisk  <= 4.0 * atr
+
+// Volume support (impulse with volume OR breakout with volume)
+callVolOk = isBullImpulse or (callConf and volume >= volSma)
+putVolOk  = isBearImpulse or (putConf  and volume >= volSma)
+
+// Swing-friendly environment
+swingFriendly = not isChaos
+
+// Compression vs exhaustion: prefer compression before breakout OR expansion with follow-through
+callCompressionOk = isCompression or (isExpansion and callConf)
+putCompressionOk  = isCompression or (isExpansion and putConf)
+
+// A/B clarity proxy: few conflicts
+callAB = callAligned and (bullStructure or callConf) and callLocationOk
+putAB  = putAligned  and (bearStructure or putConf)  and putLocationOk
+
+//------------------------------------------------------------------------------
+// Scoring weights (sum = 100) from the provided file
+//------------------------------------------------------------------------------
+w1  = 14 // structure clear
+w2  = 12 // location
+w3  = 12 // direction confirmation
+w4  = 7  // volume
+w5  = 13 // risk / invalidation
+w6  = 5  // momentum
+w7  = 6  // swing-friendly
+w8  = 8  // target space
+w9  = 6  // stop sync
+w10 = 5  // A/B grading clarity
+w11 = 4  // HTF alignment
+w12 = 4  // compression vs exhaustion
+w13 = 2  // DTE comfort
+w14 = 1  // relative strength
+w15 = 11 // level behavior
+
+f_score(_ok, _w) => _ok ? _w : 0
+
+// Conditions by direction
+callQ1  = structureClear
+putQ1   = structureClear
+
+callQ2  = callLocationOk
+putQ2   = putLocationOk
+
+callQ3  = bullStructure or callConf
+putQ3   = bearStructure or putConf
+
+callQ4  = callVolOk
+putQ4   = putVolOk
+
+callQ5  = not na(callInvalid) and not na(callStop) and callRisk > 0
+putQ5   = not na(putInvalid)  and not na(putStop)  and putRisk  > 0
+
+callQ6  = callMomentumOk
+putQ6   = putMomentumOk
+
+callQ7  = swingFriendly
+putQ7   = swingFriendly
+
+callQ8  = callHasRR
+putQ8   = putHasRR
+
+callQ9  = callStopSync
+putQ9   = putStopSync
+
+callQ10 = callAB
+putQ10  = putAB
+
+callQ11 = callAligned
+putQ11  = putAligned
+
+callQ12 = callCompressionOk
+putQ12  = putCompressionOk
+
+callQ13 = impulseOK
+putQ13  = impulseOK
+
+callQ14 = callRSOk
+putQ14  = putRSOk
+
+callQ15 = callLevelBehavior
+putQ15  = putLevelBehavior
+
+callScore = f_score(callQ1, w1)
+callScore := callScore + f_score(callQ2, w2)
+callScore := callScore + f_score(callQ3, w3)
+callScore := callScore + f_score(callQ4, w4)
+callScore := callScore + f_score(callQ5, w5)
+callScore := callScore + f_score(callQ6, w6)
+callScore := callScore + f_score(callQ7, w7)
+callScore := callScore + f_score(callQ8, w8)
+callScore := callScore + f_score(callQ9, w9)
+callScore := callScore + f_score(callQ10, w10)
+callScore := callScore + f_score(callQ11, w11)
+callScore := callScore + f_score(callQ12, w12)
+callScore := callScore + f_score(callQ13, w13)
+callScore := callScore + f_score(callQ14, w14)
+callScore := callScore + f_score(callQ15, w15)
+
+putScore = f_score(putQ1, w1)
+putScore := putScore + f_score(putQ2, w2)
+putScore := putScore + f_score(putQ3, w3)
+putScore := putScore + f_score(putQ4, w4)
+putScore := putScore + f_score(putQ5, w5)
+putScore := putScore + f_score(putQ6, w6)
+putScore := putScore + f_score(putQ7, w7)
+putScore := putScore + f_score(putQ8, w8)
+putScore := putScore + f_score(putQ9, w9)
+putScore := putScore + f_score(putQ10, w10)
+putScore := putScore + f_score(putQ11, w11)
+putScore := putScore + f_score(putQ12, w12)
+putScore := putScore + f_score(putQ13, w13)
+putScore := putScore + f_score(putQ14, w14)
+putScore := putScore + f_score(putQ15, w15)
+
+//------------------------------------------------------------------------------
+// Table rendering
+//------------------------------------------------------------------------------
+var int COL_METRIC = 0
+var int COL_PUT    = 1
+var int COL_CALL   = 2
+
+var table t = table.new(position.top_right, 3, 1, border_width=1)
+
+f_setCell(_row, _col, _txt, _bg, _tc) =>
+    table.cell(t, _col, _row, _txt, text_color=_tc, bgcolor=_bg, text_size=txtSize)
+
+f_clearTable(_rows) =>
+    for r = 0 to _rows - 1
+        for c = 0 to 2
+            f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
+
+// Build table size dynamically (but table must be created with fixed rows)
+// We create max rows and use only what we need.
+maxRows = 40
+if barstate.isfirst
+    t := table.new(position.top_right, 3, maxRows, border_width=1)
+
+f_hdrRow(_r, _title) =>
+    f_setCell(_r, COL_METRIC, _title, colHdr, f_c(color.black))
+    f_setCell(_r, COL_PUT,    "PUT",   colHdr, f_c(color.black))
+    f_setCell(_r, COL_CALL,   "CALL",  colHdr, f_c(color.black))
+
+f_sectionRow(_r, _title) =>
+    f_setCell(_r, COL_METRIC, _title, colSep, f_c(color.white))
+    f_setCell(_r, COL_PUT,    "",     colSep, f_c(color.white))
+    f_setCell(_r, COL_CALL,   "",     colSep, f_c(color.white))
+
+f_metricRow(_r, _name, _putTxt, _putCol, _callTxt, _callCol) =>
+    f_setCell(_r, COL_METRIC, _name, colBg, f_c(color.white))
+    f_setCell(_r, COL_PUT,    _putTxt,  _putCol, f_c(color.white))
+    f_setCell(_r, COL_CALL,   _callTxt, _callCol, f_c(color.white))
+
+f_valueRow(_r, _name, _putVal, _callVal) =>
+    f_setCell(_r, COL_METRIC, _name, colBg, f_c(color.white))
+    f_setCell(_r, COL_PUT,  _putVal, colBg, f_c(color.white))
+    f_setCell(_r, COL_CALL, _callVal,colBg, f_c(color.white))
+
+// Visibility filters for columns
+showPut  = modeShowBoth ? true : (modeFocus == "PUT")
+showCall = modeShowBoth ? true : (modeFocus == "CALL")
+
+f_applyColVisibility(_r) =>
+    // If one side is hidden, blank it with fully transparent colors.
+    if not showPut
+        f_setCell(_r, COL_PUT, "", color.new(color.black, 100), color.new(color.white, 100))
+    if not showCall
+        f_setCell(_r, COL_CALL, "", color.new(color.black, 100), color.new(color.white, 100))
+
+f_checkRow(_r, _name, _w, _putOk, _callOk, _putNa, _callNa) =>
+    _putTxt = f_boolToText(_putOk, _putNa) + " (" + str.tostring(_w) + ")"
+    _calTxt = f_boolToText(_callOk, _callNa) + " (" + str.tostring(_w) + ")"
+    f_metricRow(_r, _name, _putTxt, f_statusColor(_putOk, _putNa), _calTxt, f_statusColor(_callOk, _callNa))
+    f_applyColVisibility(_r)
+
+// Render condition (table only on 1H if enabled)
+render = uiShow and (not onlyOn1H or is1H)
+
+if not render
+    // Clear cells so nothing remains visible.
+    f_clearTable(maxRows)
+    if uiShowHintWhenNot1H and uiShow and onlyOn1H and not is1H
+        // show a minimal hint in first row (still respects opacity)
+        f_setCell(0, COL_METRIC, "Switch to 1H to view options table", colBg, f_c(color.orange))
+else
+    // Header
+    row = 0
+    f_hdrRow(row, "SWING OPTIONS 1H - UI")
+    f_applyColVisibility(row)
+    row += 1
+
+    // SUMMARY
+    f_sectionRow(row, "SUMMARY")
+    row += 1
+
+    // Score + grade
+    putGrade  = f_grade(putScore)
+    callGrade = f_grade(callScore)
+
+    f_metricRow(row, "Total score (0-100)", str.tostring(putScore), colBg, str.tostring(callScore), colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Grade", putGrade, colBg, callGrade, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    // Quick context (no details)
+    structTxt = bullStructure ? "TREND UP" : bearStructure ? "TREND DOWN" : isRange ? "RANGE" : "MIXED"
+
+    locPut  = putLocationOk  ? "OK" : "NO"
+    locCall = callLocationOk ? "OK" : "NO"
+
+    f_metricRow(row, "Structure (proxy)", structTxt, colBg, structTxt, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Location", locPut, f_statusColor(putLocationOk, false), locCall, f_statusColor(callLocationOk, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    // Risk & RR quick
+    rrPutTxt  = not na(putRR)  ? str.tostring(putRR, "#.##")  : "-"
+    rrCallTxt = not na(callRR) ? str.tostring(callRR,"#.##") : "-"
+
+    f_metricRow(row, "RR (to next pivot)", rrPutTxt, f_statusColor(putHasRR, na(putRR)), rrCallTxt, f_statusColor(callHasRR, na(callRR)))
+    f_applyColVisibility(row)
+    row += 1
+
+    // DETAILS
+    if uiShowDetails
+        row += 1
+        f_sectionRow(row, "DETAILS (15 checks)")
+        row += 1
+
+        // Q1..Q15
+        f_checkRow(row, "1) Structure clear", w1, putQ1, callQ1, false, false)
+        row += 1
+        f_checkRow(row, "2) Logical location", w2, putQ2, callQ2, false, false)
+        row += 1
+        f_checkRow(row, "3) Direction confirmed", w3, putQ3, callQ3, false, false)
+        row += 1
+        f_checkRow(row, "4) Volume supports move", w4, putQ4, callQ4, false, false)
+        row += 1
+        f_checkRow(row, "5) Risk / invalidation clear", w5, putQ5, callQ5, na(putInvalid) or na(putStop), na(callInvalid) or na(callStop))
+        row += 1
+        f_checkRow(row, "6) Momentum healthy (RSI/MACD)", w6, putQ6, callQ6, false, false)
+        row += 1
+        f_checkRow(row, "7) Swing-friendly environment", w7, putQ7, callQ7, false, false)
+        row += 1
+        f_checkRow(row, "8) Target space (>= min RR)", w8, putQ8, callQ8, na(putRR), na(callRR))
+        row += 1
+        f_checkRow(row, "9) Stop sync vs ATR", w9, putQ9, callQ9, na(putRisk), na(callRisk))
+        row += 1
+        f_checkRow(row, "10) A/B setup clarity", w10, putQ10, callQ10, false, false)
+        row += 1
+        f_checkRow(row, "11) HTF aligned (" + htfForAlignment + ")", w11, putQ11, callQ11, false, false)
+        row += 1
+        f_checkRow(row, "12) Compression/expansion OK", w12, putQ12, callQ12, false, false)
+        row += 1
+        f_checkRow(row, "13) DTE comfort (impulse not extended)", w13, putQ13, callQ13, false, false)
+        row += 1
+        f_checkRow(row, "14) RelStrength vs " + benchSymbol, w14, putQ14, callQ14, false, false)
+        row += 1
+        f_checkRow(row, "15) Price behavior at level", w15, putQ15, callQ15, false, false)
+        row += 1
+
+        // Extra numeric values for user verification
+        row += 1
+        f_sectionRow(row, "DETAILS: values")
+        row += 1
+
+        f_valueRow(row, "ATR", str.tostring(atr, "#.####"), str.tostring(atr, "#.####"))
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "RSI", str.tostring(rsi, "#.##"), str.tostring(rsi, "#.##"))
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "MACD hist", str.tostring(macdHist, "#.####"), str.tostring(macdHist, "#.####"))
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "Vol / VolSMA", str.tostring(volume, "#") + " / " + str.tostring(volSma, "#"), str.tostring(volume, "#") + " / " + str.tostring(volSma, "#"))
+        f_applyColVisibility(row)
+        row += 1
+
+        srTxt = (na(nearestSupport) ? "-" : str.tostring(nearestSupport, "#.####")) + " / " + (na(nearestResist) ? "-" : str.tostring(nearestResist, "#.####"))
+        f_valueRow(row, "Nearest S / R", srTxt, srTxt)
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "Stop (PUT/CALL)", na(putStop) ? "-" : str.tostring(putStop, "#.####"), na(callStop) ? "-" : str.tostring(callStop, "#.####"))
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "RR (PUT/CALL)", rrPutTxt, rrCallTxt)
+        f_applyColVisibility(row)
+        row += 1
+
+    // Clear remaining unused rows
+    if row < maxRows
+        for r = row to maxRows - 1
+            for c = 0 to 2
+                f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))

@@ -1,0 +1,50 @@
+Poniżej moje uwagi do etapu **Stock check – TF 1D** pod **options swing (ok. 1–2 tyg.)**, bazując na treści z pliku. 
+Skupiam się na tym, co warto **doprecyzować / uciąć / dodać**, żeby było łatwe do zeskryptowania i żeby daily faktycznie filtrował „theta death”.
+
+## Co jest bardzo dobre i zostawiłbym bez zmian
+
+* Podejście „**tylko z wykresu**” i nacisk na **strukturę / czystość / lokalizację / invalidation / RR** – to jest dokładnie rola daily w swing options. 
+* Wymóg, żeby dało się opisać wykres **jednym zdaniem** (czytelność) – świetny filtr na chop. 
+
+## Co bym doprecyzował (żeby było binarne i skryptowalne)
+
+### 1) Zrób z pytań *twarde pola do odhaczenia*
+
+W pliku pytania są trafne, ale część jest „miękka” (np. *clean*, *chaotyczny*). Proponuję zamienić je na pola, które da się zapisać jako **TAK/NIE** lub **A/B/C/D**:
+
+* **Market structure:** `UP / DOWN / RANGE / BREAKOUT / BREAKDOWN` 
+* **Location:** `AT_SUPPORT / AT_RESISTANCE / RETEST / MID_RANGE / EXTENDED` 
+* **Invalidation level exists?:** `YES/NO` (i wartość poziomu) 
+* **Next obstacle distance:** liczba świec / % do next S/R (dla oceny „czy jest miejsce”) 
+
+Efekt: daily przestaje być opisowe, a staje się **formularzem** pod skrypt.
+
+### 2) Dodaj jeden obowiązkowy filtr: „czy setup ma paliwo na opcje?”
+
+W pliku jest to poruszone jako „follow-through” i „theta death” – ja bym to zrobił *obowiązkowe* w daily: 
+
+* `FOLLOW_THROUGH_RISK: LOW / MED / HIGH`
+  Heurystyka ręczna (na razie): czy ticker historycznie robi ruchy kierunkowe po wybiciu/reteście, czy często „oddaje”. Dla opcji 7–14 DTE to krytyczne.
+
+### 3) Doprecyzuj „relative strength/weakness” w 1D
+
+Zostaw ideę, ale wpisz w procesie **co porównujesz** (np. SPY/QQQ) i jaki jest wynik:
+
+* `RS: STRONG / NEUTRAL / WEAK` + 1 zdanie „dlaczego” (np. „robi HH gdy indeks słabnie”). 
+  To nadal „z wykresu”, a nie z wskaźników.
+
+### 4) Ustal minimalny próg jakości (gating)
+
+W pliku przewija się logika „jak nie ma invalidation → C/D”. 
+Ja bym zrobił **twarde STOP** (nie idzie dalej do 4H/1H), jeśli:
+
+* brak czytelnego `STRUCTURE` (nie umiesz sklasyfikować),
+* brak `INVALIDATION`,
+* cena `MID_RANGE` + brak wyraźnego poziomu,
+* realistyczne RR nie wychodzi (np. „kolejna bariera jest za blisko”). 
+
+To oszczędza czas na niższych TF.
+
+## Co bym odjął (żeby 1D nie było przeładowane)
+
+* Nie dodawałbym na 1D zbyt dużo „execution” typu precyzyjne wejścia – to i tak robisz na 4H/1H. Daily ma być **filter + mapa**.

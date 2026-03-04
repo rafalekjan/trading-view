@@ -1,0 +1,78 @@
+Poniżej moje uwagi do checklisty **4H** z pliku (czyli filtr „czy wykres w ogóle nadaje się pod swing options” i *tylko* info z wykresu). 
+
+## Co jest bardzo dobre (zostawiłbym)
+
+* **“Expected vs unexpected”** przy każdym punkcie – to jest mega ważne, bo skrypt później może to mapować na flagi typu *OK / WARN / FAIL*. 
+* Nacisk na **clarity / control-not-chaos** oraz „czy potrafię opisać wykres jednym zdaniem” – świetny, praktyczny filtr jakości. 
+* Osobny punkt o **inwalidacji** i **reward justification** – to powinno być “non-negotiable”. 
+
+## Co bym zmienił / doprecyzował (żeby 4H było bardziej “skryptowalne”)
+
+### 1) Uporządkuj priorytety: “hard fail” vs “soft”
+
+W tej chwili lista jest długa i część punktów dubluje sens (poziomy/struktura/clarity). Żeby to działało jak filtr:
+
+* **Hard fail (trade odpada):**
+
+  * brak czytelnej **inwalidacji** (pkt 9) 
+  * brak realistycznego **targetu z poziomu** / RR nie trzyma minimum (pkt 10) 
+  * wykres **unstable/jumpy/false breakouts** (pkt 12 + “unstable” z pkt 6) 
+  * cena „**middle of nowhere** / chasing / extended” (pkt 14) – u mnie to też często jest hard fail, bo psuje R:R 
+* **Soft (obniża jakość / wymaga ostrożności):**
+
+  * MACD/RSI “warning” (pkt 3–4) 
+  * wolumen/ATR nie potwierdza (pkt 5, 13) 
+
+To od razu pozwala zbudować scoring (np. PASS / WATCH / SKIP).
+
+### 2) Zredukuj redundancję: poziomy vs struktura vs “respect levels”
+
+Masz to rozrzucone w pkt 2, 7, 8, 6. 
+Proponuję złożyć w **jeden blok “Price action & location”** z 4 polami do odczytu:
+
+* **Regime:** trend / range / unstable
+* **Structure:** HH/HL lub LH/LL albo range boundaries
+* **Key level reaction:** hold / reject / slice-through
+* **Location:** near support/resistance/MA? czy extended/middle?
+
+Efekt: mniej pytań, a nadal łapiesz wszystko.
+
+### 3) Doprecyzuj “RS/RW vs rynek” na 4H (żeby nie było subiektywne)
+
+W pliku opis jest dobry, ale do skryptu potrzebujesz definicji obserwowalnej. 
+Minimalnie (chart-only):
+
+* RS: “ticker robi **HH/HL** gdy SPY robi pullback / konsolidację”
+* RW: “ticker robi **LL/LH** gdy SPY stoi lub odbija”
+
+Jeśli chcesz jeden prosty, obiektywny zapis do odczytu ręcznego: **“czy ostatni swing na tickerze jest lepszy/gorszy niż na SPY w tym samym oknie (np. ostatnie 20 świec 4H)”**.
+
+### 4) RSI/MACD: rozważ “mniej”
+
+Masz i RSI, i MACD jako momentum confirmation. 
+W praktyce na 4H często wystarczy jedno:
+
+* **zostawić RSI** (prostsze progi i łatwiej zakodować jako: above/below 50 + trend RSI),
+* a **MACD** traktować jako opcjonalne (albo całkiem wywalić), żeby nie robić “analysis paralysis”.
+
+Jeśli zostawiasz MACD – dopisz, *co jest binarnym sygnałem*: np. “histogram rośnie w kierunku tezy przez X świec” zamiast ogólnego “momentum się wzmacnia”.
+
+### 5) ATR/Volume: dopisz minimalne, stałe reguły odczytu
+
+Masz świetną ideę “ATR uziemia oczekiwania”, ale bez definicji będzie różnie interpretowane. 
+Proste doprecyzowania, nadal chart-only:
+
+* ATR: “czy **stop** ma ≥ np. 0.8–1.2 *typowego 4H range* (albo inna stała)”
+* Volume: “breakout = volume > średnia z ostatnich N świec” / pullback = volume < średnia z N (to koreluje z pkt 13) 
+
+### 6) Dodaj “czas do poziomu” (małe, ale bardzo pomaga pod options swing)
+
+To nadal jest *z wykresu*: czy do targetu/levela jest “miejsce” w sensie struktury, a nie tylko RR na papierze:
+
+* “Czy między entry a targetem są **po drodze** oczywiste S/R, które mogą zatrzymać ruch?”
+  To można dorzucić jako jedno pole w “Reward justification”.
+
+## Czy czegoś wymagać mniej / więcej?
+
+* **Mniej:** MACD (opcjonalny), oraz rozbicie poziomów/struktury na 4 różne punkty (scalić).
+* **Więcej (ale minimalnie):** kategoryzacja PASS/WARN/FAIL + hard/soft filtry, i doprecyzowane, stałe reguły dla RS oraz ATR/volume (żeby skrypt miał co mapować).

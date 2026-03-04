@@ -1,0 +1,143 @@
+Poniżej przypisuję **wagi (suma = 100)** dla wszystkich 14 pytań z checklisty 4H zgodnie z dokumentem. 
+
+Priorytet nadaję temu, co realnie decyduje o **jakości struktury i asymetrii**, a nie wskaźnikom pomocniczym.
+
+---
+
+# 🔢 Wagi – 4H Stock Check (Options Swing)
+
+### 1️⃣ Relative Strength / Weakness vs rynek
+
+**Waga: 10**
+
+RS/RW daje przewagę kierunkową, ale nie zastąpi struktury. Ważne, lecz wtórne wobec price action.
+
+---
+
+### 2️⃣ Reakcja na kluczowy poziom (hold / reject / slice)
+
+**Waga: 12**
+
+To pierwszy test: „czy rynek zachowuje się jak powinien”. Jeśli nie — setup traci sens.
+
+---
+
+### 3️⃣ RSI jako potwierdzenie momentum
+
+**Waga: 5**
+
+To filtr pomocniczy. Momentum potwierdza, ale nie buduje tezy.
+
+---
+
+### 4️⃣ MACD – przyspiesza czy gaśnie
+
+**Waga: 4**
+
+Jeszcze bardziej wtórne niż RSI. Ostrzeżenie, nie fundament.
+
+---
+
+### 5️⃣ Volume / ATR / realizm ruchu
+
+**Waga: 10**
+
+Bez participation i realistycznego range’u nie ma sensownego swing setupu.
+
+---
+
+### 6️⃣ Reżim rynku (trend / range / unstable)
+
+**Waga: 12**
+
+Jeśli nie potrafisz opisać struktury jednym zdaniem – jakość spada dramatycznie.
+
+---
+
+### 7️⃣ Czystość struktury (HH/HL vs chaos)
+
+**Waga: 15**  ⭐
+
+Najważniejszy element całej checklisty.
+Options swing potrzebuje „control, not chaos”.
+
+---
+
+### 8️⃣ Kluczowe poziomy + MA (20 / 50 / 200)
+
+**Waga: 8**
+
+Kontekst i filtr reżimu. Ważne, ale zależne od struktury.
+
+---
+
+### 9️⃣ Jasna inwalidacja (non-negotiable)
+
+**Waga: 10**
+
+Jeśli nie ma oczywistego miejsca błędu – nie ma trade’u.
+
+---
+
+### 🔟 Realny reward + asymetria (R:R)
+
+**Waga: 8**
+
+Struktura może być dobra, ale bez logicznego targetu jakość spada.
+
+---
+
+### 1️⃣1️⃣ FVG jako konfluencja (opcjonalne)
+
+**Waga: 2**
+
+Dodatek. Nigdy fundament.
+
+---
+
+### 1️⃣2️⃣ Tradeable wygląd (płynność / brak jumpy candles)
+
+**Waga: 6**
+
+Praktyczny filtr jakości egzekucji.
+
+---
+
+### 1️⃣3️⃣ Charakterystyka wolumenu na pullbacku
+
+**Waga: 5**
+
+Potwierdzenie zdrowego trendu, ale rzadko samodzielny game-changer.
+
+---
+
+### 1️⃣4️⃣ Lokalizacja ceny (near structure vs extended)
+
+**Waga: 3**
+
+Timing element. Ważne, lecz nie strukturalne.
+
+---
+
+# 📊 Podsumowanie wag (100)
+
+| Kategoria                      | Waga |
+| ------------------------------ | ---- |
+| Struktura (6,7,2)              | 39   |
+| Risk/Reward (9,10)             | 18   |
+| Kontekst (1,5,8)               | 28   |
+| Momentum (3,4)                 | 9    |
+| Jakość wykonania (12,13,14,11) | 6    |
+
+---
+
+# 🏆 Najważniejsze pytania (Top 4)
+
+1. **Czy struktura jest czysta? (7)**
+2. **Czy reżim rynku jest czytelny? (6)**
+3. **Czy poziom reaguje tak jak powinien? (2)**
+4. **Czy inwalidacja jest oczywista? (9)**
+
+Te cztery razem to **49% całej oceny**.
+
+---

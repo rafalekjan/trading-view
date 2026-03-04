@@ -1,0 +1,106 @@
+| #  | Kryterium                                            | Waga   | Dlaczego tak wysoko? (kontekst opcji swing)                                       |
+| -- | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------- |
+| 1  | **Risk Definition (Invaldiation – konkretna cena)**  | **15** | W opcjach brak jasnego invalidation = szybka utrata premii. To absolutny warunek. |
+| 2  | **Location (nie extended, nie „middle of nowhere”)** | **12** | Wejście w złej lokalizacji niszczy RR i powoduje theta bleed.                     |
+| 3  | **1H Structure Clarity (trend / range / break)**     | **12** | Jeśli struktura nie jest czysta – nie ma edge.                                    |
+| 4  | **Reward Justification (RR ≥ 2:1, najlepiej 3:1)**   | **12** | Swing na opcjach musi kompensować ryzyko + decay.                                 |
+| 5  | **Reaction at Level (hold / reject / break&hold)**   | **10** | Brak reakcji = wejście „na nadzieję”.                                             |
+| 6  | **Key Level Obviousness (czy level jest czytelny)**  | **8**  | Opcje wymagają precyzyjnych poziomów – nie ogólnych stref.                        |
+| 7  | **Structure Confirmation (HL/LH + break minor)**     | **8**  | Potwierdzenie minimalizuje fałszywe wybicia.                                      |
+| 8  | **Volume & Momentum Confirmation**                   | **7**  | Brak wolumenu = słaby follow-through.                                             |
+| 9  | **Relative Strength / Weakness vs Market**           | **6**  | Swing działa lepiej, gdy ticker ma przewagę nad indeksem.                         |
+| 10 | **ATR / Volatility sanity check**                    | **4**  | Stop i target muszą być realistyczne vs zmienność.                                |
+| 11 | **Daily Alignment (kierunek wyższego TF)**           | **3**  | Zwiększa jakość, ale nie zawsze dyskwalifikuje.                                   |
+| 12 | **Liquidity (akcja + opcje, tight spread, OI)**      | **3**  | Warunek techniczny – bez tego nie handlujesz.                                     |
+
+
+Bardzo dobre pytanie — bo bez **blokad i kar** scoring przestaje działać jako filtr jakości, a zaczyna być „usprawiedliwianiem trade’u”.
+
+Na bazie opisu z załącznika  poniżej masz system **kar (penalties) + twardych blokad (hard stops)** dopasowany do options swing.
+
+---
+
+# 🔴 1️⃣ BLOKADY (Hard Stops) – automatyczne PASS
+
+Jeśli którykolwiek z poniższych = TAK → **0 pkt, brak trade’u niezależnie od sumy**
+
+| Blokada                                            | Dlaczego krytyczne przy opcjach            |
+| -------------------------------------------------- | ------------------------------------------ |
+| ❌ Brak konkretnej ceny invalidation                | Bez tego nie kontrolujesz ryzyka premii    |
+| ❌ Cena jest „extended” (gonienie ruchu)            | Theta + cofnięcie = szybka utrata wartości |
+| ❌ Brak reakcji na poziomie (wejście na dotknięciu) | To jest anticipacja, nie potwierdzenie     |
+| ❌ Struktura 1H nieczytelna / choppy                | Brak edge strukturalnego                   |
+| ❌ Opcje z szerokim spreadem / niskie OI            | Koszt wejścia niszczy RR                   |
+| ❌ Nie potrafisz opisać trade’u w 1 zdaniu          | Brak klarowności = brak przewagi           |
+
+---
+
+# 🟠 2️⃣ KARY PUNKTOWE (Penalties)
+
+To są sytuacje, które **nie dyskwalifikują**, ale obniżają klasę setupu.
+
+### 📉 Strukturalne kary
+
+| Sytuacja                                                   | Kara   |
+| ---------------------------------------------------------- | ------ |
+| Weak RR (2:1–2.3:1)                                        | −5 pkt |
+| Daily lekko przeciwko kierunkowi                           | −5 pkt |
+| Brak wyraźnej RS/RW vs rynek                               | −4 pkt |
+| Wolumen neutralny (nie potwierdza, ale nie przeczy)        | −3 pkt |
+| Target oparty na „luźnej strefie”, nie konkretnym poziomie | −4 pkt |
+| Stop bardzo blisko (poniżej 0.8x ATR)                      | −5 pkt |
+
+---
+
+### 📊 Zmienność / opcje – kary specyficzne
+
+| Sytuacja                                | Kara   |
+| --------------------------------------- | ------ |
+| Wysoka IV przed earnings (ryzyko crush) | −6 pkt |
+| IV już mocno rozszerzona                | −4 pkt |
+| Spread opcji średni (ale akceptowalny)  | −3 pkt |
+| Wejście po dużej świecy impulsowej      | −5 pkt |
+
+---
+
+# 🟡 3️⃣ Kara psychologiczna (framework autora)
+
+Autor mocno podkreśla „clarity test”.
+
+| Sytuacja                                     | Kara              |
+| -------------------------------------------- | ----------------- |
+| Setup wymaga „wiary”, nie logiki             | −10 pkt           |
+| Musisz tłumaczyć trade więcej niż 2 zdaniami | −6 pkt            |
+| Emocjonalne FOMO wejście                     | automatyczny PASS |
+
+---
+
+# 📊 4️⃣ Jak to zastosować praktycznie?
+
+### Model działania:
+
+1. Start = 100 pkt
+2. Sprawdzasz blokady (jeśli któraś TAK → koniec)
+3. Odejmujesz kary
+4. Klasyfikacja:
+
+| Wynik  | Klasa                                      |
+| ------ | ------------------------------------------ |
+| 85–100 | A (pełna struktura + matematyka)           |
+| 70–84  | B (dobry, ale z jednym słabszym elementem) |
+| 55–69  | C (technicznie poprawny, ale bez przewagi) |
+| <55    | PASS                                       |
+
+---
+
+# 🎯 Najważniejsze przy options swing
+
+Blokady są ważniejsze niż punktacja.
+
+Możesz mieć:
+
+* 92 pkt, ale brak invalidation → PASS
+* 78 pkt bez extended → B, akceptowalny
+* 88 pkt, ale IV earnings week → realnie C
+
+---

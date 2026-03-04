@@ -1,0 +1,108 @@
+Masz to poukładane sensownie: **Market check (SPY/QQQ 1D) jako pierwszy filtr** jest właściwy dla swing options, bo odpowiada na kluczowe pytanie „czy środowisko w ogóle daje prawo trzymać ryzyko overnight i liczyć na follow-through”. W pliku dobrze opisujesz, *jakie odpowiedzi z 1D są „oczekiwane” vs „nieoczekiwane”* (trend vs chop, jasny bias vs “maybe”, przestrzeń do poziomu, kontrolowana zmienność, momentum, location itd.). 
+
+Poniżej konkretne uwagi „co bym zmienił / dodał / uprościł”, pod kątem tego, że docelowo ma to wejść w skrypt i ma być **tylko wyciąganiem informacji z wykresu**.
+
+---
+
+## 1) Zamień pytania opisowe na binarne warunki + wynik
+
+W tej chwili masz dużo dobrych kryteriów, ale warto je sprowadzić do formatu:
+
+* **Warunek** (tak/nie / 0-1 / skala 1–3)
+* **Dowód z wykresu** (co dokładnie widzę)
+* **Wniosek** (Allowed / Caution / No-trade)
+
+Przykład (dla SPY/QQQ 1D):
+
+* *Regime*: Trend? (TAK/NIE)
+* *Bias*: Powyżej/poniżej 200MA? (TAK/NIE)
+* *Chop*: Cena przecina 20/50 w obie strony w ostatnich X świecach? (TAK/NIE)
+* *Space*: % dystansu do najbliższego daily S/R > minimalny próg? (TAK/NIE)
+* *Volatility*: „climax candles / duże gapy” ostatnie X dni? (TAK/NIE)
+
+To bardzo ułatwia automatyzację i późniejsze „grading” A/B/C/D, o którym wspominasz. 
+
+---
+
+## 2) Dodaj jawny **„No-Trade Gate”** już na etapie SPY/QQQ 1D
+
+Masz opis, że chop i chaos obniżają jakość, ale warto mieć 2–4 twarde powody, które **z automatu blokują swing options** (albo wymuszają tryb defensywny).
+
+Przykładowe bramki (z samego wykresu 1D, bez newsów):
+
+* **Chop/overlap**: seria nakładających się świec + cena mieli przez 20/50 MA
+* **Bliskość dużego oporu/wsparcia**: brak „space” do następnego poziomu (reward robi się teoretyczny)
+* **Climax / parabolic**: 3–4 mocne świece z rzędu bez pullbacku (ryzyko retrace)
+* **Reżim przejściowy**: utrata 20EMA + słabnące HH/HL (sygnał zmiany regime)
+
+W pliku masz te elementy rozproszone — ja bym je skleił w jedną sekcję „STOP / NO-TRADE”. 
+
+---
+
+## 3) Uporządkuj „momentum” i „volatility”, żeby się nie dublowały
+
+U Ciebie:
+
+* volatility = ATR / dzienne świece / gapy / chaos
+* momentum = RSI/MACD/volume i dywergencje
+
+To jest OK, ale do skryptu zwykle lepiej:
+
+* zostawić **volatility** jako „czy ruch jest *kontrolowany*”
+* zostawić **momentum** jako „czy kierunek ma *paliwo*”
+
+I jasno rozdzielić „co obniża ocenę” vs „co blokuje trade”. Teraz część punktów (np. duże świece, dywergencje) może wpadać do obu koszyków. 
+
+---
+
+## 4) Doprecyzuj „location” jednym standardem
+
+Sekcja „lokacyjnie zdrowy” jest bardzo ważna. Żeby to było spójne (i skryptowalne), przyjmij jeden schemat, np.:
+
+* **Pozycja względem 20/50/200** (nad/na/pod)
+* **Pozycja w strukturze** (przy wsparciu / w środku range / pod oporem / po wybiciu i retest)
+* **Czy move jest extended** (np. liczba świec bez pullbacku)
+
+To ogranicza subiektywność „czy to jeszcze dobre miejsce”. 
+
+---
+
+## 5) Dodaj „Market breadth / participation” jako opcjonalny element (jeśli ma być tylko z wykresu)
+
+Jeżeli trzymasz się zasady „tylko wykres”, to i tak możesz dodać prostą obserwację:
+
+* czy SPY/QQQ idzie „gładko” (ciągłość trendu) czy jest „poszarpany” (dużo knotów, odrzucenia, szybkie powroty)
+* ewentualnie drugi indeks jako cross-check (np. SPY vs QQQ: czy potwierdzają kierunek)
+
+To wzmacnia punkt o tym, czy indeks „pomaga” RS/RW na spółkach. 
+
+---
+
+## 6) Minimalny zestaw, żeby nie przeładować procesu
+
+Jeśli chcesz „wymagać mniej” na start (szybki filtr), to dla SPY/QQQ 1D ja bym zostawił **5 pól obowiązkowych**:
+
+1. **Regime**: trend vs chop
+2. **Bias**: nad/pod 200MA + struktura HH/HL lub LH/LL
+3. **Location**: przy wsparciu / pod oporem / środek range / extended
+4. **Space**: jest miejsce do kolejnego daily level?
+5. **Volatility quality**: kontrolowane vs chaos/climax
+
+A momentum (RSI/MACD/vol) dał jako **„bonus / downgrade”**, nie jako core gate (chyba że masz bardzo konsekwentny sposób oceny). 
+
+---
+
+## 7) Format wyjścia pod skrypt (propozycja)
+
+Żeby później łatwo to automatyzować, finalny wynik dla SPY/QQQ 1D może wyglądać jak stały rekord:
+
+* Regime: Trend / Chop / Transition
+* Bias: Bull / Bear / Neutral
+* Location: Support / Mid / Resistance / Extended
+* Space: OK / Tight
+* Volatility: Controlled / Elevated / Chaotic
+* Outcome: **A-tailwind / B-ok / C-caution / D-no trade**
+
+To jest spójne z Twoim podejściem gradingu A/B/C/D. 
+
+---
