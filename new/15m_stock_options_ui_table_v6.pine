@@ -53,6 +53,8 @@ groupEntry = "Entry calibration (15m)"
 entryTrendMin = input.float(58.0, "ENTRY: min Trend score", minval=0, maxval=100, step=1, group=groupEntry)
 entryScoreMin = input.float(62.0, "ENTRY: min Entry score", minval=0, maxval=100, step=1, group=groupEntry)
 h1MacdNearZeroPct = input.float(0.0005, "1H gate: MACD near zero (% price)", minval=0.0, step=0.0001, group=groupEntry)
+entryHoldAtr = input.float(0.30, "ENTRY: break-hold tolerance (x ATR)", minval=0.0, step=0.05, group=groupEntry)
+entryBreakLookback = input.int(6, "ENTRY: minor break lookback (bars)", minval=3, maxval=50, group=groupEntry)
 
 groupGrading = "Grading"
 gradeA = input.int(75, "Grade A threshold", minval=0, maxval=100, group=groupGrading)
@@ -123,10 +125,6 @@ f_rollSum(_src, _len) =>
     for i = 0 to _len - 1
         _sum += nz(_src[i], 0.0)
     _sum
-
-f_adxFromDmi(_len) =>
-    [_diPlus, _diMinus, _adx] = ta.dmi(_len, _len)
-    _adx
 
 f_macdHist() =>
     [_m, _s, _h] = ta.macd(close, 12, 26, 9)
@@ -200,9 +198,29 @@ distS = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
 distR = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
 nearSupport = not na(distS) and distS <= nearLevelAtr * atr
 nearResist  = not na(distR) and distR <= nearLevelAtr * atr
+
+// Day levels (intraday execution context): prior day high/low.
+pdh = request.security(syminfo.tickerid, "D", high[1])
+pdl = request.security(syminfo.tickerid, "D", low[1])
+distPDH = not na(pdh) ? math.abs(close - pdh) : na
+distPDL = not na(pdl) ? math.abs(close - pdl) : na
+nearPDH = not na(distPDH) and distPDH <= nearLevelAtr * atr
+nearPDL = not na(distPDL) and distPDL <= nearLevelAtr * atr
+
+vwap = ta.vwap(hlc3)
+distVWAP = not na(vwap) ? math.abs(close - vwap) : na
+nearVWAP = not na(distVWAP) and distVWAP <= nearLevelAtr * atr
+
 nearMA = math.abs(close - emaFast) <= nearLevelAtr * atr or math.abs(close - smaMid) <= nearLevelAtr * atr
+nearSupportZone = nearSupport or nearMA or nearPDL or nearVWAP
+nearResistZone  = nearResist  or nearMA or nearPDH or nearVWAP
+
 trendStrength = atr > 0 ? math.abs(emaFast - smaMid) / atr : 0.0
 trendOK = trendStrength > 0.2
+trendBiasBull = emaFast >= smaMid
+trendBiasBear = emaFast <= smaMid
+trendAlignBull = trendBiasBull and close >= emaFast
+trendAlignBear = trendBiasBear and close <= emaFast
 
 // Candle anatomy
 rng = high - low
@@ -212,9 +230,13 @@ lowerW = math.min(open, close) - low
 
 closePos = rng > 0 ? (close - low) / rng : na  // 0 bottom, 1 top
 
-// Reaction definition (measurable)
-reactionLong  = (lowerW >= wickBodyMult * body) and (not na(closePos) and closePos >= closePosPct) and (volume >= volSma)
-reactionShort = (upperW >= wickBodyMult * body) and (not na(closePos) and closePos <= (1 - closePosPct)) and (volume >= volSma)
+// Reaction definition (execution-friendly): wick rejection OR body-close strength, with softer volume floor.
+wickRejectLong = (lowerW >= wickBodyMult * body) and (not na(closePos) and closePos >= closePosPct)
+wickRejectShort = (upperW >= wickBodyMult * body) and (not na(closePos) and closePos <= (1 - closePosPct))
+bodyConfirmLong = close > open and (not na(closePos) and closePos >= 0.5)
+bodyConfirmShort = close < open and (not na(closePos) and closePos <= 0.5)
+reactionLong  = (wickRejectLong or bodyConfirmLong) and (volume >= 0.7 * volSma)
+reactionShort = (wickRejectShort or bodyConfirmShort) and (volume >= 0.7 * volSma)
 
 // Impulse definition
 bodyPct = rng > 0 ? (body / rng) : 0.0
@@ -227,7 +249,8 @@ distEmaAtr = atr > 0 ? (distToEma / atr) : na
 extended = not na(distEmaAtr) and distEmaAtr > extendedAtr
 impulseSpikeSrc = (impulseBull or impulseBear) ? 1.0 : 0.0
 impulseCount = f_rollSum(impulseSpikeSrc, impulseBars)
-isOverextended = extended or impulseCount >= math.max(3, impulseBars - 1)
+impulseHeat = impulseCount >= math.max(3, impulseBars - 1)
+isOverextended = extended
 
 // Pullback health (measurable proxies)
 impulseRange = ta.sma((impulseBull or impulseBear) ? rng : 0.0, pullbackWin)
@@ -311,15 +334,10 @@ putMomOk  = (rsi <= rsiMid) and (macdHist <= 0) and (macdHist <= macdHist[1])
 // Daily context (week-type proxy): avoid high-vol days; align with daily EMA50
 dATR = request.security(syminfo.tickerid, dailyTF, ta.atr(14))
 dATRsma20 = request.security(syminfo.tickerid, dailyTF, ta.sma(ta.atr(14), 20))
-dADX = request.security(syminfo.tickerid, dailyTF, f_adxFromDmi(14))
-dClose = request.security(syminfo.tickerid, dailyTF, close)
-dEma50 = request.security(syminfo.tickerid, dailyTF, ta.ema(close, 50))
-dTrend = dADX >= 18 and dClose > dEma50
-dBear  = dADX >= 18 and dClose < dEma50
 dHighVol = dATR > dATRsma20 * 1.2
 
-callWeekOk = (dTrend and not dHighVol) or (not dHighVol)
-putWeekOk  = (dBear  and not dHighVol) or (not dHighVol)
+callWeekOk = not dHighVol
+putWeekOk  = not dHighVol
 
 // 1H gate: 15m is trigger only when 1H context is ready
 // Use closed 1H candle values to avoid intra-hour gate flicker.
@@ -343,16 +361,17 @@ h1CallStateTxt = h1CallReady ? "READY" : (h1BullCtx ? "PULLBACK" : "NEUTRAL")
 h1PutStateTxt  = h1PutReady  ? "READY" : (h1BearCtx ? "PULLBACK" : "NEUTRAL")
 
 //------------------------------------------------------------------------------
-// 15m Questions & Weights (sum = 100)
+// 15m Questions & Weights (sum = 100 for checklist)
+// Core ENTRY score uses execution subset; Q4/Q9 act as soft caps only.
 //------------------------------------------------------------------------------
 w1=20, w2=18, w3=15, w4=12, w5=10, w6=9, w7=7, w8=6, w9=3
 
 // Directional checks (CALL bullish, PUT bearish)
-callQ1 = (nearSupport or nearMA) and reactionLong
-putQ1  = (nearResist  or nearMA) and reactionShort
+callQ1 = nearSupportZone and reactionLong
+putQ1  = nearResistZone and reactionShort
 
-callQ2 = bullMicro and trendOK
-putQ2  = bearMicro and trendOK
+callQ2 = bullMicro or trendAlignBull
+putQ2  = bearMicro or trendAlignBear
 
 callQ3 = not na(callInvalid) and not na(callStop) and callRiskOK
 putQ3  = not na(putInvalid)  and not na(putStop)  and putRiskOK
@@ -375,49 +394,81 @@ putQ8  = putMomOk
 callQ9 = callWeekOk
 putQ9  = putWeekOk
 
-callRawScore = f_score(callQ1, w1)
-callRawScore := callRawScore + f_score(callQ2, w2)
-callRawScore := callRawScore + f_score(callQ3, w3)
-callRawScore := callRawScore + f_score(callQ4, w4)
-callRawScore := callRawScore + f_score(callQ5, w5)
-callRawScore := callRawScore + f_score(callQ6, w6)
-callRawScore := callRawScore + f_score(callQ7, w7)
-callRawScore := callRawScore + f_score(callQ8, w8)
-callRawScore := callRawScore + f_score(callQ9, w9)
+// 15m execution trigger (Blueprint style): break&hold OR reject&continue (price-first trigger).
+// Break uses minor structure lookback (no pivot-confirm lag).
+entryHoldTol = entryHoldAtr * atr
+minorBreakHigh = ta.highest(high[1], entryBreakLookback)
+minorBreakLow  = ta.lowest(low[1], entryBreakLookback)
+callBreakHold = not na(minorBreakHigh) and close > minorBreakHigh and close >= (minorBreakHigh - entryHoldTol)
+putBreakHold  = not na(minorBreakLow)  and close < minorBreakLow  and close <= (minorBreakLow + entryHoldTol)
 
-putRawScore = f_score(putQ1, w1)
-putRawScore := putRawScore + f_score(putQ2, w2)
-putRawScore := putRawScore + f_score(putQ3, w3)
-putRawScore := putRawScore + f_score(putQ4, w4)
-putRawScore := putRawScore + f_score(putQ5, w5)
-putRawScore := putRawScore + f_score(putQ6, w6)
-putRawScore := putRawScore + f_score(putQ7, w7)
-putRawScore := putRawScore + f_score(putQ8, w8)
-putRawScore := putRawScore + f_score(putQ9, w9)
+callRejectContinue = nearSupportZone and reactionLong and (close >= emaFast or (not na(closePos) and closePos >= 0.55))
+putRejectContinue  = nearResistZone  and reactionShort and (close <= emaFast or (not na(closePos) and closePos <= 0.45))
 
-trendW = w2 + w8 + w9
-entryW = w1 + w3 + w4 + w5 + w6 + w7
+// Price trigger is independent; volume remains in quality scoring (Q7) and confidence/grade soft caps.
+callEntryPattern = callBreakHold or callRejectContinue
+putEntryPattern  = putBreakHold  or putRejectContinue
 
-callTrendRaw = f_score(callQ2, w2) + f_score(callQ8, w8) + f_score(callQ9, w9)
-putTrendRaw  = f_score(putQ2, w2)  + f_score(putQ8, w8)  + f_score(putQ9, w9)
+callEntryPatternTxt = callBreakHold ? "break&hold" : (callRejectContinue ? "reject&continue" : "no trigger")
+putEntryPatternTxt  = putBreakHold  ? "break&hold" : (putRejectContinue  ? "reject&continue" : "no trigger")
 
-callEntryRaw = f_score(callQ1, w1) + f_score(callQ3, w3) + f_score(callQ4, w4) + f_score(callQ5, w5) + f_score(callQ6, w6) + f_score(callQ7, w7)
-putEntryRaw  = f_score(putQ1, w1)  + f_score(putQ3, w3)  + f_score(putQ4, w4)  + f_score(putQ5, w5)  + f_score(putQ6, w6)  + f_score(putQ7, w7)
+// Core execution-quality score (without daily-vol and HTF compression as hard blockers).
+// Trend core is inherited from 1H readiness to keep 15m as execution/timing TF.
+trendCoreW = w2 + w8
+entryCoreW = w1 + w3 + w5 + w6 + w7
+callTrendCoreRaw = f_score(h1CallReady, trendCoreW)
+putTrendCoreRaw  = f_score(h1PutReady, trendCoreW)
+callEntryCoreRaw = f_score(callQ1, w1) + f_score(callQ3, w3) + f_score(callQ5, w5) + f_score(callQ6, w6) + f_score(callQ7, w7)
+putEntryCoreRaw  = f_score(putQ1, w1)  + f_score(putQ3, w3)  + f_score(putQ5, w5)  + f_score(putQ6, w6)  + f_score(putQ7, w7)
+callTrendCoreScore = trendCoreW > 0 ? 100.0 * callTrendCoreRaw / trendCoreW : 0.0
+putTrendCoreScore  = trendCoreW > 0 ? 100.0 * putTrendCoreRaw  / trendCoreW : 0.0
+callEntryCoreScore = entryCoreW > 0 ? 100.0 * callEntryCoreRaw / entryCoreW : 0.0
+putEntryCoreScore  = entryCoreW > 0 ? 100.0 * putEntryCoreRaw  / entryCoreW : 0.0
 
-callTrendScore = trendW > 0 ? 100.0 * callTrendRaw / trendW : 0.0
-putTrendScore  = trendW > 0 ? 100.0 * putTrendRaw  / trendW : 0.0
+callTrendScore = callTrendCoreScore
+putTrendScore  = putTrendCoreScore
+callEntryScore = callEntryCoreScore
+putEntryScore  = putEntryCoreScore
 
-callEntryScore = entryW > 0 ? 100.0 * callEntryRaw / entryW : 0.0
-putEntryScore  = entryW > 0 ? 100.0 * putEntryRaw  / entryW : 0.0
+callSetupQualityOk = callEntryCoreScore >= entryScoreMin and callTrendCoreScore >= entryTrendMin
+putSetupQualityOk  = putEntryCoreScore  >= entryScoreMin and putTrendCoreScore  >= entryTrendMin
 
-callEntryReady = callEntryScore >= entryScoreMin and callTrendScore >= entryTrendMin
-putEntryReady  = putEntryScore  >= entryScoreMin and putTrendScore  >= entryTrendMin
+// Process-state flags (ModMark-style): bias -> level -> reaction -> trigger.
+callBiasOk = h1BullCtx
+putBiasOk  = h1BearCtx
+callLevelOk = nearSupportZone
+putLevelOk  = nearResistZone
+callReactionOk = reactionLong
+putReactionOk  = reactionShort
+callLtfReversalOk = callQ2 or (close >= emaFast and (rsi >= rsiMid or macdHist >= macdHist[1]))
+putLtfReversalOk  = putQ2  or (close <= emaFast and (rsi <= rsiMid or macdHist <= macdHist[1]))
+
+callNoTradeState = (not callBiasOk) or (not callHasRR) or na(callInvalid) or na(callStop)
+putNoTradeState  = (not putBiasOk)  or (not putHasRR)  or na(putInvalid)  or na(putStop)
+
+callWaitPullbackState = (not callLevelOk) or isOverextended
+putWaitPullbackState  = (not putLevelOk)  or isOverextended
+
+callWaitReversalState = (not h1CallReady) or (not callLtfReversalOk) or (not callReactionOk)
+putWaitReversalState  = (not h1PutReady)  or (not putLtfReversalOk)  or (not putReactionOk)
+
+callSetupDevelopingState = h1CallReady and not isOverextended and callLevelOk and callReactionOk and (not callEntryPattern)
+putSetupDevelopingState  = h1PutReady  and not isOverextended and putLevelOk  and putReactionOk  and (not putEntryPattern)
+callEntryNowState = h1CallReady and not isOverextended and callLevelOk and callReactionOk and callEntryPattern
+putEntryNowState  = h1PutReady  and not isOverextended and putLevelOk  and putReactionOk  and putEntryPattern
+
+callNoTradeStatus = not callBiasOk ? "NO TRADE (NO BIAS)" : ((na(callInvalid) or na(callStop)) ? "NO TRADE (NO STOP)" : "NO TRADE (RR)")
+putNoTradeStatus  = not putBiasOk  ? "NO TRADE (NO BIAS)" : ((na(putInvalid)  or na(putStop))  ? "NO TRADE (NO STOP)" : "NO TRADE (RR)")
 
 callScore = math.min(callTrendScore, callEntryScore)
 putScore  = math.min(putTrendScore, putEntryScore)
 
-callConfidence = math.max(0.0, math.min(100.0, callScore + (callTrendScore - callEntryScore) / 4.0))
-putConfidence  = math.max(0.0, math.min(100.0, putScore  + (putTrendScore  - putEntryScore)  / 4.0))
+callConfidenceBase = math.max(0.0, math.min(100.0, callScore + (callTrendScore - callEntryScore) / 4.0))
+putConfidenceBase  = math.max(0.0, math.min(100.0, putScore  + (putTrendScore  - putEntryScore)  / 4.0))
+callSoftPenalty = (dHighVol ? 8.0 : 0.0) + (not callRiskCompression ? 6.0 : 0.0) + (impulseHeat ? 4.0 : 0.0) + (not callMomOk ? 5.0 : 0.0) + (not trendOK ? 3.0 : 0.0)
+putSoftPenalty  = (dHighVol ? 8.0 : 0.0) + (not putRiskCompression  ? 6.0 : 0.0) + (impulseHeat ? 4.0 : 0.0) + (not putMomOk  ? 5.0 : 0.0) + (not trendOK ? 3.0 : 0.0)
+callConfidence = math.max(0.0, math.min(100.0, callConfidenceBase - callSoftPenalty))
+putConfidence  = math.max(0.0, math.min(100.0, putConfidenceBase  - putSoftPenalty))
 callConfTxt = str.tostring(callConfidence, "#.##") + " " + f_confBand(callConfidence)
 putConfTxt  = str.tostring(putConfidence,  "#.##") + " " + f_confBand(putConfidence)
 
@@ -473,15 +524,15 @@ f_applyColVisibility(_r) =>
 
 f_failReason(_id, _isPut) =>
     if _id == 1
-        _isPut ? (not (nearResist or nearMA) ? "not near level" : (upperW < wickBodyMult * body ? "wick too small" : (closePos > (1 - closePosPct) ? "weak close" : "low volume"))) : (not (nearSupport or nearMA) ? "not near level" : (lowerW < wickBodyMult * body ? "wick too small" : (closePos < closePosPct ? "weak close" : "low volume")))
+        _isPut ? (not nearResistZone ? "not near level" : (upperW < wickBodyMult * body ? "wick too small" : (closePos > (1 - closePosPct) ? "weak close" : "low volume"))) : (not nearSupportZone ? "not near level" : (lowerW < wickBodyMult * body ? "wick too small" : (closePos < closePosPct ? "weak close" : "low volume")))
     else if _id == 2
-        _isPut ? (not trendOK ? "trend too weak" : "no bear micro") : (not trendOK ? "trend too weak" : "no bull micro")
+        _isPut ? "no bear structure/align" : "no bull structure/align"
     else if _id == 3
         _isPut ? (na(putInvalid) ? "no invalidation" : (na(putStop) ? "no stop" : "risk too high")) : (na(callInvalid) ? "no invalidation" : (na(callStop) ? "no stop" : "risk too high"))
     else if _id == 4
         _isPut ? (not putRiskOK ? "risk invalid" : "no HTF compression") : (not callRiskOK ? "risk invalid" : "no HTF compression")
     else if _id == 5
-        extended ? "distance > limit" : "impulse overheat"
+        "distance > limit"
     else if _id == 6
         _isPut ? (not healthyPullbackBear ? "pullback too strong" : "retrace too deep") : (not healthyPullbackBull ? "pullback too strong" : "retrace too deep")
     else if _id == 7
@@ -541,20 +592,24 @@ else
     putBaseGrade  = f_grade(putScore)
     callBaseGrade = f_grade(callScore)
 
-    putCapGrade  = (not putHasRR and isOverextended) ? "D" : ((not putHasRR or isOverextended or not h1PutReady) ? "C" : "A")
-    callCapGrade = (not callHasRR and isOverextended) ? "D" : ((not callHasRR or isOverextended or not h1CallReady) ? "C" : "A")
+    putCapGradeHard  = (not putHasRR and isOverextended) ? "D" : ((not putHasRR or isOverextended or not h1PutReady) ? "C" : "A")
+    callCapGradeHard = (not callHasRR and isOverextended) ? "D" : ((not callHasRR or isOverextended or not h1CallReady) ? "C" : "A")
+    putCapGradeSoft  = (dHighVol or not putRiskCompression or impulseHeat or not putMomOk or not trendOK) ? "C" : "A"
+    callCapGradeSoft = (dHighVol or not callRiskCompression or impulseHeat or not callMomOk or not trendOK) ? "C" : "A"
 
+    putCapGrade  = f_capGrade(putCapGradeHard, putCapGradeSoft)
+    callCapGrade = f_capGrade(callCapGradeHard, callCapGradeSoft)
     putGrade  = f_capGrade(putBaseGrade, putCapGrade)
     callGrade = f_capGrade(callBaseGrade, callCapGrade)
 
-    putStatus = not putHasRR ? "NO TRADE (RR)" : (not h1PutReady ? "WAIT REVERSAL" : (isOverextended ? "WAIT PULLBACK" : (putEntryReady ? "ENTRY NOW" : "SETUP DEVELOPING")))
-    callStatus = not callHasRR ? "NO TRADE (RR)" : (not h1CallReady ? "WAIT REVERSAL" : (isOverextended ? "WAIT PULLBACK" : (callEntryReady ? "ENTRY NOW" : "SETUP DEVELOPING")))
+    putStatus = putNoTradeState ? putNoTradeStatus : (putWaitPullbackState ? "WAIT PULLBACK" : (putWaitReversalState ? "WAIT REVERSAL" : (putEntryNowState ? "ENTRY NOW" : (putSetupDevelopingState ? "SETUP DEVELOPING" : "WAIT REVERSAL"))))
+    callStatus = callNoTradeState ? callNoTradeStatus : (callWaitPullbackState ? "WAIT PULLBACK" : (callWaitReversalState ? "WAIT REVERSAL" : (callEntryNowState ? "ENTRY NOW" : (callSetupDevelopingState ? "SETUP DEVELOPING" : "WAIT REVERSAL"))))
 
-    f_metricRow(row, "Trend score (0-100)", str.tostring(putTrendScore, "#.##"), colBg, str.tostring(callTrendScore, "#.##"), colBg)
+    f_metricRow(row, "Trend score core (0-100)", str.tostring(putTrendScore, "#.##"), colBg, str.tostring(callTrendScore, "#.##"), colBg)
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Entry score (0-100)", str.tostring(putEntryScore, "#.##"), colBg, str.tostring(callEntryScore, "#.##"), colBg)
+    f_metricRow(row, "Entry score core (0-100)", str.tostring(putEntryScore, "#.##"), colBg, str.tostring(callEntryScore, "#.##"), colBg)
     f_applyColVisibility(row)
     row += 1
 
@@ -578,11 +633,23 @@ else
     f_applyColVisibility(row)
     row += 1
 
+    putSoftTxt = (dHighVol ? "day-vol" : "ok") + (not putRiskCompression ? " +no-compress" : "") + (impulseHeat ? " +impulse-hot" : "") + (not putMomOk ? " +mom-weak" : "") + (not trendOK ? " +trend-weak" : "")
+    callSoftTxt = (dHighVol ? "day-vol" : "ok") + (not callRiskCompression ? " +no-compress" : "") + (impulseHeat ? " +impulse-hot" : "") + (not callMomOk ? " +mom-weak" : "") + (not trendOK ? " +trend-weak" : "")
+    f_metricRow(row, "Soft caps", putSoftTxt, colBg, callSoftTxt, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
     f_metricRow(row, "Reaction @ level", putQ1 ? "OK" : f_failReason(1, true), f_statusColor(putQ1, false), callQ1 ? "OK" : f_failReason(1, false), f_statusColor(callQ1, false))
     f_applyColVisibility(row)
     row += 1
 
     f_metricRow(row, "Structure + trend strength", putQ2 ? "YES" : f_failReason(2, true), f_statusColor(putQ2, false), callQ2 ? "YES" : f_failReason(2, false), f_statusColor(callQ2, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    putEntryTrigTxt = not putReactionOk ? "no reaction" : (putEntryPattern ? (putSetupQualityOk ? putEntryPatternTxt : putEntryPatternTxt + " / low quality") : "no break&hold/reject&continue")
+    callEntryTrigTxt = not callReactionOk ? "no reaction" : (callEntryPattern ? (callSetupQualityOk ? callEntryPatternTxt : callEntryPatternTxt + " / low quality") : "no break&hold/reject&continue")
+    f_metricRow(row, "Entry trigger 15m", putEntryTrigTxt, f_statusColor(putEntryPattern and putReactionOk, false), callEntryTrigTxt, f_statusColor(callEntryPattern and callReactionOk, false))
     f_applyColVisibility(row)
     row += 1
 
@@ -635,12 +702,21 @@ else
         f_applyColVisibility(row)
         row += 1
 
+        f_valueRow(row, "VWAP", na(vwap) ? "-" : str.tostring(vwap, "#.####"), na(vwap) ? "-" : str.tostring(vwap, "#.####"))
+        f_applyColVisibility(row)
+        row += 1
+
         f_valueRow(row, "Trend strength (|EMA-SMA|/ATR)", str.tostring(trendStrength, "#.###"), str.tostring(trendStrength, "#.###"))
         f_applyColVisibility(row)
         row += 1
 
         srTxt = (na(nearestSupport) ? "-" : str.tostring(nearestSupport, "#.####")) + " / " + (na(nearestResist) ? "-" : str.tostring(nearestResist, "#.####"))
         f_valueRow(row, "Nearest S / R", srTxt, srTxt)
+        f_applyColVisibility(row)
+        row += 1
+
+        dayLvlTxt = (na(pdl) ? "-" : str.tostring(pdl, "#.####")) + " / " + (na(pdh) ? "-" : str.tostring(pdh, "#.####"))
+        f_valueRow(row, "PDL / PDH", dayLvlTxt, dayLvlTxt)
         f_applyColVisibility(row)
         row += 1
 
