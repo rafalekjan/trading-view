@@ -1,5 +1,5 @@
 ﻿//@version=6
-indicator("Stock 1D Options UI Table (PUT/CALL) - Blueprint", overlay=true, max_labels_count=500, max_lines_count=500)
+indicator("Stock 1D", overlay=true, max_labels_count=500, max_lines_count=500)
 
 //------------------------------------------------------------------------------
 // Inputs (all user-configurable)
@@ -78,6 +78,9 @@ f_statusColor(_ok, _na) =>
 f_boolToText(_ok, _na) =>
     _na ? "-" : (_ok ? "YES" : "NO")
 
+f_gateText(_ok, _na, _reason) =>
+    _na ? "-" : (_ok ? "YES" : _reason)
+
 f_grade(_score) =>
     if _score >= gradeA
         "A"
@@ -89,6 +92,22 @@ f_grade(_score) =>
         "D"
 
 f_score(_ok, _w) => _ok ? _w : 0
+
+f_pickSupport(_last, _prev, _px) =>
+    float _s = na
+    if not na(_last) and _last <= _px
+        _s := _last
+    if not na(_prev) and _prev <= _px
+        _s := na(_s) ? _prev : ((_px - _prev) < (_px - _s) ? _prev : _s)
+    _s
+
+f_pickResist(_last, _prev, _px) =>
+    float _r = na
+    if not na(_last) and _last >= _px
+        _r := _last
+    if not na(_prev) and _prev >= _px
+        _r := na(_r) ? _prev : ((_prev - _px) < (_r - _px) ? _prev : _r)
+    _r
 
 //------------------------------------------------------------------------------
 // Symbol gating (Stock 1D only; exclude SPY/QQQ)
@@ -144,8 +163,8 @@ trSpike = tr >= unstableTrAtr * atr
 cleanChart = not isChaos and not trSpike
 
 // Nearest structure levels
-nearestSupport = lastPL
-nearestResist  = lastPH
+nearestSupport = f_pickSupport(lastPL, prevPL, close)
+nearestResist  = f_pickResist(lastPH, prevPH, close)
 
 distToSupport = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
 distToResist  = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
@@ -180,8 +199,14 @@ riskRealisticPut  = not na(putRisk)  and putRisk  > 0 and putRisk  <= 6.0 * atr
 callObstacle = nearestResist
 putObstacle  = nearestSupport
 
-callSpace = not na(callObstacle) ? math.abs(callObstacle - close) : na
-putSpace  = not na(putObstacle)  ? math.abs(close - putObstacle) : na
+callSpaceSr = not na(callObstacle) ? math.abs(callObstacle - close) : na
+putSpaceSr  = not na(putObstacle)  ? math.abs(close - putObstacle) : na
+
+callSpaceAlt = not na(callRisk) ? (1.5 * callRisk) : na
+putSpaceAlt  = not na(putRisk)  ? (1.5 * putRisk)  : na
+
+callSpace = not na(callSpaceSr) and not na(callSpaceAlt) ? math.max(callSpaceSr, callSpaceAlt) : (not na(callSpaceSr) ? callSpaceSr : callSpaceAlt)
+putSpace  = not na(putSpaceSr) and not na(putSpaceAlt)  ? math.max(putSpaceSr, putSpaceAlt)   : (not na(putSpaceSr)  ? putSpaceSr  : putSpaceAlt)
 
 callSpaceOK = not na(callSpace) and callSpace >= minSpaceAtr * atr
 putSpaceOK  = not na(putSpace)  and putSpace  >= minSpaceAtr * atr
@@ -333,13 +358,59 @@ f_applyColVisibility(_r) =>
     if not showCall
         f_setCell(_r, COL_CALL, "", color.new(color.black, 100), color.new(color.white, 100))
 
-f_checkRow(_r, _name, _w, _putOk, _callOk, _putNa, _callNa) =>
-    _putTxt = f_boolToText(_putOk, _putNa) + " (" + str.tostring(_w) + ")"
-    _calTxt = f_boolToText(_callOk, _callNa) + " (" + str.tostring(_w) + ")"
+f_failReason(_id, _isPut) =>
+    if _id == 1
+        "no structure"
+    else if _id == 2
+        isChaos ? "chaos overlap" : (trSpike ? "TR spike" : "chart noisy")
+    else if _id == 3
+        _isPut ? (not (nearResist or nearMA) ? "not near level" : (extended ? "price extended" : "bad location")) : (not (nearSupport or nearMA) ? "not near level" : (extended ? "price extended" : "bad location"))
+    else if _id == 4
+        _isPut ? (na(putInvalid) ? "no invalidation" : (not riskRealisticPut ? "risk unrealistic" : "risk invalid")) : (na(callInvalid) ? "no invalidation" : (not riskRealisticCall ? "risk unrealistic" : "risk invalid"))
+    else if _id == 5
+        _isPut ? (na(putSpace) ? "no obstacle data" : "space too small") : (na(callSpace) ? "no obstacle data" : "space too small")
+    else if _id == 6
+        _isPut ? (na(putRR) ? "RR n/a" : "RR below min") : (na(callRR) ? "RR n/a" : "RR below min")
+    else if _id == 7
+        _isPut ? "RW not confirmed" : "RS not confirmed"
+    else if _id == 8
+        _isPut ? (not trendRegime ? "no trend regime" : (close > sma50 ? "above SMA50" : (ema20 > ema20[5] ? "EMA20 rising" : "follow weak"))) : (not trendRegime ? "no trend regime" : (close < sma50 ? "below SMA50" : (ema20 < ema20[5] ? "EMA20 falling" : "follow weak")))
+    else if _id == 9
+        not structureClear ? "no structure" : (not cleanChart ? "chart noisy" : (isMiddle ? "middle zone" : "clarity low"))
+    else
+        _isPut ? (not putLocationOk ? "location bad" : (not riskRealisticPut ? "risk unrealistic" : (not putHasRR ? "RR below min" : (not cleanChart ? "chart noisy" : "AB weak")))) : (not callLocationOk ? "location bad" : (not riskRealisticCall ? "risk unrealistic" : (not callHasRR ? "RR below min" : (not cleanChart ? "chart noisy" : "AB weak"))))
+
+f_checkRow(_r, _id, _name, _w, _putOk, _callOk, _putNa, _callNa) =>
+    _putTxt = f_gateText(_putOk, _putNa, f_failReason(_id, true)) + " (" + str.tostring(_w) + ")"
+    _calTxt = f_gateText(_callOk, _callNa, f_failReason(_id, false)) + " (" + str.tostring(_w) + ")"
     f_metricRow(_r, _name, _putTxt, f_statusColor(_putOk, _putNa), _calTxt, f_statusColor(_callOk, _callNa))
     f_applyColVisibility(_r)
 
+f_updateSrLine(_ln, _y, _col) =>
+    line _out = _ln
+    if na(_y)
+        if not na(_out)
+            line.delete(_out)
+            _out := na
+    else
+        _x1 = bar_index
+        _x2 = bar_index + 3
+        if na(_out)
+            _out := line.new(_x1, _y, _x2, _y, xloc=xloc.bar_index, extend=extend.none, color=_col, width=1)
+        else
+            line.set_xy1(_out, _x1, _y)
+            line.set_xy2(_out, _x2, _y)
+            line.set_color(_out, _col)
+            line.set_width(_out, 1)
+    _out
+
+var line srSupportLine = na
+var line srResistLine = na
+
 render = uiShow and (not onlyOn1D or is1D) and not isExcluded
+
+srSupportLine := f_updateSrLine(srSupportLine, render ? nearestSupport : na, f_c(color.teal))
+srResistLine := f_updateSrLine(srResistLine, render ? nearestResist : na, f_c(color.orange))
 
 if not render
     f_clearTable(maxRows)
@@ -397,25 +468,25 @@ else
         f_sectionRow(row, "DETAILS (10 checks)")
         row += 1
 
-        f_checkRow(row, "1) Structure identified", w1, putQ1, callQ1, false, false)
+        f_checkRow(row, 1, "1) Structure identified", w1, putQ1, callQ1, false, false)
         row += 1
-        f_checkRow(row, "2) Clean chart (no chaos)", w2, putQ2, callQ2, false, false)
+        f_checkRow(row, 2, "2) Clean chart (no chaos)", w2, putQ2, callQ2, false, false)
         row += 1
-        f_checkRow(row, "3) Location logical", w3, putQ3, callQ3, false, false)
+        f_checkRow(row, 3, "3) Location logical", w3, putQ3, callQ3, false, false)
         row += 1
-        f_checkRow(row, "4) Invalidation exists", w4, putQ4, callQ4, na(putInvalid), na(callInvalid))
+        f_checkRow(row, 4, "4) Invalidation exists", w4, putQ4, callQ4, na(putInvalid), na(callInvalid))
         row += 1
-        f_checkRow(row, "5) Space to next obstacle", w5, putQ5, callQ5, na(putSpace), na(callSpace))
+        f_checkRow(row, 5, "5) Space to next obstacle", w5, putQ5, callQ5, na(putSpace), na(callSpace))
         row += 1
-        f_checkRow(row, "6) RR >= min", w6, putQ6, callQ6, na(putRR), na(callRR))
+        f_checkRow(row, 6, "6) RR >= min", w6, putQ6, callQ6, na(putRR), na(callRR))
         row += 1
-        f_checkRow(row, "7) RS/RW vs benchmark", w7, putQ7, callQ7, false, false)
+        f_checkRow(row, 7, "7) RS/RW vs benchmark", w7, putQ7, callQ7, false, false)
         row += 1
-        f_checkRow(row, "8) Follow-through potential", w8, putQ8, callQ8, false, false)
+        f_checkRow(row, 8, "8) Follow-through potential", w8, putQ8, callQ8, false, false)
         row += 1
-        f_checkRow(row, "9) One-sentence clarity", w9, putQ9, callQ9, false, false)
+        f_checkRow(row, 9, "9) One-sentence clarity", w9, putQ9, callQ9, false, false)
         row += 1
-        f_checkRow(row, "10) A/B quality proxy", w10, putQ10, callQ10, false, false)
+        f_checkRow(row, 10, "10) A/B quality proxy", w10, putQ10, callQ10, false, false)
         row += 1
 
         row += 1
@@ -458,4 +529,3 @@ else
         for r = row to maxRows - 1
             for c = 0 to 2
                 f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
-

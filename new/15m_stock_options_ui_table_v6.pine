@@ -1,5 +1,5 @@
 ﻿//@version=6
-indicator("Stock 15m Options UI Table (PUT/CALL) - Blueprint", overlay=true, max_labels_count=500, max_lines_count=500)
+indicator("Stock 15m", overlay=true, max_labels_count=500, max_lines_count=500)
 
 //------------------------------------------------------------------------------
 // Inputs (all user-configurable)
@@ -35,7 +35,7 @@ volImpulseMult = input.float(1.2, "Impulse vol >= SMA *", minval=0.5, step=0.1, 
 wickBodyMult = input.float(0.8, "Reaction wick >= x body", minval=0.1, step=0.1, group=groupFilters)
 closePosPct = input.float(0.6, "Reaction close position (0..1)", minval=0.1, maxval=0.9, step=0.05, group=groupFilters)
 
-extendedAtr = input.float(1.5, "Extended if |close-EMA| > x ATR", minval=0.5, step=0.25, group=groupFilters)
+extendedAtr = input.float(1.8, "Extended if |close-EMA| > x ATR", minval=0.5, step=0.25, group=groupFilters)
 impulseBars = input.int(4, "Overextension: impulse bars window", minval=2, maxval=10, group=groupFilters)
 impulseBodyPct = input.float(0.55, "Impulse: body/range >= ", minval=0.1, maxval=0.95, step=0.05, group=groupFilters)
 
@@ -44,6 +44,7 @@ aggrRetracePct = input.float(0.6, "Aggressive pullback if retrace >= ", minval=0
 
 stopBufAtr = input.float(0.20, "Stop buffer (x ATR)", minval=0.0, step=0.05, group=groupFilters)
 riskAtrMax = input.float(2.0, "Max risk (x ATR) for 15m entry", minval=0.5, step=0.25, group=groupFilters)
+minRR = input.float(1.5, "Minimum RR", minval=0.5, step=0.25, group=groupFilters)
 
 rsiLen = input.int(14, "RSI length", minval=1, group=groupFilters)
 rsiMid = input.float(50.0, "RSI mid", minval=1, maxval=99, step=1, group=groupFilters)
@@ -85,6 +86,9 @@ f_statusColor(_ok, _na) =>
 f_boolToText(_ok, _na) =>
     _na ? "-" : (_ok ? "YES" : "NO")
 
+f_gateText(_ok, _na, _reason) =>
+    _na ? "-" : (_ok ? "YES" : _reason)
+
 f_grade(_score) =>
     if _score >= gradeA
         "A"
@@ -94,6 +98,18 @@ f_grade(_score) =>
         "C"
     else
         "D"
+
+f_gradeRank(_g) =>
+    _g == "A" ? 4 : _g == "B" ? 3 : _g == "C" ? 2 : 1
+
+f_gradeFromRank(_r) =>
+    _r >= 4 ? "A" : _r == 3 ? "B" : _r == 2 ? "C" : "D"
+
+f_capGrade(_base, _cap) =>
+    f_gradeFromRank(math.min(f_gradeRank(_base), f_gradeRank(_cap)))
+
+f_confBand(_v) =>
+    _v > 75 ? "HIGH" : (_v >= 55 ? "WATCH" : "LOW")
 
 f_score(_ok, _w) => _ok ? _w : 0
 
@@ -106,6 +122,26 @@ f_rollSum(_src, _len) =>
 f_adxFromDmi(_len) =>
     [_diPlus, _diMinus, _adx] = ta.dmi(_len, _len)
     _adx
+
+f_macdHist() =>
+    [_m, _s, _h] = ta.macd(close, 12, 26, 9)
+    _h
+
+f_pickSupport(_last, _prev, _px) =>
+    float _s = na
+    if not na(_last) and _last <= _px
+        _s := _last
+    if not na(_prev) and _prev <= _px
+        _s := na(_s) ? _prev : ((_px - _prev) < (_px - _s) ? _prev : _s)
+    _s
+
+f_pickResist(_last, _prev, _px) =>
+    float _r = na
+    if not na(_last) and _last >= _px
+        _r := _last
+    if not na(_prev) and _prev >= _px
+        _r := na(_r) ? _prev : ((_prev - _px) < (_r - _px) ? _prev : _r)
+    _r
 
 //------------------------------------------------------------------------------
 // Data (15m)
@@ -138,14 +174,16 @@ if not na(pl)
 bullMicro = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH > prevPH and lastPL > prevPL
 bearMicro = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH < prevPH and lastPL < prevPL
 
-nearestSupport = lastPL
-nearestResist  = lastPH
+nearestSupport = f_pickSupport(lastPL, prevPL, close)
+nearestResist  = f_pickResist(lastPH, prevPH, close)
 
 distS = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
 distR = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
 nearSupport = not na(distS) and distS <= nearLevelAtr * atr
 nearResist  = not na(distR) and distR <= nearLevelAtr * atr
 nearMA = math.abs(close - emaFast) <= nearLevelAtr * atr or math.abs(close - smaMid) <= nearLevelAtr * atr
+trendStrength = atr > 0 ? math.abs(emaFast - smaMid) / atr : 0.0
+trendOK = trendStrength > 0.2
 
 // Candle anatomy
 rng = high - low
@@ -166,7 +204,8 @@ impulseBear = close < open and bodyPct >= impulseBodyPct and volume >= volSma * 
 
 // Overextension
 distToEma = math.abs(close - emaFast)
-extended = distToEma > extendedAtr * atr
+distEmaAtr = atr > 0 ? (distToEma / atr) : na
+extended = not na(distEmaAtr) and distEmaAtr > extendedAtr
 impulseSpikeSrc = (impulseBull or impulseBear) ? 1.0 : 0.0
 impulseCount = f_rollSum(impulseSpikeSrc, impulseBars)
 isOverextended = extended or impulseCount >= math.max(3, impulseBars - 1)
@@ -199,6 +238,24 @@ putRisk  = not na(putStop)  ? math.abs(putStop - close) : na
 
 callRiskOK = not na(callRisk) and callRisk > 0 and callRisk <= riskAtrMax * atr
 putRiskOK  = not na(putRisk)  and putRisk  > 0 and putRisk  <= riskAtrMax * atr
+
+callTarget = nearestResist
+putTarget  = nearestSupport
+
+callRewardSr = not na(callTarget) ? math.max(0.0, callTarget - close) : na
+putRewardSr  = not na(putTarget)  ? math.max(0.0, close - putTarget) : na
+
+callRewardAlt = not na(callRisk) ? (1.5 * callRisk) : na
+putRewardAlt  = not na(putRisk)  ? (1.5 * putRisk)  : na
+
+callReward = not na(callRewardSr) and not na(callRewardAlt) ? math.max(callRewardSr, callRewardAlt) : (not na(callRewardSr) ? callRewardSr : callRewardAlt)
+putReward  = not na(putRewardSr) and not na(putRewardAlt)  ? math.max(putRewardSr, putRewardAlt)   : (not na(putRewardSr)  ? putRewardSr  : putRewardAlt)
+
+callRR = (not na(callRisk) and callRisk > 0 and not na(callReward)) ? (callReward / callRisk) : na
+putRR  = (not na(putRisk)  and putRisk  > 0 and not na(putReward))  ? (putReward  / putRisk)  : na
+
+callHasRR = not na(callRR) and callRR >= minRR
+putHasRR  = not na(putRR)  and putRR  >= minRR
 
 // Entry reduces risk (risk compression): compare to HTF pivot-based risk
 htfATR = request.security(syminfo.tickerid, htfTF, ta.atr(atrLen))
@@ -234,15 +291,31 @@ putMomOk  = (rsi <= rsiMid) and (macdHist <= 0) and (macdHist <= macdHist[1])
 
 // Daily context (week-type proxy): avoid high-vol days; align with daily EMA50
 dATR = request.security(syminfo.tickerid, dailyTF, ta.atr(14))
+dATRsma20 = request.security(syminfo.tickerid, dailyTF, ta.sma(ta.atr(14), 20))
 dADX = request.security(syminfo.tickerid, dailyTF, f_adxFromDmi(14))
 dClose = request.security(syminfo.tickerid, dailyTF, close)
 dEma50 = request.security(syminfo.tickerid, dailyTF, ta.ema(close, 50))
 dTrend = dADX >= 18 and dClose > dEma50
 dBear  = dADX >= 18 and dClose < dEma50
-dHighVol = dATR > ta.sma(dATR, 20) * 1.2
+dHighVol = dATR > dATRsma20 * 1.2
 
 callWeekOk = (dTrend and not dHighVol) or (not dHighVol)
 putWeekOk  = (dBear  and not dHighVol) or (not dHighVol)
+
+// 1H gate: 15m is trigger only when 1H context is ready
+// Use closed 1H candle values to avoid intra-hour gate flicker.
+h1Close = request.security(syminfo.tickerid, "60", close[1])
+h1Ema20 = request.security(syminfo.tickerid, "60", ta.ema(close, 20)[1])
+h1Rsi = request.security(syminfo.tickerid, "60", ta.rsi(close, rsiLen)[1])
+h1MacdHist = request.security(syminfo.tickerid, "60", f_macdHist()[1])
+h1BullCtx = request.security(syminfo.tickerid, "60", close[1] > ta.ema(close, 50)[1])
+h1BearCtx = request.security(syminfo.tickerid, "60", close[1] < ta.ema(close, 50)[1])
+
+h1CallReady = h1BullCtx and h1Close >= h1Ema20 and h1Rsi >= rsiMid and h1MacdHist >= 0
+h1PutReady  = h1BearCtx and h1Close <= h1Ema20 and h1Rsi <= rsiMid and h1MacdHist <= 0
+
+h1CallStateTxt = h1CallReady ? "READY" : (h1BullCtx ? "PULLBACK" : "NEUTRAL")
+h1PutStateTxt  = h1PutReady  ? "READY" : (h1BearCtx ? "PULLBACK" : "NEUTRAL")
 
 //------------------------------------------------------------------------------
 // 15m Questions & Weights (sum = 100)
@@ -253,8 +326,8 @@ w1=20, w2=18, w3=15, w4=12, w5=10, w6=9, w7=7, w8=6, w9=3
 callQ1 = (nearSupport or nearMA) and reactionLong
 putQ1  = (nearResist  or nearMA) and reactionShort
 
-callQ2 = bullMicro
-putQ2  = bearMicro
+callQ2 = bullMicro and trendOK
+putQ2  = bearMicro and trendOK
 
 callQ3 = not na(callInvalid) and not na(callStop) and callRiskOK
 putQ3  = not na(putInvalid)  and not na(putStop)  and putRiskOK
@@ -277,25 +350,48 @@ putQ8  = putMomOk
 callQ9 = callWeekOk
 putQ9  = putWeekOk
 
-callScore = f_score(callQ1, w1)
-callScore := callScore + f_score(callQ2, w2)
-callScore := callScore + f_score(callQ3, w3)
-callScore := callScore + f_score(callQ4, w4)
-callScore := callScore + f_score(callQ5, w5)
-callScore := callScore + f_score(callQ6, w6)
-callScore := callScore + f_score(callQ7, w7)
-callScore := callScore + f_score(callQ8, w8)
-callScore := callScore + f_score(callQ9, w9)
+callRawScore = f_score(callQ1, w1)
+callRawScore := callRawScore + f_score(callQ2, w2)
+callRawScore := callRawScore + f_score(callQ3, w3)
+callRawScore := callRawScore + f_score(callQ4, w4)
+callRawScore := callRawScore + f_score(callQ5, w5)
+callRawScore := callRawScore + f_score(callQ6, w6)
+callRawScore := callRawScore + f_score(callQ7, w7)
+callRawScore := callRawScore + f_score(callQ8, w8)
+callRawScore := callRawScore + f_score(callQ9, w9)
 
-putScore = f_score(putQ1, w1)
-putScore := putScore + f_score(putQ2, w2)
-putScore := putScore + f_score(putQ3, w3)
-putScore := putScore + f_score(putQ4, w4)
-putScore := putScore + f_score(putQ5, w5)
-putScore := putScore + f_score(putQ6, w6)
-putScore := putScore + f_score(putQ7, w7)
-putScore := putScore + f_score(putQ8, w8)
-putScore := putScore + f_score(putQ9, w9)
+putRawScore = f_score(putQ1, w1)
+putRawScore := putRawScore + f_score(putQ2, w2)
+putRawScore := putRawScore + f_score(putQ3, w3)
+putRawScore := putRawScore + f_score(putQ4, w4)
+putRawScore := putRawScore + f_score(putQ5, w5)
+putRawScore := putRawScore + f_score(putQ6, w6)
+putRawScore := putRawScore + f_score(putQ7, w7)
+putRawScore := putRawScore + f_score(putQ8, w8)
+putRawScore := putRawScore + f_score(putQ9, w9)
+
+trendW = w2 + w8 + w9
+entryW = w1 + w3 + w4 + w5 + w6 + w7
+
+callTrendRaw = f_score(callQ2, w2) + f_score(callQ8, w8) + f_score(callQ9, w9)
+putTrendRaw  = f_score(putQ2, w2)  + f_score(putQ8, w8)  + f_score(putQ9, w9)
+
+callEntryRaw = f_score(callQ1, w1) + f_score(callQ3, w3) + f_score(callQ4, w4) + f_score(callQ5, w5) + f_score(callQ6, w6) + f_score(callQ7, w7)
+putEntryRaw  = f_score(putQ1, w1)  + f_score(putQ3, w3)  + f_score(putQ4, w4)  + f_score(putQ5, w5)  + f_score(putQ6, w6)  + f_score(putQ7, w7)
+
+callTrendScore = trendW > 0 ? 100.0 * callTrendRaw / trendW : 0.0
+putTrendScore  = trendW > 0 ? 100.0 * putTrendRaw  / trendW : 0.0
+
+callEntryScore = entryW > 0 ? 100.0 * callEntryRaw / entryW : 0.0
+putEntryScore  = entryW > 0 ? 100.0 * putEntryRaw  / entryW : 0.0
+
+callScore = math.min(callTrendScore, callEntryScore)
+putScore  = math.min(putTrendScore, putEntryScore)
+
+callConfidence = math.max(0.0, math.min(100.0, callScore + (callTrendScore - callEntryScore) / 4.0))
+putConfidence  = math.max(0.0, math.min(100.0, putScore  + (putTrendScore  - putEntryScore)  / 4.0))
+callConfTxt = str.tostring(callConfidence, "#.##") + " " + f_confBand(callConfidence)
+putConfTxt  = str.tostring(putConfidence,  "#.##") + " " + f_confBand(putConfidence)
 
 //------------------------------------------------------------------------------
 // Table rendering (Top Right)
@@ -347,13 +443,57 @@ f_applyColVisibility(_r) =>
     if not showCall
         f_setCell(_r, COL_CALL, "", color.new(color.black, 100), color.new(color.white, 100))
 
-f_checkRow(_r, _name, _w, _putOk, _callOk, _putNa, _callNa) =>
-    _putTxt = f_boolToText(_putOk, _putNa) + " (" + str.tostring(_w) + ")"
-    _calTxt = f_boolToText(_callOk, _callNa) + " (" + str.tostring(_w) + ")"
+f_failReason(_id, _isPut) =>
+    if _id == 1
+        _isPut ? (not (nearResist or nearMA) ? "not near level" : (upperW < wickBodyMult * body ? "wick too small" : (closePos > (1 - closePosPct) ? "weak close" : "low volume"))) : (not (nearSupport or nearMA) ? "not near level" : (lowerW < wickBodyMult * body ? "wick too small" : (closePos < closePosPct ? "weak close" : "low volume")))
+    else if _id == 2
+        _isPut ? (not trendOK ? "trend too weak" : "no bear micro") : (not trendOK ? "trend too weak" : "no bull micro")
+    else if _id == 3
+        _isPut ? (na(putInvalid) ? "no invalidation" : (na(putStop) ? "no stop" : "risk too high")) : (na(callInvalid) ? "no invalidation" : (na(callStop) ? "no stop" : "risk too high"))
+    else if _id == 4
+        _isPut ? (not putRiskOK ? "risk invalid" : "no HTF compression") : (not callRiskOK ? "risk invalid" : "no HTF compression")
+    else if _id == 5
+        extended ? "distance > limit" : "impulse overheat"
+    else if _id == 6
+        _isPut ? (not healthyPullbackBear ? "pullback too strong" : "retrace too deep") : (not healthyPullbackBull ? "pullback too strong" : "retrace too deep")
+    else if _id == 7
+        _isPut ? (not impulseBear and not healthyPullbackBear ? "no impulse/pb" : "low volume") : (not impulseBull and not healthyPullbackBull ? "no impulse/pb" : "low volume")
+    else if _id == 8
+        _isPut ? (rsi > rsiMid ? "RSI too high" : (macdHist > 0 ? "MACD > 0" : "MACD weakening")) : (rsi < rsiMid ? "RSI too low" : (macdHist < 0 ? "MACD < 0" : "MACD weakening"))
+    else
+        "daily high vol"
+
+f_checkRow(_r, _id, _name, _w, _putOk, _callOk, _putNa, _callNa) =>
+    _putTxt = f_gateText(_putOk, _putNa, f_failReason(_id, true)) + " (" + str.tostring(_w) + ")"
+    _calTxt = f_gateText(_callOk, _callNa, f_failReason(_id, false)) + " (" + str.tostring(_w) + ")"
     f_metricRow(_r, _name, _putTxt, f_statusColor(_putOk, _putNa), _calTxt, f_statusColor(_callOk, _callNa))
     f_applyColVisibility(_r)
 
+f_updateSrLine(_ln, _y, _col) =>
+    line _out = _ln
+    if na(_y)
+        if not na(_out)
+            line.delete(_out)
+            _out := na
+    else
+        _x1 = bar_index
+        _x2 = bar_index + 3
+        if na(_out)
+            _out := line.new(_x1, _y, _x2, _y, xloc=xloc.bar_index, extend=extend.none, color=_col, width=1)
+        else
+            line.set_xy1(_out, _x1, _y)
+            line.set_xy2(_out, _x2, _y)
+            line.set_color(_out, _col)
+            line.set_width(_out, 1)
+    _out
+
+var line srSupportLine = na
+var line srResistLine = na
+
 render = uiShow and (not onlyOn15m or is15m)
+
+srSupportLine := f_updateSrLine(srSupportLine, render ? nearestSupport : na, f_c(color.teal))
+srResistLine := f_updateSrLine(srResistLine, render ? nearestResist : na, f_c(color.orange))
 
 if not render
     f_clearTable(maxRows)
@@ -370,10 +510,31 @@ else
     f_sectionRow(row, "SUMMARY")
     row += 1
 
-    putGrade  = f_grade(putScore)
-    callGrade = f_grade(callScore)
+    putBaseGrade  = f_grade(putScore)
+    callBaseGrade = f_grade(callScore)
 
-    f_metricRow(row, "Total score (0-100)", str.tostring(putScore), colBg, str.tostring(callScore), colBg)
+    putCapGrade  = (not putHasRR and isOverextended) ? "D" : ((not putHasRR or isOverextended or not h1PutReady) ? "C" : "A")
+    callCapGrade = (not callHasRR and isOverextended) ? "D" : ((not callHasRR or isOverextended or not h1CallReady) ? "C" : "A")
+
+    putGrade  = f_capGrade(putBaseGrade, putCapGrade)
+    callGrade = f_capGrade(callBaseGrade, callCapGrade)
+
+    putStatus = not putHasRR ? "NO TRADE (RR)" : (not h1PutReady ? "WAIT REVERSAL" : (isOverextended ? "WAIT PULLBACK" : (f_gradeRank(putGrade) >= 3 ? "ENTRY NOW" : "WAIT PULLBACK")))
+    callStatus = not callHasRR ? "NO TRADE (RR)" : (not h1CallReady ? "WAIT REVERSAL" : (isOverextended ? "WAIT PULLBACK" : (f_gradeRank(callGrade) >= 3 ? "ENTRY NOW" : "WAIT PULLBACK")))
+
+    f_metricRow(row, "Trend score (0-100)", str.tostring(putTrendScore, "#.##"), colBg, str.tostring(callTrendScore, "#.##"), colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Entry score (0-100)", str.tostring(putEntryScore, "#.##"), colBg, str.tostring(callEntryScore, "#.##"), colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Final score (0-100)", str.tostring(putScore, "#.##"), colBg, str.tostring(callScore, "#.##"), colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Confidence", putConfTxt, colBg, callConfTxt, colBg)
     f_applyColVisibility(row)
     row += 1
 
@@ -381,11 +542,25 @@ else
     f_applyColVisibility(row)
     row += 1
 
+    f_metricRow(row, "Status", putStatus, colBg, callStatus, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "1H gate state", h1PutStateTxt, colBg, h1CallStateTxt, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
     f_metricRow(row, "Reaction @ level", putQ1 ? "OK" : "NO", f_statusColor(putQ1, false), callQ1 ? "OK" : "NO", f_statusColor(callQ1, false))
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Structure supports dir", putQ2 ? "YES" : "NO", f_statusColor(putQ2, false), callQ2 ? "YES" : "NO", f_statusColor(callQ2, false))
+    f_metricRow(row, "Structure + trend strength", putQ2 ? "YES" : "NO", f_statusColor(putQ2, false), callQ2 ? "YES" : "NO", f_statusColor(callQ2, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    rrPutTxt  = not na(putRR)  ? str.tostring(putRR, "#.##")  : "-"
+    rrCallTxt = not na(callRR) ? str.tostring(callRR, "#.##") : "-"
+    f_metricRow(row, "RR (SR or 1.5R)", rrPutTxt, f_statusColor(putHasRR, na(putRR)), rrCallTxt, f_statusColor(callHasRR, na(callRR)))
     f_applyColVisibility(row)
     row += 1
 
@@ -399,23 +574,23 @@ else
         f_sectionRow(row, "DETAILS (9 checks)")
         row += 1
 
-        f_checkRow(row, "1) Reaction at key level", w1, putQ1, callQ1, false, false)
+        f_checkRow(row, 1, "1) Reaction at key level", w1, putQ1, callQ1, false, false)
         row += 1
-        f_checkRow(row, "2) Micro-structure confirms", w2, putQ2, callQ2, false, false)
+        f_checkRow(row, 2, "2) Micro-structure + trend strength", w2, putQ2, callQ2, false, false)
         row += 1
-        f_checkRow(row, "3) Invalidation definable", w3, putQ3, callQ3, na(putInvalid), na(callInvalid))
+        f_checkRow(row, 3, "3) Invalidation definable", w3, putQ3, callQ3, na(putInvalid), na(callInvalid))
         row += 1
-        f_checkRow(row, "4) Entry reduces risk (vs HTF)", w4, putQ4, callQ4, false, false)
+        f_checkRow(row, 4, "4) Entry reduces risk (vs HTF)", w4, putQ4, callQ4, false, false)
         row += 1
-        f_checkRow(row, "5) Not extended", w5, putQ5, callQ5, false, false)
+        f_checkRow(row, 5, "5) Not extended", w5, putQ5, callQ5, false, false)
         row += 1
-        f_checkRow(row, "6) Pullback healthy", w6, putQ6, callQ6, false, false)
+        f_checkRow(row, 6, "6) Pullback healthy", w6, putQ6, callQ6, false, false)
         row += 1
-        f_checkRow(row, "7) Volume confirms", w7, putQ7, callQ7, false, false)
+        f_checkRow(row, 7, "7) Volume confirms", w7, putQ7, callQ7, false, false)
         row += 1
-        f_checkRow(row, "8) Momentum not weakening", w8, putQ8, callQ8, false, false)
+        f_checkRow(row, 8, "8) Momentum not weakening", w8, putQ8, callQ8, false, false)
         row += 1
-        f_checkRow(row, "9) Week-type alignment (Daily)", w9, putQ9, callQ9, false, false)
+        f_checkRow(row, 9, "9) Week-type alignment (Daily)", w9, putQ9, callQ9, false, false)
         row += 1
 
         row += 1
@@ -432,6 +607,10 @@ else
         f_applyColVisibility(row)
         row += 1
 
+        f_valueRow(row, "Trend strength (|EMA-SMA|/ATR)", str.tostring(trendStrength, "#.###"), str.tostring(trendStrength, "#.###"))
+        f_applyColVisibility(row)
+        row += 1
+
         srTxt = (na(nearestSupport) ? "-" : str.tostring(nearestSupport, "#.####")) + " / " + (na(nearestResist) ? "-" : str.tostring(nearestResist, "#.####"))
         f_valueRow(row, "Nearest S / R", srTxt, srTxt)
         f_applyColVisibility(row)
@@ -442,6 +621,14 @@ else
         row += 1
 
         f_valueRow(row, "Risk (PUT/CALL)", na(putRisk) ? "-" : str.tostring(putRisk, "#.####"), na(callRisk) ? "-" : str.tostring(callRisk, "#.####"))
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "RR (PUT/CALL)", rrPutTxt, rrCallTxt)
+        f_applyColVisibility(row)
+        row += 1
+
+        f_valueRow(row, "1H gate state", h1PutStateTxt, h1CallStateTxt)
         f_applyColVisibility(row)
         row += 1
 

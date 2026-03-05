@@ -1,5 +1,5 @@
 ﻿//@version=6
-indicator("Market 1D (SPY/QQQ) Options UI Table (PUT/CALL) - Blueprint", overlay=true, max_labels_count=500, max_lines_count=500)
+indicator("Market 1D", overlay=true, max_labels_count=500, max_lines_count=500)
 
 //------------------------------------------------------------------------------
 // Inputs
@@ -91,6 +91,9 @@ f_statusColor(_ok, _na) =>
 f_boolToText(_ok, _na) =>
     _na ? "-" : (_ok ? "YES" : "NO")
 
+f_gateText(_ok, _na, _reason) =>
+    _na ? "-" : (_ok ? "YES" : _reason)
+
 f_grade(_score) =>
     if _score >= gradeA
         "A"
@@ -102,6 +105,22 @@ f_grade(_score) =>
         "D"
 
 f_score(_ok, _w) => _ok ? _w : 0
+
+f_pickSupport(_last, _prev, _px) =>
+    float _s = na
+    if not na(_last) and _last <= _px
+        _s := _last
+    if not na(_prev) and _prev <= _px
+        _s := na(_s) ? _prev : ((_px - _prev) < (_px - _s) ? _prev : _s)
+    _s
+
+f_pickResist(_last, _prev, _px) =>
+    float _r = na
+    if not na(_last) and _last >= _px
+        _r := _last
+    if not na(_prev) and _prev >= _px
+        _r := na(_r) ? _prev : ((_prev - _px) < (_r - _px) ? _prev : _r)
+    _r
 
 f_rollSum(_src, _len) =>
     float _sum = 0.0
@@ -182,8 +201,8 @@ isRange = (adx < adxTrend) and isChop
 regimeTxt = isUnstable ? "VOLATILE" : isTrend ? "TREND" : isRange ? "CHOP" : "MIXED"
 
 // Location health
-nearestSupport = lastPL
-nearestResist  = lastPH
+nearestSupport = f_pickSupport(lastPL, prevPL, close)
+nearestResist  = f_pickResist(lastPH, prevPH, close)
 
 distTo20 = math.abs(close - ema20)
 distTo50 = math.abs(close - sma50)
@@ -228,8 +247,14 @@ putStop  = not na(putInvalid)  ? putInvalid  + stopBufAtr * atr : na
 callRisk = not na(callStop) ? math.abs(close - callStop) : na
 putRisk  = not na(putStop)  ? math.abs(putStop - close) : na
 
-callReward = not na(nearestResist) ? math.max(0.0, nearestResist - close) : na
-putReward  = not na(nearestSupport)? math.max(0.0, close - nearestSupport) : na
+callRewardSr = not na(nearestResist) ? math.max(0.0, nearestResist - close) : na
+putRewardSr  = not na(nearestSupport)? math.max(0.0, close - nearestSupport) : na
+
+callRewardAlt = not na(callRisk) ? (1.5 * callRisk) : na
+putRewardAlt  = not na(putRisk)  ? (1.5 * putRisk)  : na
+
+callReward = not na(callRewardSr) and not na(callRewardAlt) ? math.max(callRewardSr, callRewardAlt) : (not na(callRewardSr) ? callRewardSr : callRewardAlt)
+putReward  = not na(putRewardSr) and not na(putRewardAlt)  ? math.max(putRewardSr, putRewardAlt)   : (not na(putRewardSr)  ? putRewardSr  : putRewardAlt)
 
 callRR = (not na(callRisk) and callRisk > 0 and not na(callReward)) ? (callReward / callRisk) : na
 putRR  = (not na(putRisk)  and putRisk  > 0 and not na(putReward))  ? (putReward  / putRisk)  : na
@@ -360,18 +385,64 @@ f_applyColVisibility(_t, _r) =>
     if not showCall
         f_setCell(_t, _r, COL_CALL, "", color.new(color.black, 100), color.new(color.white, 100))
 
-f_checkRow(_t, _r, _name, _w, _putOk, _callOk, _putNa, _callNa) =>
-    _putTxt = f_boolToText(_putOk, _putNa) + " (" + str.tostring(_w) + ")"
-    _calTxt = f_boolToText(_callOk, _callNa) + " (" + str.tostring(_w) + ")"
+f_failReason(_id, _isPut) =>
+    if _id == 1
+        isUnstable ? "regime volatile" : (isChop ? "chop regime" : "regime not swing")
+    else if _id == 2
+        _isPut ? (not bearBias ? "no bear bias" : "cross-check fail") : (not bullBias ? "no bull bias" : "cross-check fail")
+    else if _id == 3
+        _isPut ? (not bearStructure ? "no bear structure" : "no trend regime") : (not bullStructure ? "no bull structure" : "no trend regime")
+    else if _id == 4
+        isUnstable ? "unstable volatility" : "climax candles"
+    else if _id == 5
+        _isPut ? (rsi > rsiBearCeil ? "RSI too high" : "MACD not bearish") : (rsi < rsiBullFloor ? "RSI too low" : "MACD not bullish")
+    else if _id == 6
+        not volControlled ? "volatility not controlled" : (extended ? "price extended" : "bias neutral")
+    else if _id == 7
+        extended ? "price extended" : (_isPut ? (not (nearMA or nearResist or isCompression) ? "not near level" : "location weak") : (not (nearMA or nearSupport or isCompression) ? "not near level" : "location weak"))
+    else if _id == 8
+        not isTrend ? "no trend regime" : (not volControlled ? "volatility not controlled" : "bias neutral")
+    else if _id == 9
+        _isPut ? ((na(spaceDn) and na(putRR)) ? "no target data" : (not spaceDnOK ? "space too small" : "RR below min")) : ((na(spaceUp) and na(callRR)) ? "no target data" : (not spaceUpOK ? "space too small" : "RR below min"))
+    else
+        lost20Bull or lost20Bear ? "lost EMA20" : ((adx < (adxTrend - 3) and isTrend[10]) ? "trend weakening" : (momFlip ? "momentum flip" : "regime change risk"))
+
+f_checkRow(_t, _r, _id, _name, _w, _putOk, _callOk, _putNa, _callNa) =>
+    _putTxt = f_gateText(_putOk, _putNa, f_failReason(_id, true)) + " (" + str.tostring(_w) + ")"
+    _calTxt = f_gateText(_callOk, _callNa, f_failReason(_id, false)) + " (" + str.tostring(_w) + ")"
     f_metricRow(_t, _r, _name, _putTxt, f_statusColor(_putOk, _putNa), _calTxt, f_statusColor(_callOk, _callNa))
     f_applyColVisibility(_t, _r)
+
+f_updateSrLine(_ln, _y, _col) =>
+    line _out = _ln
+    if na(_y)
+        if not na(_out)
+            line.delete(_out)
+            _out := na
+    else
+        _x1 = bar_index
+        _x2 = bar_index + 3
+        if na(_out)
+            _out := line.new(_x1, _y, _x2, _y, xloc=xloc.bar_index, extend=extend.none, color=_col, width=1)
+        else
+            line.set_xy1(_out, _x1, _y)
+            line.set_xy2(_out, _x2, _y)
+            line.set_color(_out, _col)
+            line.set_width(_out, 1)
+    _out
 
 var table t = table.new(position.top_right, 3, 1, border_width=1)
 maxRows = 40
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
+var line srSupportLine = na
+var line srResistLine = na
+
 render = uiShow and (not onlyOn1D or is1D) and (not onlyOnSPYQQQ or isSPYQQQ)
+
+srSupportLine := f_updateSrLine(srSupportLine, render ? nearestSupport : na, f_c(color.teal))
+srResistLine := f_updateSrLine(srResistLine, render ? nearestResist : na, f_c(color.orange))
 
 if not render
     f_clearTable(t, maxRows)
@@ -422,25 +493,25 @@ else
         f_sectionRow(t, row, "DETAILS (10 checks)")
         row += 1
 
-        f_checkRow(t, row, "1) Market regime supports swing", w1, putQ1, callQ1, false, false)
+        f_checkRow(t, row, 1, "1) Market regime supports swing", w1, putQ1, callQ1, false, false)
         row += 1
-        f_checkRow(t, row, "2) Direction / bias is clear", w2, putQ2, callQ2, false, false)
+        f_checkRow(t, row, 2, "2) Direction / bias is clear", w2, putQ2, callQ2, false, false)
         row += 1
-        f_checkRow(t, row, "3) Structure supports multi-day", w3, putQ3, callQ3, false, false)
+        f_checkRow(t, row, 3, "3) Structure supports multi-day", w3, putQ3, callQ3, false, false)
         row += 1
-        f_checkRow(t, row, "4) Volatility controlled", w4, putQ4, callQ4, false, false)
+        f_checkRow(t, row, 4, "4) Volatility controlled", w4, putQ4, callQ4, false, false)
         row += 1
-        f_checkRow(t, row, "5) Momentum supports direction", w5, putQ5, callQ5, false, false)
+        f_checkRow(t, row, 5, "5) Momentum supports direction", w5, putQ5, callQ5, false, false)
         row += 1
-        f_checkRow(t, row, "6) Overnight permission", w6, putQ6, callQ6, false, false)
+        f_checkRow(t, row, 6, "6) Overnight permission", w6, putQ6, callQ6, false, false)
         row += 1
-        f_checkRow(t, row, "7) Location is healthy", w7, putQ7, callQ7, false, false)
+        f_checkRow(t, row, 7, "7) Location is healthy", w7, putQ7, callQ7, false, false)
         row += 1
-        f_checkRow(t, row, "8) Index supports RS/RW stocks", w8, putQ8, callQ8, false, false)
+        f_checkRow(t, row, 8, "8) Index supports RS/RW stocks", w8, putQ8, callQ8, false, false)
         row += 1
-        f_checkRow(t, row, "9) Reward realistic (space/RR)", w9, putQ9, callQ9, (na(spaceDn) and na(putRR)), (na(spaceUp) and na(callRR)))
+        f_checkRow(t, row, 9, "9) Reward realistic (space/RR)", w9, putQ9, callQ9, (na(spaceDn) and na(putRR)), (na(spaceUp) and na(callRR)))
         row += 1
-        f_checkRow(t, row, "10) No regime change warning", w10, putQ10, callQ10, false, false)
+        f_checkRow(t, row, 10, "10) No regime change warning", w10, putQ10, callQ10, false, false)
         row += 1
 
         row += 1
