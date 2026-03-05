@@ -49,9 +49,14 @@ minRR = input.float(1.5, "Minimum RR", minval=0.5, step=0.25, group=groupFilters
 rsiLen = input.int(14, "RSI length", minval=1, group=groupFilters)
 rsiMid = input.float(50.0, "RSI mid", minval=1, maxval=99, step=1, group=groupFilters)
 
+groupEntry = "Entry calibration (15m)"
+entryTrendMin = input.float(58.0, "ENTRY: min Trend score", minval=0, maxval=100, step=1, group=groupEntry)
+entryScoreMin = input.float(62.0, "ENTRY: min Entry score", minval=0, maxval=100, step=1, group=groupEntry)
+h1MacdNearZeroPct = input.float(0.0005, "1H gate: MACD near zero (% price)", minval=0.0, step=0.0001, group=groupEntry)
+
 groupGrading = "Grading"
-gradeA = input.int(80, "Grade A threshold", minval=0, maxval=100, group=groupGrading)
-gradeB = input.int(65, "Grade B threshold", minval=0, maxval=100, group=groupGrading)
+gradeA = input.int(75, "Grade A threshold", minval=0, maxval=100, group=groupGrading)
+gradeB = input.int(60, "Grade B threshold", minval=0, maxval=100, group=groupGrading)
 gradeC = input.int(50, "Grade C threshold", minval=0, maxval=100, group=groupGrading)
 
 //------------------------------------------------------------------------------
@@ -174,8 +179,22 @@ if not na(pl)
 bullMicro = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH > prevPH and lastPL > prevPL
 bearMicro = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH < prevPH and lastPL < prevPL
 
-nearestSupport = f_pickSupport(lastPL, prevPL, close)
-nearestResist  = f_pickResist(lastPH, prevPH, close)
+// Multi-horizon fallback when local pivots are missing: W -> M -> 12M -> ATR proxy.
+pivotSupport = f_pickSupport(lastPL, prevPL, close)
+pivotResist  = f_pickResist(lastPH, prevPH, close)
+
+wkLow  = request.security(syminfo.tickerid, "W", low[1])
+wkHigh = request.security(syminfo.tickerid, "W", high[1])
+moLow  = request.security(syminfo.tickerid, "M", low[1])
+moHigh = request.security(syminfo.tickerid, "M", high[1])
+yrLow  = request.security(syminfo.tickerid, "12M", low[1])
+yrHigh = request.security(syminfo.tickerid, "12M", high[1])
+
+fallbackSupport = not na(wkLow) ? wkLow : (not na(moLow) ? moLow : (not na(yrLow) ? yrLow : na))
+fallbackResist  = not na(wkHigh) ? wkHigh : (not na(moHigh) ? moHigh : (not na(yrHigh) ? yrHigh : na))
+
+nearestSupport = not na(pivotSupport) ? pivotSupport : (not na(fallbackSupport) ? fallbackSupport : (not na(atr) ? close - 2.0 * atr : low))
+nearestResist  = not na(pivotResist)  ? pivotResist  : (not na(fallbackResist)  ? fallbackResist  : (not na(atr) ? close + 2.0 * atr : high))
 
 distS = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
 distR = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
@@ -308,11 +327,17 @@ h1Close = request.security(syminfo.tickerid, "60", close[1])
 h1Ema20 = request.security(syminfo.tickerid, "60", ta.ema(close, 20)[1])
 h1Rsi = request.security(syminfo.tickerid, "60", ta.rsi(close, rsiLen)[1])
 h1MacdHist = request.security(syminfo.tickerid, "60", f_macdHist()[1])
+h1MacdHistPrev = request.security(syminfo.tickerid, "60", f_macdHist()[2])
 h1BullCtx = request.security(syminfo.tickerid, "60", close[1] > ta.ema(close, 50)[1])
 h1BearCtx = request.security(syminfo.tickerid, "60", close[1] < ta.ema(close, 50)[1])
 
-h1CallReady = h1BullCtx and h1Close >= h1Ema20 and h1Rsi >= rsiMid and h1MacdHist >= 0
-h1PutReady  = h1BearCtx and h1Close <= h1Ema20 and h1Rsi <= rsiMid and h1MacdHist <= 0
+h1MacdNearZeroAbs = h1Close * h1MacdNearZeroPct
+h1MacdNearZero = math.abs(h1MacdHist) <= h1MacdNearZeroAbs
+h1CallMomentumOk = (h1Rsi >= rsiMid) or (h1MacdHist >= h1MacdHistPrev) or h1MacdNearZero
+h1PutMomentumOk  = (h1Rsi <= rsiMid) or (h1MacdHist <= h1MacdHistPrev) or h1MacdNearZero
+
+h1CallReady = h1BullCtx and h1Close >= h1Ema20 and h1CallMomentumOk
+h1PutReady  = h1BearCtx and h1Close <= h1Ema20 and h1PutMomentumOk
 
 h1CallStateTxt = h1CallReady ? "READY" : (h1BullCtx ? "PULLBACK" : "NEUTRAL")
 h1PutStateTxt  = h1PutReady  ? "READY" : (h1BearCtx ? "PULLBACK" : "NEUTRAL")
@@ -384,6 +409,9 @@ putTrendScore  = trendW > 0 ? 100.0 * putTrendRaw  / trendW : 0.0
 
 callEntryScore = entryW > 0 ? 100.0 * callEntryRaw / entryW : 0.0
 putEntryScore  = entryW > 0 ? 100.0 * putEntryRaw  / entryW : 0.0
+
+callEntryReady = callEntryScore >= entryScoreMin and callTrendScore >= entryTrendMin
+putEntryReady  = putEntryScore  >= entryScoreMin and putTrendScore  >= entryTrendMin
 
 callScore = math.min(callTrendScore, callEntryScore)
 putScore  = math.min(putTrendScore, putEntryScore)
@@ -519,8 +547,8 @@ else
     putGrade  = f_capGrade(putBaseGrade, putCapGrade)
     callGrade = f_capGrade(callBaseGrade, callCapGrade)
 
-    putStatus = not putHasRR ? "NO TRADE (RR)" : (not h1PutReady ? "WAIT REVERSAL" : (isOverextended ? "WAIT PULLBACK" : (f_gradeRank(putGrade) >= 3 ? "ENTRY NOW" : "WAIT PULLBACK")))
-    callStatus = not callHasRR ? "NO TRADE (RR)" : (not h1CallReady ? "WAIT REVERSAL" : (isOverextended ? "WAIT PULLBACK" : (f_gradeRank(callGrade) >= 3 ? "ENTRY NOW" : "WAIT PULLBACK")))
+    putStatus = not putHasRR ? "NO TRADE (RR)" : (not h1PutReady ? "WAIT REVERSAL" : (isOverextended ? "WAIT PULLBACK" : (putEntryReady ? "ENTRY NOW" : "SETUP DEVELOPING")))
+    callStatus = not callHasRR ? "NO TRADE (RR)" : (not h1CallReady ? "WAIT REVERSAL" : (isOverextended ? "WAIT PULLBACK" : (callEntryReady ? "ENTRY NOW" : "SETUP DEVELOPING")))
 
     f_metricRow(row, "Trend score (0-100)", str.tostring(putTrendScore, "#.##"), colBg, str.tostring(callTrendScore, "#.##"), colBg)
     f_applyColVisibility(row)
@@ -550,11 +578,11 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Reaction @ level", putQ1 ? "OK" : "NO", f_statusColor(putQ1, false), callQ1 ? "OK" : "NO", f_statusColor(callQ1, false))
+    f_metricRow(row, "Reaction @ level", putQ1 ? "OK" : f_failReason(1, true), f_statusColor(putQ1, false), callQ1 ? "OK" : f_failReason(1, false), f_statusColor(callQ1, false))
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Structure + trend strength", putQ2 ? "YES" : "NO", f_statusColor(putQ2, false), callQ2 ? "YES" : "NO", f_statusColor(callQ2, false))
+    f_metricRow(row, "Structure + trend strength", putQ2 ? "YES" : f_failReason(2, true), f_statusColor(putQ2, false), callQ2 ? "YES" : f_failReason(2, false), f_statusColor(callQ2, false))
     f_applyColVisibility(row)
     row += 1
 

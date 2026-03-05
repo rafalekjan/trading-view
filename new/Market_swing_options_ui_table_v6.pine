@@ -200,9 +200,22 @@ isTrend = adx >= adxTrend and not isChop and not isUnstable
 isRange = (adx < adxTrend) and isChop
 regimeTxt = isUnstable ? "VOLATILE" : isTrend ? "TREND" : isRange ? "CHOP" : "MIXED"
 
-// Location health
-nearestSupport = f_pickSupport(lastPL, prevPL, close)
-nearestResist  = f_pickResist(lastPH, prevPH, close)
+// Location health with fallback: W -> M -> 12M -> ATR proxy.
+pivotSupport = f_pickSupport(lastPL, prevPL, close)
+pivotResist  = f_pickResist(lastPH, prevPH, close)
+
+wkLow  = request.security(syminfo.tickerid, "W", low[1])
+wkHigh = request.security(syminfo.tickerid, "W", high[1])
+moLow  = request.security(syminfo.tickerid, "M", low[1])
+moHigh = request.security(syminfo.tickerid, "M", high[1])
+yrLow  = request.security(syminfo.tickerid, "12M", low[1])
+yrHigh = request.security(syminfo.tickerid, "12M", high[1])
+
+fallbackSupport = not na(wkLow) ? wkLow : (not na(moLow) ? moLow : (not na(yrLow) ? yrLow : na))
+fallbackResist  = not na(wkHigh) ? wkHigh : (not na(moHigh) ? moHigh : (not na(yrHigh) ? yrHigh : na))
+
+nearestSupport = not na(pivotSupport) ? pivotSupport : (not na(fallbackSupport) ? fallbackSupport : (not na(atr) ? close - 2.0 * atr : low))
+nearestResist  = not na(pivotResist)  ? pivotResist  : (not na(fallbackResist)  ? fallbackResist  : (not na(atr) ? close + 2.0 * atr : high))
 
 distTo20 = math.abs(close - ema20)
 distTo50 = math.abs(close - sma50)

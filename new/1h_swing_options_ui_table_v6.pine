@@ -184,9 +184,22 @@ overlap = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1]))
 overlapRatio = (rng > 0 and prevRng > 0) ? (overlap / math.min(rng, prevRng)) : na
 isChaos = not na(overlapRatio) and overlapRatio > chaosOverlapThresh and isRange
 
-// Key levels: use last pivot for nearest "structure level"
-nearestSupport = f_pickSupport(lastPL, prevPL, close)
-nearestResist  = f_pickResist(lastPH, prevPH, close)
+// Key levels with fallback when local pivots are missing: W -> M -> 12M -> ATR proxy.
+pivotSupport = f_pickSupport(lastPL, prevPL, close)
+pivotResist  = f_pickResist(lastPH, prevPH, close)
+
+wkLow  = request.security(syminfo.tickerid, "W", low[1])
+wkHigh = request.security(syminfo.tickerid, "W", high[1])
+moLow  = request.security(syminfo.tickerid, "M", low[1])
+moHigh = request.security(syminfo.tickerid, "M", high[1])
+yrLow  = request.security(syminfo.tickerid, "12M", low[1])
+yrHigh = request.security(syminfo.tickerid, "12M", high[1])
+
+fallbackSupport = not na(wkLow) ? wkLow : (not na(moLow) ? moLow : (not na(yrLow) ? yrLow : na))
+fallbackResist  = not na(wkHigh) ? wkHigh : (not na(moHigh) ? moHigh : (not na(yrHigh) ? yrHigh : na))
+
+nearestSupport = not na(pivotSupport) ? pivotSupport : (not na(fallbackSupport) ? fallbackSupport : (not na(atr) ? close - 2.0 * atr : low))
+nearestResist  = not na(pivotResist)  ? pivotResist  : (not na(fallbackResist)  ? fallbackResist  : (not na(atr) ? close + 2.0 * atr : high))
 
 distToSupport = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
 distToResist  = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
@@ -611,8 +624,8 @@ else
     // Quick context (no details)
     structTxt = bullStructure ? "TREND UP" : bearStructure ? "TREND DOWN" : isRange ? "RANGE" : "MIXED"
 
-    locPut  = putLocationOk  ? "OK" : "NO"
-    locCall = callLocationOk ? "OK" : "NO"
+    locPut  = putLocationOk  ? "OK" : f_failReason(2, true)
+    locCall = callLocationOk ? "OK" : f_failReason(2, false)
 
     f_metricRow(row, "Structure (proxy)", structTxt, colBg, structTxt, colBg)
     f_applyColVisibility(row)

@@ -207,9 +207,22 @@ stdev50 = ta.stdev(close, 50)
 volatilitySpike = stdev10 > 1.5 * stdev50
 unstableNow = trSpike or volatilitySpike
 
-// Nearest structure levels
-nearestSupport = f_pickSupport(lastPL, prevPL, close)
-nearestResist  = f_pickResist(lastPH, prevPH, close)
+// Nearest structure levels with fallback: W -> M -> 12M -> ATR proxy.
+pivotSupport = f_pickSupport(lastPL, prevPL, close)
+pivotResist  = f_pickResist(lastPH, prevPH, close)
+
+wkLow  = request.security(syminfo.tickerid, "W", low[1])
+wkHigh = request.security(syminfo.tickerid, "W", high[1])
+moLow  = request.security(syminfo.tickerid, "M", low[1])
+moHigh = request.security(syminfo.tickerid, "M", high[1])
+yrLow  = request.security(syminfo.tickerid, "12M", low[1])
+yrHigh = request.security(syminfo.tickerid, "12M", high[1])
+
+fallbackSupport = not na(wkLow) ? wkLow : (not na(moLow) ? moLow : (not na(yrLow) ? yrLow : na))
+fallbackResist  = not na(wkHigh) ? wkHigh : (not na(moHigh) ? moHigh : (not na(yrHigh) ? yrHigh : na))
+
+nearestSupport = not na(pivotSupport) ? pivotSupport : (not na(fallbackSupport) ? fallbackSupport : (not na(atr) ? close - 2.0 * atr : low))
+nearestResist  = not na(pivotResist)  ? pivotResist  : (not na(fallbackResist)  ? fallbackResist  : (not na(atr) ? close + 2.0 * atr : high))
 
 distToSupport = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
 distToResist  = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
@@ -630,8 +643,8 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    rsTxtPut  = putRSOk  ? "RW" : "NO"
-    rsTxtCall = callRSOk ? "RS" : "NO"
+    rsTxtPut  = putRSOk  ? "RW" : f_failReason(1, true)
+    rsTxtCall = callRSOk ? "RS" : f_failReason(1, false)
     f_metricRow(row, "RS/RW vs " + benchSymbol, rsTxtPut, f_statusColor(putRSOk, false), rsTxtCall, f_statusColor(callRSOk, false))
     f_applyColVisibility(row)
     row += 1
@@ -642,8 +655,8 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    locPut  = putLocationOk and not extended ? "OK" : "NO"
-    locCall = callLocationOk and not extended ? "OK" : "NO"
+    locPut  = putLocationOk and not extended ? "OK" : f_failReason(14, true)
+    locCall = callLocationOk and not extended ? "OK" : f_failReason(14, false)
     f_metricRow(row, "Location (near structure/MA)", locPut, f_statusColor(locPut=="OK", false), locCall, f_statusColor(locCall=="OK", false))
     f_applyColVisibility(row)
     row += 1
@@ -726,4 +739,3 @@ else
         for r = row to maxRows - 1
             for c = 0 to 2
                 f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
-
