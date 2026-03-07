@@ -139,6 +139,8 @@ f_rollSum(_src, _len) =>
 // Data (4H)
 //------------------------------------------------------------------------------
 atr = ta.atr(atrLen)
+atrAvg50 = ta.sma(atr, 50)
+atrRatio = atrAvg50 > 0 ? atr / atrAvg50 : na
 rsi = ta.rsi(close, rsiLen)
 [macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
 volSma = ta.sma(volume, volLen)
@@ -651,16 +653,18 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    // LOCATION
-    f_sectionRow(row, "LOCATION")
+    // LOCATION / KEY LEVELS
+    f_sectionRow(row, "LOCATION / KEY LEVELS")
     f_applyColVisibility(row)
     row += 1
 
     putLocBand = locAtStructure ? "AT STRUCTURE" : (locNearStructure ? "NEAR STRUCTURE" : "EXTENDED")
     callLocBand = locAtStructure ? "AT STRUCTURE" : (locNearStructure ? "NEAR STRUCTURE" : "EXTENDED")
-    locPut  = putLocationOk ? putLocBand : f_failReason(14, true)
-    locCall = callLocationOk ? callLocBand : f_failReason(14, false)
-    f_metricRow(row, "Location (structure distance)", locPut, f_statusColor(putLocationOk, false), locCall, f_statusColor(callLocationOk, false))
+    putLocKeyOk = putLocationOk and putKeyLvlsOk
+    callLocKeyOk = callLocationOk and callKeyLvlsOk
+    locPut  = putLocKeyOk ? putLocBand : (not putLocationOk ? f_failReason(14, true) : f_failReason(8, true))
+    locCall = callLocKeyOk ? callLocBand : (not callLocationOk ? f_failReason(14, false) : f_failReason(8, false))
+    f_metricRow(row, "Location / key levels", locPut, f_statusColor(putLocKeyOk, false), locCall, f_statusColor(callLocKeyOk, false))
     f_applyColVisibility(row)
     row += 1
 
@@ -694,6 +698,13 @@ else
     f_applyColVisibility(row)
     row += 1
 
+    volCtxTxt = na(atrRatio) ? "N/A" : (atrRatio > 1.2 ? "EXPANDING" : (atrRatio < 0.8 ? "LOW" : "NORMAL"))
+    volCtxCol = na(atrRatio) ? colNA : (atrRatio > 1.2 ? colOk : (atrRatio < 0.8 ? colNA : colBg))
+    volCtxDisplay = na(atrRatio) ? volCtxTxt : (volCtxTxt + " (" + str.tostring(atrRatio, "#.##") + "x)")
+    f_metricRow(row, "Volatility context", volCtxDisplay, volCtxCol, volCtxDisplay, volCtxCol)
+    f_applyColVisibility(row)
+    row += 1
+
     volBehaviorTxt = volStrong ? "STRONG" : (volWeak ? "WEAK" : "NORMAL")
     volBehaviorCol = volStrong ? colOk : (volWeak ? colBad : colNA)
     f_metricRow(row, "Volume behaviour", volBehaviorTxt, volBehaviorCol, volBehaviorTxt, volBehaviorCol)
@@ -713,7 +724,14 @@ else
 
         f_checkRow(row, 2, "1) Level reaction (soft)", w2, putQ2, callQ2, false, false)
         row += 1
-        f_checkRow(row, 14, "2) Location at key area", w14, putQ14, callQ14, false, false)
+        putLocKeyCheck = putQ14 and putQ8
+        callLocKeyCheck = callQ14 and callQ8
+        putLocKeyReason = not putQ14 ? f_failReason(14, true) : f_failReason(8, true)
+        callLocKeyReason = not callQ14 ? f_failReason(14, false) : f_failReason(8, false)
+        putLocKeyTxt = f_gateText(putLocKeyCheck, false, putLocKeyReason) + " (" + str.tostring(w14 + w8) + ")"
+        callLocKeyTxt = f_gateText(callLocKeyCheck, false, callLocKeyReason) + " (" + str.tostring(w14 + w8) + ")"
+        f_metricRow(row, "2) Location / key levels", putLocKeyTxt, f_statusColor(putLocKeyCheck, false), callLocKeyTxt, f_statusColor(callLocKeyCheck, false))
+        f_applyColVisibility(row)
         row += 1
         f_checkRow(row, 7, "3) Structure quality (not chop)", w7, putQ7, callQ7, false, false)
         row += 1
@@ -725,8 +743,6 @@ else
         row += 1
         f_checkRow(row, 10, "7) Reward justified (RR>=min)", w10, putQ10, callQ10, na(putRR), na(callRR))
         row += 1
-        f_checkRow(row, 8, "8) Key levels context", w8, putQ8, callQ8, false, false)
-        row += 1
 
     // OPTIONAL DEBUG (collapsed by default)
     if uiShowDebug
@@ -736,6 +752,11 @@ else
         row += 1
 
         f_valueRow(row, "ATR / TR", str.tostring(atr, "#.####") + " / " + str.tostring(tr, "#.####"), str.tostring(atr, "#.####") + " / " + str.tostring(tr, "#.####"))
+        f_applyColVisibility(row)
+        row += 1
+
+        atrRatioTxt = na(atrRatio) ? "N/A" : str.tostring(atrRatio, "#.##") + "x"
+        f_valueRow(row, "ATR ratio (14/50)", atrRatioTxt, atrRatioTxt)
         f_applyColVisibility(row)
         row += 1
 

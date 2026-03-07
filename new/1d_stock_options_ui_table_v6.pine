@@ -8,6 +8,7 @@ groupUI   = "UI"
 uiShow    = input.bool(true, "Show table", group=groupUI)
 uiOpacity = input.int(10, "Table visibility (0=solid, 100=invisible)", minval=0, maxval=100, group=groupUI)
 uiShowDetails = input.bool(true, "Show DETAILS section", group=groupUI)
+uiShowSoftContext = input.bool(false, "Show soft context in DETAILS (debug)", group=groupUI)
 uiTextSize = input.string("small", "Text size", options=["tiny","small","normal","large"], group=groupUI)
 uiShowHintWhenNot1D = input.bool(false, "Show hint when not on 1D / excluded ticker", group=groupUI)
 
@@ -30,7 +31,9 @@ pivLen = input.int(5, "Pivot length (swing points)", minval=2, maxval=20, group=
 groupFilters = "Filters / Thresholds"
 atrLen = input.int(14, "ATR length", minval=1, group=groupFilters)
 stopBufAtr = input.float(0.25, "Stop buffer (x ATR) beyond invalidation", minval=0.0, step=0.05, group=groupFilters)
-atrLocMult = input.float(1.0, "Location: 'near level' within x ATR", minval=0.2, step=0.1, group=groupFilters)
+locAtAtr = input.float(0.5, "Location: AT level <= x ATR", minval=0.1, step=0.1, group=groupFilters)
+atrLocMult = input.float(1.0, "Location: NEAR level <= x ATR", minval=0.2, step=0.1, group=groupFilters)
+locExtendedAtr = input.float(1.8, "Location: EXTENDED above x ATR", minval=1.0, step=0.1, group=groupFilters)
 minRR = input.float(2.0, "Minimum RR", minval=0.5, step=0.25, group=groupFilters)
 minSpaceAtr = input.float(2.0, "Space: next obstacle distance >= x ATR", minval=0.5, step=0.25, group=groupFilters)
 adxLen = input.int(14, "ADX length", minval=3, group=groupFilters)
@@ -91,6 +94,25 @@ f_grade(_score) =>
     else
         "D"
 
+f_gradeRank(_g) =>
+    _g == "A" ? 4 : _g == "B" ? 3 : _g == "C" ? 2 : 1
+
+f_gradeFromRank(_r) =>
+    _r >= 4 ? "A" : _r == 3 ? "B" : _r == 2 ? "C" : "D"
+
+f_capGrade(_base, _cap) =>
+    f_gradeFromRank(math.min(f_gradeRank(_base), f_gradeRank(_cap)))
+
+f_capScoreByGrade(_score, _cap) =>
+    if _cap == "A"
+        _score
+    else if _cap == "B"
+        math.min(_score, gradeA - 0.01)
+    else if _cap == "C"
+        math.min(_score, gradeB - 0.01)
+    else
+        math.min(_score, gradeC - 0.01)
+
 f_score(_ok, _w) => _ok ? _w : 0
 
 f_pickSupport(_last, _prev, _px) =>
@@ -108,6 +130,24 @@ f_pickResist(_last, _prev, _px) =>
     if not na(_prev) and _prev >= _px
         _r := na(_r) ? _prev : ((_prev - _px) < (_r - _px) ? _prev : _r)
     _r
+
+f_locState(_distAtr) =>
+    if na(_distAtr)
+        "MID"
+    else if _distAtr <= locAtAtr
+        "AT LEVEL"
+    else if _distAtr <= atrLocMult
+        "NEAR LEVEL"
+    else if _distAtr <= locExtendedAtr
+        "MID"
+    else
+        "EXTENDED"
+
+f_locValid(_state) =>
+    _state == "AT LEVEL" or _state == "NEAR LEVEL"
+
+f_locDisplay(_state) =>
+    (_state == "AT LEVEL" or _state == "NEAR LEVEL") ? _state : "MID / EXTENDED"
 
 //------------------------------------------------------------------------------
 // Symbol gating (Stock 1D only; exclude SPY/QQQ)
@@ -128,8 +168,12 @@ sma200 = ta.sma(close, ma200Len)
 
 // Benchmark relative strength (ratio slope on 1D)
 benchClose = request.security(benchSymbol, timeframe.period, close)
-rs = close / benchClose
+rs = benchClose > 0 ? close / benchClose : na
 rsSlope = ta.linreg(rs, rsLen, 0) - ta.linreg(rs, rsLen, 1)
+benchEma20 = request.security(benchSymbol, timeframe.period, ta.ema(close, 20))
+benchEma50 = request.security(benchSymbol, timeframe.period, ta.ema(close, 50))
+marketBull = benchEma20 > benchEma50
+marketBear = benchEma20 < benchEma50
 
 // Pivots for structure
 ph = ta.pivothigh(high, pivLen, pivLen)
@@ -150,7 +194,11 @@ if not na(pl)
 
 bullStructure = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH > prevPH and lastPL > prevPL
 bearStructure = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and lastPH < prevPH and lastPL < prevPL
-structureClear = bullStructure or bearStructure or (adx < (adxTrend - 2))
+isRange = adx < (adxTrend - 2)
+structureTrendUp = bullStructure
+structureTrendDown = bearStructure
+structureDirectional = structureTrendUp or structureTrendDown
+structureRange = isRange and not structureDirectional
 
 // Chaos / cleanliness proxies
 rng = high - low
@@ -160,7 +208,10 @@ overlapRatio = (rng > 0 and prevRng > 0) ? (overlap / math.min(rng, prevRng)) : 
 isChaos = not na(overlapRatio) and overlapRatio > chaosOverlapThresh and adx < (adxTrend - 2)
 
 trSpike = tr >= unstableTrAtr * atr
-cleanChart = not isChaos and not trSpike
+structureChaos = isChaos or trSpike
+cleanChart = not structureChaos
+structureClear = structureDirectional and not structureChaos
+structureUsable = (structureDirectional or structureRange) and not structureChaos
 
 // Nearest structure levels with fallback: W -> M -> 12M -> ATR proxy.
 pivotSupport = f_pickSupport(lastPL, prevPL, close)
@@ -189,11 +240,83 @@ nearResist  = not na(distToResist)  and distToResist  <= atrLocMult * atr
 distTo20  = math.abs(close - ema20)
 distTo50  = math.abs(close - sma50)
 distTo200 = math.abs(close - sma200)
-nearMA = (distTo20 <= atrLocMult * atr) or (distTo50 <= atrLocMult * atr) or (distTo200 <= atrLocMult * atr)
+distTo20Atr  = atr > 0 ? (distTo20 / atr) : na
+distTo50Atr  = atr > 0 ? (distTo50 / atr) : na
+distTo200Atr = atr > 0 ? (distTo200 / atr) : na
 
-// Location labels (proxy)
-isMiddle = (not nearSupport) and (not nearResist) and (not nearMA)
-extended = isMiddle and (math.abs(close - ema20) > 2.0 * atr)
+// Side-specific location anchor (Daily context), priority-based (not nearest-only):
+// support/resistance -> EMA20/SMA50 -> SMA200.
+callDistSupportAtr = atr > 0 and not na(distToSupport) ? (distToSupport / atr) : na
+putDistResistAtr   = atr > 0 and not na(distToResist)  ? (distToResist  / atr) : na
+
+callNearSupport = not na(callDistSupportAtr) and callDistSupportAtr <= atrLocMult
+callNearEMA20 = bullStructure and not na(distTo20Atr) and distTo20Atr <= atrLocMult
+callNearSMA50 = bullStructure and not na(distTo50Atr) and distTo50Atr <= atrLocMult
+callNearSMA200 = not na(distTo200Atr) and distTo200Atr <= atrLocMult
+
+callLocationAnchor = "NONE"
+float callAnchorDistAtr = na
+if callNearSupport
+    callLocationAnchor := "SUPPORT"
+    callAnchorDistAtr := callDistSupportAtr
+else if callNearEMA20
+    callLocationAnchor := "EMA20"
+    callAnchorDistAtr := distTo20Atr
+else if callNearSMA50
+    callLocationAnchor := "SMA50"
+    callAnchorDistAtr := distTo50Atr
+else if callNearSMA200
+    callLocationAnchor := "SMA200"
+    callAnchorDistAtr := distTo200Atr
+else if not na(callDistSupportAtr)
+    callLocationAnchor := "SUPPORT"
+    callAnchorDistAtr := callDistSupportAtr
+else if bullStructure and not na(distTo20Atr)
+    callLocationAnchor := "EMA20"
+    callAnchorDistAtr := distTo20Atr
+else if bullStructure and not na(distTo50Atr)
+    callLocationAnchor := "SMA50"
+    callAnchorDistAtr := distTo50Atr
+else if not na(distTo200Atr)
+    callLocationAnchor := "SMA200"
+    callAnchorDistAtr := distTo200Atr
+
+putNearResist = not na(putDistResistAtr) and putDistResistAtr <= atrLocMult
+putNearEMA20 = bearStructure and not na(distTo20Atr) and distTo20Atr <= atrLocMult
+putNearSMA50 = bearStructure and not na(distTo50Atr) and distTo50Atr <= atrLocMult
+putNearSMA200 = not na(distTo200Atr) and distTo200Atr <= atrLocMult
+
+putLocationAnchor = "NONE"
+float putAnchorDistAtr = na
+if putNearResist
+    putLocationAnchor := "RESISTANCE"
+    putAnchorDistAtr := putDistResistAtr
+else if putNearEMA20
+    putLocationAnchor := "EMA20"
+    putAnchorDistAtr := distTo20Atr
+else if putNearSMA50
+    putLocationAnchor := "SMA50"
+    putAnchorDistAtr := distTo50Atr
+else if putNearSMA200
+    putLocationAnchor := "SMA200"
+    putAnchorDistAtr := distTo200Atr
+else if not na(putDistResistAtr)
+    putLocationAnchor := "RESISTANCE"
+    putAnchorDistAtr := putDistResistAtr
+else if bearStructure and not na(distTo20Atr)
+    putLocationAnchor := "EMA20"
+    putAnchorDistAtr := distTo20Atr
+else if bearStructure and not na(distTo50Atr)
+    putLocationAnchor := "SMA50"
+    putAnchorDistAtr := distTo50Atr
+else if not na(distTo200Atr)
+    putLocationAnchor := "SMA200"
+    putAnchorDistAtr := distTo200Atr
+
+callLocationState = f_locState(callAnchorDistAtr)
+putLocationState = f_locState(putAnchorDistAtr)
+
+isMiddle = callLocationState == "MID" and putLocationState == "MID"
 
 // Invalidation (structural)
 callInvalid = nearestSupport
@@ -235,15 +358,15 @@ trendRegime = adx >= adxTrend and cleanChart
 callFollow = trendRegime and (close >= sma50) and (ema20 >= ema20[5])
 putFollow  = trendRegime and (close <= sma50) and (ema20 <= ema20[5])
 
-// "One sentence" proxy: structure clear + clean + not middle-of-nowhere
-oneSentence = structureClear and cleanChart and not isMiddle
+// "One sentence" proxy: structure usable + clean + not middle-of-nowhere
+oneSentence = structureUsable and cleanChart and not isMiddle
 
 // Execution / tradeable look proxy: not chaotic + not TR spike + volume exists
 tradeable = cleanChart and volume > 0
 
-// Location correctness for direction (simple)
-callLocationOk = (nearSupport or nearMA) and not extended
-putLocationOk  = (nearResist or nearMA) and not extended
+// Location validity for Daily: entry-side anchor + distance class.
+callLocationOk = f_locValid(callLocationState) and not nearResist
+putLocationOk  = f_locValid(putLocationState) and not nearSupport
 
 // RS/RW for direction
 callRSOk = rsSlope > 0
@@ -253,24 +376,41 @@ putRSOk  = rsSlope < 0
 callAB = callLocationOk and riskRealisticCall and callHasRR and cleanChart
 putAB  = putLocationOk  and riskRealisticPut  and putHasRR  and cleanChart
 
+// Daily bias/context engine (ModMark-style): direction + market + edge.
+callMarketAligned = marketBull
+putMarketAligned  = marketBear
+
+callDirectionOk = structureClear and bullStructure and callRSOk and callMarketAligned
+putDirectionOk  = structureClear and bearStructure and putRSOk and putMarketAligned
+
+callRiskDefined = not na(callInvalid) and not na(callStop) and riskRealisticCall
+putRiskDefined  = not na(putInvalid)  and not na(putStop)  and riskRealisticPut
+
+callRewardDefined = callHasRR and callSpaceOK
+putRewardDefined  = putHasRR  and putSpaceOK
+
+callDailyCandidate = callDirectionOk and callLocationOk and callRiskDefined and callRewardDefined
+putDailyCandidate  = putDirectionOk  and putLocationOk  and putRiskDefined  and putRewardDefined
+
+callNoTradeDaily = structureChaos or (structureDirectional and not callDirectionOk) or (not callRiskDefined) or (not callHasRR)
+putNoTradeDaily  = structureChaos or (structureDirectional and not putDirectionOk) or (not putRiskDefined) or (not putHasRR)
+
 //------------------------------------------------------------------------------
-// Scoring weights (sum = 100) from the provided 1D file
-// 1 Structure 20
-// 2 Clean 10
-// 3 Location 15
-// 4 Invalidation 15
+// Core Daily scoring weights (sum = 100).
+// Daily stays bias/context-first; follow-through/clarity/A-B remain soft context.
+// 1 Structure usable 24
+// 2 Clean chart 12
+// 3 Location acceptable 18
+// 4 Invalidation exists 16
 // 5 Space to obstacle 15
-// 6 RR >= 2:1 10
-// 7 RS/RW 5
-// 8 Follow-through 5
-// 9 One sentence 3
-// 10 A/B quality 2
+// 6 RR >= min 10
+// 7 RS/RW vs benchmark 5
 //------------------------------------------------------------------------------
-w1=20, w2=10, w3=15, w4=15, w5=15, w6=10, w7=5, w8=5, w9=3, w10=2
+w1=24, w2=12, w3=18, w4=16, w5=15, w6=10, w7=5, w8=0, w9=0, w10=0
 
 // Conditions by direction
-callQ1 = structureClear
-putQ1  = structureClear
+callQ1 = structureUsable
+putQ1  = structureUsable
 
 callQ2 = cleanChart
 putQ2  = cleanChart
@@ -306,9 +446,6 @@ callScore := callScore + f_score(callQ4, w4)
 callScore := callScore + f_score(callQ5, w5)
 callScore := callScore + f_score(callQ6, w6)
 callScore := callScore + f_score(callQ7, w7)
-callScore := callScore + f_score(callQ8, w8)
-callScore := callScore + f_score(callQ9, w9)
-callScore := callScore + f_score(callQ10, w10)
 
 putScore = f_score(putQ1, w1)
 putScore := putScore + f_score(putQ2, w2)
@@ -317,9 +454,6 @@ putScore := putScore + f_score(putQ4, w4)
 putScore := putScore + f_score(putQ5, w5)
 putScore := putScore + f_score(putQ6, w6)
 putScore := putScore + f_score(putQ7, w7)
-putScore := putScore + f_score(putQ8, w8)
-putScore := putScore + f_score(putQ9, w9)
-putScore := putScore + f_score(putQ10, w10)
 
 //------------------------------------------------------------------------------
 // Table rendering (Top Right)
@@ -338,7 +472,7 @@ f_clearTable(_rows) =>
         for c = 0 to 2
             f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
 
-maxRows = 34
+maxRows = 56
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -373,11 +507,11 @@ f_applyColVisibility(_r) =>
 
 f_failReason(_id, _isPut) =>
     if _id == 1
-        "no structure"
+        "structure not usable"
     else if _id == 2
         isChaos ? "chaos overlap" : (trSpike ? "TR spike" : "chart noisy")
     else if _id == 3
-        _isPut ? (not (nearResist or nearMA) ? "not near level" : (extended ? "price extended" : "bad location")) : (not (nearSupport or nearMA) ? "not near level" : (extended ? "price extended" : "bad location"))
+        _isPut ? (f_locDisplay(putLocationState) + " @ " + putLocationAnchor) : (f_locDisplay(callLocationState) + " @ " + callLocationAnchor)
     else if _id == 4
         _isPut ? (na(putInvalid) ? "no invalidation" : (not riskRealisticPut ? "risk unrealistic" : "risk invalid")) : (na(callInvalid) ? "no invalidation" : (not riskRealisticCall ? "risk unrealistic" : "risk invalid"))
     else if _id == 5
@@ -389,7 +523,7 @@ f_failReason(_id, _isPut) =>
     else if _id == 8
         _isPut ? (not trendRegime ? "no trend regime" : (close > sma50 ? "above SMA50" : (ema20 > ema20[5] ? "EMA20 rising" : "follow weak"))) : (not trendRegime ? "no trend regime" : (close < sma50 ? "below SMA50" : (ema20 < ema20[5] ? "EMA20 falling" : "follow weak")))
     else if _id == 9
-        not structureClear ? "no structure" : (not cleanChart ? "chart noisy" : (isMiddle ? "middle zone" : "clarity low"))
+        not structureUsable ? "structure not usable" : (not cleanChart ? "chart noisy" : (isMiddle ? "middle zone" : "clarity low"))
     else
         _isPut ? (not putLocationOk ? "location bad" : (not riskRealisticPut ? "risk unrealistic" : (not putHasRR ? "RR below min" : (not cleanChart ? "chart noisy" : "AB weak")))) : (not callLocationOk ? "location bad" : (not riskRealisticCall ? "risk unrealistic" : (not callHasRR ? "RR below min" : (not cleanChart ? "chart noisy" : "AB weak"))))
 
@@ -436,36 +570,41 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    // SUMMARY
-    f_sectionRow(row, "SUMMARY")
-    row += 1
-
-    putGrade  = f_grade(putScore)
-    callGrade = f_grade(callScore)
-
-    f_metricRow(row, "Total score (0-100)", str.tostring(putScore), colBg, str.tostring(callScore), colBg)
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "Grade", putGrade, colBg, callGrade, colBg)
-    f_applyColVisibility(row)
-    row += 1
-
-    structTxt = bullStructure ? "TREND UP" : bearStructure ? "TREND DOWN" : (adx >= adxTrend ? "TREND-ish" : "RANGE/MIXED")
-
-    f_metricRow(row, "Structure (proxy)", structTxt, colBg, structTxt, colBg)
-    f_applyColVisibility(row)
-    row += 1
-
-    locPut  = putLocationOk  ? "OK" : (extended ? "EXT" : "MID")
-    locCall = callLocationOk ? "OK" : (extended ? "EXT" : "MID")
-    f_metricRow(row, "Location", locPut, f_statusColor(putLocationOk, false), locCall, f_statusColor(callLocationOk, false))
-    f_applyColVisibility(row)
-    row += 1
-
     rrPutTxt  = not na(putRR)  ? str.tostring(putRR, "#.##")  : "-"
-    rrCallTxt = not na(callRR) ? str.tostring(callRR,"#.##") : "-"
-    f_metricRow(row, "RR (to next obstacle)", rrPutTxt, f_statusColor(putHasRR, na(putRR)), rrCallTxt, f_statusColor(callHasRR, na(callRR)))
+    rrCallTxt = not na(callRR) ? str.tostring(callRR, "#.##") : "-"
+    putBaseGrade  = f_grade(putScore)
+    callBaseGrade = f_grade(callScore)
+    // Keep grade consistent with Daily decision: no A when blocked by hard filters.
+    putCapGrade = putNoTradeDaily ? "D" : (putDailyCandidate ? "A" : "C")
+    callCapGrade = callNoTradeDaily ? "D" : (callDailyCandidate ? "A" : "C")
+    putGrade  = f_capGrade(putBaseGrade, putCapGrade)
+    callGrade = f_capGrade(callBaseGrade, callCapGrade)
+    putScoreCapped = f_capScoreByGrade(putScore, putCapGrade)
+    callScoreCapped = f_capScoreByGrade(callScore, callCapGrade)
+
+    // DIRECTION
+    f_sectionRow(row, "DIRECTION")
+    f_applyColVisibility(row)
+    row += 1
+
+    putStructTxt = structureChaos ? "CHAOS" : (bearStructure ? "BEAR TREND" : (bullStructure ? "BULL TREND" : (structureRange ? "RANGE" : "UNDEFINED")))
+    callStructTxt = structureChaos ? "CHAOS" : (bullStructure ? "BULL TREND" : (bearStructure ? "BEAR TREND" : (structureRange ? "RANGE" : "UNDEFINED")))
+    putStructCol = structureChaos ? colBad : (bearStructure ? colOk : (bullStructure ? colBad : colNA))
+    callStructCol = structureChaos ? colBad : (bullStructure ? colOk : (bearStructure ? colBad : colNA))
+    f_metricRow(row, "Daily structure", putStructTxt, putStructCol, callStructTxt, callStructCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    structureUsableTxt = structureUsable ? "YES" : "NO"
+    f_metricRow(row, "Structure usable", structureUsableTxt, f_statusColor(structureUsable, false), structureUsableTxt, f_statusColor(structureUsable, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    putMarketTxt = putMarketAligned ? "SUPPORTIVE" : (marketBull ? "HEADWIND" : "NEUTRAL")
+    callMarketTxt = callMarketAligned ? "SUPPORTIVE" : (marketBear ? "HEADWIND" : "NEUTRAL")
+    putMarketCol = putMarketAligned ? colOk : ((marketBull and not putMarketAligned) ? colBad : colNA)
+    callMarketCol = callMarketAligned ? colOk : ((marketBear and not callMarketAligned) ? colBad : colNA)
+    f_metricRow(row, "Market alignment", putMarketTxt, putMarketCol, callMarketTxt, callMarketCol)
     f_applyColVisibility(row)
     row += 1
 
@@ -475,17 +614,91 @@ else
     f_applyColVisibility(row)
     row += 1
 
+    // LOCATION
+    f_sectionRow(row, "LOCATION")
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Location state", f_locDisplay(putLocationState), f_statusColor(putLocationOk, false), f_locDisplay(callLocationState), f_statusColor(callLocationOk, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Location anchor", putLocationAnchor, colBg, callLocationAnchor, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    // RISK
+    f_sectionRow(row, "RISK")
+    f_applyColVisibility(row)
+    row += 1
+
+    putRiskTxt = putRiskDefined ? "DEFINED" : "UNCLEAR"
+    callRiskTxt = callRiskDefined ? "DEFINED" : "UNCLEAR"
+    f_metricRow(row, "Invalidation defined", putRiskTxt, f_statusColor(putRiskDefined, false), callRiskTxt, f_statusColor(callRiskDefined, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    putStopTxt = not na(putStop) ? str.tostring(putStop, "#.####") : "-"
+    callStopTxt = not na(callStop) ? str.tostring(callStop, "#.####") : "-"
+    f_metricRow(row, "Stop level", putStopTxt, colBg, callStopTxt, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    // REWARD
+    f_sectionRow(row, "REWARD")
+    f_applyColVisibility(row)
+    row += 1
+
+    putObstacleTxt = not na(putObstacle) ? str.tostring(putObstacle, "#.####") : "-"
+    callObstacleTxt = not na(callObstacle) ? str.tostring(callObstacle, "#.####") : "-"
+    f_metricRow(row, "Next obstacle", putObstacleTxt, colBg, callObstacleTxt, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "RR to next obstacle", rrPutTxt, f_statusColor(putHasRR, na(putRR)), rrCallTxt, f_statusColor(callHasRR, na(callRR)))
+    f_applyColVisibility(row)
+    row += 1
+
+    // DECISION
+    f_sectionRow(row, "DECISION")
+    f_applyColVisibility(row)
+    row += 1
+
+    putBiasTxt = putDirectionOk ? "SHORT BIAS" : "NEUTRAL"
+    callBiasTxt = callDirectionOk ? "LONG BIAS" : "NEUTRAL"
+    putBiasCol = putDirectionOk ? colOk : colNA
+    callBiasCol = callDirectionOk ? colOk : colNA
+    f_metricRow(row, "Bias", putBiasTxt, putBiasCol, callBiasTxt, callBiasCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    putDecisionTxt = putDailyCandidate ? "VALID DAILY CANDIDATE" : (putNoTradeDaily ? "NO TRADE" : "WATCHLIST")
+    callDecisionTxt = callDailyCandidate ? "VALID DAILY CANDIDATE" : (callNoTradeDaily ? "NO TRADE" : "WATCHLIST")
+    putDecisionCol = putDailyCandidate ? colOk : (putNoTradeDaily ? colBad : colBg)
+    callDecisionCol = callDailyCandidate ? colOk : (callNoTradeDaily ? colBad : colBg)
+    f_metricRow(row, "Daily decision", putDecisionTxt, putDecisionCol, callDecisionTxt, callDecisionCol)
+    f_applyColVisibility(row)
+    row += 1
+
     // DETAILS
     if uiShowDetails
         row += 1
-        f_sectionRow(row, "DETAILS (10 checks)")
+        f_sectionRow(row, "DETAILS (core checks)")
         row += 1
 
-        f_checkRow(row, 1, "1) Structure identified", w1, putQ1, callQ1, false, false)
+        f_metricRow(row, "Core score (decision-capped)", str.tostring(putScoreCapped, "#.##"), colBg, str.tostring(callScoreCapped, "#.##"), colBg)
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "Grade (decision-capped)", putGrade, colBg, callGrade, colBg)
+        f_applyColVisibility(row)
+        row += 1
+
+        f_checkRow(row, 1, "1) Structure usable", w1, putQ1, callQ1, false, false)
         row += 1
         f_checkRow(row, 2, "2) Clean chart (no chaos)", w2, putQ2, callQ2, false, false)
         row += 1
-        f_checkRow(row, 3, "3) Location logical", w3, putQ3, callQ3, false, false)
+        f_checkRow(row, 3, "3) Location acceptable", w3, putQ3, callQ3, false, false)
         row += 1
         f_checkRow(row, 4, "4) Invalidation exists", w4, putQ4, callQ4, na(putInvalid), na(callInvalid))
         row += 1
@@ -495,47 +708,54 @@ else
         row += 1
         f_checkRow(row, 7, "7) RS/RW vs benchmark", w7, putQ7, callQ7, false, false)
         row += 1
-        f_checkRow(row, 8, "8) Follow-through potential", w8, putQ8, callQ8, false, false)
-        row += 1
-        f_checkRow(row, 9, "9) One-sentence clarity", w9, putQ9, callQ9, false, false)
-        row += 1
-        f_checkRow(row, 10, "10) A/B quality proxy", w10, putQ10, callQ10, false, false)
-        row += 1
 
-        row += 1
-        f_sectionRow(row, "DETAILS: values")
-        row += 1
+        if uiShowSoftContext
+            row += 1
+            f_sectionRow(row, "DETAILS: soft context / values")
+            row += 1
 
-        f_valueRow(row, "ATR / ADX", str.tostring(atr, "#.####") + " / " + str.tostring(adx, "#.##"), str.tostring(atr, "#.####") + " / " + str.tostring(adx, "#.##"))
-        f_applyColVisibility(row)
-        row += 1
+            f_metricRow(row, "Soft: follow-through", putQ8 ? "YES" : "NO", f_statusColor(putQ8, false), callQ8 ? "YES" : "NO", f_statusColor(callQ8, false))
+            f_applyColVisibility(row)
+            row += 1
 
-        f_valueRow(row, "RS slope", str.tostring(rsSlope, "#.######"), str.tostring(rsSlope, "#.######"))
-        f_applyColVisibility(row)
-        row += 1
+            f_metricRow(row, "Soft: one-sentence clarity", putQ9 ? "YES" : "NO", f_statusColor(putQ9, false), callQ9 ? "YES" : "NO", f_statusColor(callQ9, false))
+            f_applyColVisibility(row)
+            row += 1
 
-        f_valueRow(row, "20/50/200 MA", str.tostring(ema20, "#.####") + " / " + str.tostring(sma50, "#.####") + " / " + str.tostring(sma200, "#.####"),
-                           str.tostring(ema20, "#.####") + " / " + str.tostring(sma50, "#.####") + " / " + str.tostring(sma200, "#.####"))
-        f_applyColVisibility(row)
-        row += 1
+            f_metricRow(row, "Soft: A/B proxy", putQ10 ? "YES" : "NO", f_statusColor(putQ10, false), callQ10 ? "YES" : "NO", f_statusColor(callQ10, false))
+            f_applyColVisibility(row)
+            row += 1
 
-        srTxt = (na(nearestSupport) ? "-" : str.tostring(nearestSupport, "#.####")) + " / " + (na(nearestResist) ? "-" : str.tostring(nearestResist, "#.####"))
-        f_valueRow(row, "Nearest S / R", srTxt, srTxt)
-        f_applyColVisibility(row)
-        row += 1
+            f_valueRow(row, "ATR / ADX", str.tostring(atr, "#.####") + " / " + str.tostring(adx, "#.##"), str.tostring(atr, "#.####") + " / " + str.tostring(adx, "#.##"))
+            f_applyColVisibility(row)
+            row += 1
 
-        f_valueRow(row, "Stop (PUT/CALL)", na(putStop) ? "-" : str.tostring(putStop, "#.####"), na(callStop) ? "-" : str.tostring(callStop, "#.####"))
-        f_applyColVisibility(row)
-        row += 1
+            f_valueRow(row, "RS slope", str.tostring(rsSlope, "#.######"), str.tostring(rsSlope, "#.######"))
+            f_applyColVisibility(row)
+            row += 1
 
-        f_valueRow(row, "Space (PUT/CALL)", (na(putSpace) ? "-" : str.tostring(putSpace, "#.####")) + " (" + str.tostring(minSpaceAtr) + "xATR)",
-                                     (na(callSpace) ? "-" : str.tostring(callSpace, "#.####")) + " (" + str.tostring(minSpaceAtr) + "xATR)")
-        f_applyColVisibility(row)
-        row += 1
+            f_valueRow(row, "20/50/200 MA", str.tostring(ema20, "#.####") + " / " + str.tostring(sma50, "#.####") + " / " + str.tostring(sma200, "#.####"),
+                               str.tostring(ema20, "#.####") + " / " + str.tostring(sma50, "#.####") + " / " + str.tostring(sma200, "#.####"))
+            f_applyColVisibility(row)
+            row += 1
 
-        f_valueRow(row, "RR (PUT/CALL)", rrPutTxt, rrCallTxt)
-        f_applyColVisibility(row)
-        row += 1
+            srTxt = (na(nearestSupport) ? "-" : str.tostring(nearestSupport, "#.####")) + " / " + (na(nearestResist) ? "-" : str.tostring(nearestResist, "#.####"))
+            f_valueRow(row, "Nearest S / R", srTxt, srTxt)
+            f_applyColVisibility(row)
+            row += 1
+
+            f_valueRow(row, "Stop (PUT/CALL)", na(putStop) ? "-" : str.tostring(putStop, "#.####"), na(callStop) ? "-" : str.tostring(callStop, "#.####"))
+            f_applyColVisibility(row)
+            row += 1
+
+            f_valueRow(row, "Space (PUT/CALL)", (na(putSpace) ? "-" : str.tostring(putSpace, "#.####")) + " (" + str.tostring(minSpaceAtr) + "xATR)",
+                                         (na(callSpace) ? "-" : str.tostring(callSpace, "#.####")) + " (" + str.tostring(minSpaceAtr) + "xATR)")
+            f_applyColVisibility(row)
+            row += 1
+
+            f_valueRow(row, "RR (PUT/CALL)", rrPutTxt, rrCallTxt)
+            f_applyColVisibility(row)
+            row += 1
 
     // Clear remaining unused rows
     if row < maxRows

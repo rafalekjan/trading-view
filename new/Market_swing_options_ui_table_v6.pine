@@ -198,7 +198,11 @@ neutralBias = not bullBias and not bearBias
 // Regime
 isTrend = adx >= adxTrend and not isChop and not isUnstable
 isRange = (adx < adxTrend) and isChop
-regimeTxt = isUnstable ? "VOLATILE" : isTrend ? "TREND" : isRange ? "CHOP" : "MIXED"
+regimeClass = isTrend ? "TREND" : isRange ? "RANGE" : "TRANSITION"
+regimeTxt = regimeClass
+
+// Market phase (Blueprint-style context)
+phaseTxt = isUnstable ? "TRANSITION" : isTrend ? (isExpansion ? "EXPANSION" : "TREND CONT.") : (isRange ? (isCompression ? "COMPRESSION" : "ROTATION") : "TRANSITION")
 
 // Location health with fallback: W -> M -> 12M -> ATR proxy.
 pivotSupport = f_pickSupport(lastPL, prevPL, close)
@@ -220,7 +224,10 @@ nearestResist  = not na(pivotResist)  ? pivotResist  : (not na(fallbackResist)  
 distTo20 = math.abs(close - ema20)
 distTo50 = math.abs(close - sma50)
 distTo200 = math.abs(close - sma200)
-nearMA = (distTo20 <= 1.0*atr) or (distTo50 <= 1.0*atr) or (distTo200 <= 1.0*atr)
+nearEMA20 = distTo20 <= 1.0*atr
+nearSMA50 = distTo50 <= 1.0*atr
+nearSMA200 = distTo200 <= 1.0*atr
+nearMA = nearEMA20 or nearSMA50 or nearSMA200
 
 distToSupport = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
 distToResist  = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
@@ -228,6 +235,10 @@ nearSupport = not na(distToSupport) and distToSupport <= 1.0*atr
 nearResist  = not na(distToResist)  and distToResist  <= 1.0*atr
 
 extended = distTo20 > extendedAtr * atr
+
+// Location anchor (priority: price levels -> EMA20/SMA50 -> SMA200)
+callLocAnchor = nearSupport ? "SUPPORT" : (nearEMA20 ? "EMA20" : (nearSMA50 ? "SMA50" : (nearSMA200 ? "SMA200" : "MID")))
+putLocAnchor  = nearResist  ? "RESISTANCE" : (nearEMA20 ? "EMA20" : (nearSMA50 ? "SMA50" : (nearSMA200 ? "SMA200" : "MID")))
 
 // Structure supports multi-day move
 structureSupportsMoveBull = bullStructure and (isTrend or (isCompression and isExpansion))
@@ -302,7 +313,8 @@ crossOkBear = not crossCheckEnabled or crossSlope <= 0
 w1=18, w2=14, w3=14, w4=10, w5=8, w6=12, w7=10, w8=6, w9=5, w10=3
 
 // Conditions by direction (PUT = bearish, CALL = bullish)
-callQ1 = (regimeTxt == "TREND") or (regimeTxt == "MIXED" and not isChop and not isUnstable)
+regimeSwingOk = (regimeClass == "TREND") or (regimeClass == "RANGE")
+callQ1 = regimeSwingOk and not isUnstable
 putQ1  = callQ1
 
 callQ2 = bullBias and crossOkBull
@@ -400,7 +412,7 @@ f_applyColVisibility(_t, _r) =>
 
 f_failReason(_id, _isPut) =>
     if _id == 1
-        isUnstable ? "regime volatile" : (isChop ? "chop regime" : "regime not swing")
+        isUnstable ? "regime unstable" : (regimeClass == "TRANSITION" ? "transition regime" : "regime not swing")
     else if _id == 2
         _isPut ? (not bearBias ? "no bear bias" : "cross-check fail") : (not bullBias ? "no bull bias" : "cross-check fail")
     else if _id == 3
@@ -445,7 +457,7 @@ f_updateSrLine(_ln, _y, _col) =>
     _out
 
 var table t = table.new(position.top_right, 3, 1, border_width=1)
-maxRows = 40
+maxRows = 44
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -488,15 +500,23 @@ else
     f_applyColVisibility(t, row)
     row += 1
 
+    f_metricRow(t, row, "Market phase", phaseTxt, colBg, phaseTxt, colBg)
+    f_applyColVisibility(t, row)
+    row += 1
+
     locPut  = putQ7 ? "OK" : (extended ? "EXT" : "MID")
     locCall = callQ7 ? "OK" : (extended ? "EXT" : "MID")
     f_metricRow(t, row, "Location health", locPut, f_statusColor(putQ7, false), locCall, f_statusColor(callQ7, false))
     f_applyColVisibility(t, row)
     row += 1
 
+    f_metricRow(t, row, "Location anchor", putLocAnchor, colBg, callLocAnchor, colBg)
+    f_applyColVisibility(t, row)
+    row += 1
+
     rrPutTxt  = not na(putRR)  ? str.tostring(putRR, "#.##")  : "-"
     rrCallTxt = not na(callRR) ? str.tostring(callRR, "#.##") : "-"
-    f_metricRow(t, row, "RR (pivot proxy)", rrPutTxt, f_statusColor(putHasRR, na(putRR)), rrCallTxt, f_statusColor(callHasRR, na(callRR)))
+    f_metricRow(t, row, "Reward (space/RR proxy)", rrPutTxt, f_statusColor(putHasRR, na(putRR)), rrCallTxt, f_statusColor(callHasRR, na(callRR)))
     f_applyColVisibility(t, row)
     row += 1
 
