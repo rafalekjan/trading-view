@@ -7,7 +7,8 @@ indicator("Stock 15m", overlay=true, max_labels_count=500, max_lines_count=500)
 groupUI   = "UI"
 uiShow    = input.bool(true, "Show table", group=groupUI)
 uiOpacity = input.int(10, "Table visibility (0=solid, 100=invisible)", minval=0, maxval=100, group=groupUI)
-uiShowDetails = input.bool(true, "Show DETAILS section", group=groupUI)
+uiShowDetails = input.bool(true, "Show CHECKS section", group=groupUI)
+uiShowDebug = input.bool(false, "Show DEBUG metrics", group=groupUI)
 uiTextSize = input.string("small", "Text size", options=["tiny","small","normal","large"], group=groupUI)
 uiShowHintWhenNot15m = input.bool(false, "Show hint when not on 15m", group=groupUI)
 
@@ -526,7 +527,7 @@ f_failReason(_id, _isPut) =>
     if _id == 1
         _isPut ? (not nearResistZone ? "not near level" : (upperW < wickBodyMult * body ? "wick too small" : (closePos > (1 - closePosPct) ? "weak close" : "low volume"))) : (not nearSupportZone ? "not near level" : (lowerW < wickBodyMult * body ? "wick too small" : (closePos < closePosPct ? "weak close" : "low volume")))
     else if _id == 2
-        _isPut ? "no bear structure/align" : "no bull structure/align"
+        "no structure align"
     else if _id == 3
         _isPut ? (na(putInvalid) ? "no invalidation" : (na(putStop) ? "no stop" : "risk too high")) : (na(callInvalid) ? "no invalidation" : (na(callStop) ? "no stop" : "risk too high"))
     else if _id == 4
@@ -585,18 +586,17 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    // SUMMARY
-    f_sectionRow(row, "SUMMARY")
+    // ENTRY DECISION (single score for fast read)
+    f_sectionRow(row, "ENTRY DECISION")
+    f_applyColVisibility(row)
     row += 1
 
     putBaseGrade  = f_grade(putScore)
     callBaseGrade = f_grade(callScore)
-
     putCapGradeHard  = (not putHasRR and isOverextended) ? "D" : ((not putHasRR or isOverextended or not h1PutReady) ? "C" : "A")
     callCapGradeHard = (not callHasRR and isOverextended) ? "D" : ((not callHasRR or isOverextended or not h1CallReady) ? "C" : "A")
     putCapGradeSoft  = (dHighVol or not putRiskCompression or impulseHeat or not putMomOk or not trendOK) ? "C" : "A"
     callCapGradeSoft = (dHighVol or not callRiskCompression or impulseHeat or not callMomOk or not trendOK) ? "C" : "A"
-
     putCapGrade  = f_capGrade(putCapGradeHard, putCapGradeSoft)
     callCapGrade = f_capGrade(callCapGradeHard, callCapGradeSoft)
     putGrade  = f_capGrade(putBaseGrade, putCapGrade)
@@ -604,20 +604,10 @@ else
 
     putStatus = putNoTradeState ? putNoTradeStatus : (putWaitPullbackState ? "WAIT PULLBACK" : (putWaitReversalState ? "WAIT REVERSAL" : (putEntryNowState ? "ENTRY NOW" : (putSetupDevelopingState ? "SETUP DEVELOPING" : "WAIT REVERSAL"))))
     callStatus = callNoTradeState ? callNoTradeStatus : (callWaitPullbackState ? "WAIT PULLBACK" : (callWaitReversalState ? "WAIT REVERSAL" : (callEntryNowState ? "ENTRY NOW" : (callSetupDevelopingState ? "SETUP DEVELOPING" : "WAIT REVERSAL"))))
+    putStatusCol = putEntryNowState ? colOk : (putNoTradeState ? colBad : colBg)
+    callStatusCol = callEntryNowState ? colOk : (callNoTradeState ? colBad : colBg)
 
-    f_metricRow(row, "Trend score core (0-100)", str.tostring(putTrendScore, "#.##"), colBg, str.tostring(callTrendScore, "#.##"), colBg)
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "Entry score core (0-100)", str.tostring(putEntryScore, "#.##"), colBg, str.tostring(callEntryScore, "#.##"), colBg)
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "Final score (0-100)", str.tostring(putScore, "#.##"), colBg, str.tostring(callScore, "#.##"), colBg)
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "Confidence", putConfTxt, colBg, callConfTxt, colBg)
+    f_metricRow(row, "Entry score (0-100)", str.tostring(putScore, "#.##"), colBg, str.tostring(callScore, "#.##"), colBg)
     f_applyColVisibility(row)
     row += 1
 
@@ -625,7 +615,12 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Status", putStatus, colBg, callStatus, colBg)
+    f_metricRow(row, "Status", putStatus, putStatusCol, callStatus, callStatusCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    // CONTEXT (1H gate + local trend)
+    f_sectionRow(row, "CONTEXT")
     f_applyColVisibility(row)
     row += 1
 
@@ -633,23 +628,57 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    putSoftTxt = (dHighVol ? "day-vol" : "ok") + (not putRiskCompression ? " +no-compress" : "") + (impulseHeat ? " +impulse-hot" : "") + (not putMomOk ? " +mom-weak" : "") + (not trendOK ? " +trend-weak" : "")
-    callSoftTxt = (dHighVol ? "day-vol" : "ok") + (not callRiskCompression ? " +no-compress" : "") + (impulseHeat ? " +impulse-hot" : "") + (not callMomOk ? " +mom-weak" : "") + (not trendOK ? " +trend-weak" : "")
-    f_metricRow(row, "Soft caps", putSoftTxt, colBg, callSoftTxt, colBg)
+    putTrendCtxTxt = trendBiasBear ? "BEARISH" : (trendBiasBull ? "BULLISH (HEADWIND)" : "NEUTRAL")
+    callTrendCtxTxt = trendBiasBull ? "BULLISH" : (trendBiasBear ? "BEARISH (HEADWIND)" : "NEUTRAL")
+    putTrendCtxCol = trendBiasBear ? colOk : (trendBiasBull ? colBad : colNA)
+    callTrendCtxCol = trendBiasBull ? colOk : (trendBiasBear ? colBad : colNA)
+    f_metricRow(row, "Trend context", putTrendCtxTxt, putTrendCtxCol, callTrendCtxTxt, callTrendCtxCol)
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Reaction @ level", putQ1 ? "OK" : f_failReason(1, true), f_statusColor(putQ1, false), callQ1 ? "OK" : f_failReason(1, false), f_statusColor(callQ1, false))
+    // ENTRY CHECK (reaction -> structure -> trigger)
+    f_sectionRow(row, "ENTRY CHECK")
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Structure + trend strength", putQ2 ? "YES" : f_failReason(2, true), f_statusColor(putQ2, false), callQ2 ? "YES" : f_failReason(2, false), f_statusColor(callQ2, false))
+    putReactionTxt = putReactionOk ? "CONFIRMED" : (putLevelOk ? "NO REACTION" : "NOT AT LEVEL")
+    callReactionTxt = callReactionOk ? "CONFIRMED" : (callLevelOk ? "NO REACTION" : "NOT AT LEVEL")
+    f_metricRow(row, "Reaction @ level", putReactionTxt, f_statusColor(putReactionOk, false), callReactionTxt, f_statusColor(callReactionOk, false))
     f_applyColVisibility(row)
     row += 1
 
-    putEntryTrigTxt = not putReactionOk ? "no reaction" : (putEntryPattern ? (putSetupQualityOk ? putEntryPatternTxt : putEntryPatternTxt + " / low quality") : "no break&hold/reject&continue")
-    callEntryTrigTxt = not callReactionOk ? "no reaction" : (callEntryPattern ? (callSetupQualityOk ? callEntryPatternTxt : callEntryPatternTxt + " / low quality") : "no break&hold/reject&continue")
-    f_metricRow(row, "Entry trigger 15m", putEntryTrigTxt, f_statusColor(putEntryPattern and putReactionOk, false), callEntryTrigTxt, f_statusColor(callEntryPattern and callReactionOk, false))
+    putStructureTxt = putQ2 ? "YES" : "NO"
+    callStructureTxt = callQ2 ? "YES" : "NO"
+    f_metricRow(row, "Structure align", putStructureTxt, f_statusColor(putQ2, false), callStructureTxt, f_statusColor(callQ2, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    putEntryTrigTxt = putEntryPattern ? (putBreakHold ? "STRUCTURE BREAK" : (wickRejectShort ? "REJECTION CANDLE" : "RECLAIM LEVEL")) : (not putReactionOk ? "NO REACTION" : "NO TRIGGER")
+    callEntryTrigTxt = callEntryPattern ? (callBreakHold ? "STRUCTURE BREAK" : (wickRejectLong ? "REJECTION CANDLE" : "RECLAIM LEVEL")) : (not callReactionOk ? "NO REACTION" : "NO TRIGGER")
+    f_metricRow(row, "Entry trigger", putEntryTrigTxt, f_statusColor(putEntryPattern, false), callEntryTrigTxt, f_statusColor(callEntryPattern, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    putVolTxt = putQ7 ? "CONFIRMED" : "WEAK"
+    callVolTxt = callQ7 ? "CONFIRMED" : "WEAK"
+    f_metricRow(row, "Volume", putVolTxt, f_statusColor(putQ7, false), callVolTxt, f_statusColor(callQ7, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    // RISK
+    f_sectionRow(row, "RISK")
+    f_applyColVisibility(row)
+    row += 1
+
+    putInvalidTxt = not na(putInvalid) ? str.tostring(putInvalid, "#.####") : "-"
+    callInvalidTxt = not na(callInvalid) ? str.tostring(callInvalid, "#.####") : "-"
+    f_metricRow(row, "Invalidation", putInvalidTxt, colBg, callInvalidTxt, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    putStopTxt = not na(putStop) ? str.tostring(putStop, "#.####") : "-"
+    callStopTxt = not na(callStop) ? str.tostring(callStop, "#.####") : "-"
+    f_metricRow(row, "Stop", putStopTxt, colBg, callStopTxt, colBg)
     f_applyColVisibility(row)
     row += 1
 
@@ -659,37 +688,34 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Overextended?", isOverextended ? "YES" : "NO", f_statusColor(not isOverextended, false), isOverextended ? "YES" : "NO", f_statusColor(not isOverextended, false))
-    f_applyColVisibility(row)
-    row += 1
-
-    // DETAILS
+    // CHECKS (compact)
     if uiShowDetails
         row += 1
-        f_sectionRow(row, "DETAILS (9 checks)")
+        f_sectionRow(row, "CHECKS")
+        f_applyColVisibility(row)
         row += 1
 
-        f_checkRow(row, 1, "1) Reaction at key level", w1, putQ1, callQ1, false, false)
-        row += 1
-        f_checkRow(row, 2, "2) Micro-structure + trend strength", w2, putQ2, callQ2, false, false)
-        row += 1
-        f_checkRow(row, 3, "3) Invalidation definable", w3, putQ3, callQ3, na(putInvalid), na(callInvalid))
-        row += 1
-        f_checkRow(row, 4, "4) Entry reduces risk (vs HTF)", w4, putQ4, callQ4, false, false)
-        row += 1
-        f_checkRow(row, 5, "5) Not extended", w5, putQ5, callQ5, false, false)
-        row += 1
-        f_checkRow(row, 6, "6) Pullback healthy", w6, putQ6, callQ6, false, false)
-        row += 1
-        f_checkRow(row, 7, "7) Volume confirms", w7, putQ7, callQ7, false, false)
-        row += 1
-        f_checkRow(row, 8, "8) Momentum not weakening", w8, putQ8, callQ8, false, false)
-        row += 1
-        f_checkRow(row, 9, "9) Week-type alignment (Daily)", w9, putQ9, callQ9, false, false)
+        f_metricRow(row, "1) Reaction at level", putReactionOk ? "YES" : "NO", f_statusColor(putReactionOk, false), callReactionOk ? "YES" : "NO", f_statusColor(callReactionOk, false))
+        f_applyColVisibility(row)
         row += 1
 
+        f_metricRow(row, "2) Structure align", putQ2 ? "YES" : "NO", f_statusColor(putQ2, false), callQ2 ? "YES" : "NO", f_statusColor(callQ2, false))
+        f_applyColVisibility(row)
         row += 1
-        f_sectionRow(row, "DETAILS: values")
+
+        f_metricRow(row, "3) Trigger active", putEntryPattern ? "YES" : "NO", f_statusColor(putEntryPattern, false), callEntryPattern ? "YES" : "NO", f_statusColor(callEntryPattern, false))
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "4) RR acceptable", putHasRR ? "YES" : "NO", f_statusColor(putHasRR, na(putRR)), callHasRR ? "YES" : "NO", f_statusColor(callHasRR, na(callRR)))
+        f_applyColVisibility(row)
+        row += 1
+
+    // OPTIONAL DEBUG (collapsed by default)
+    if uiShowDebug
+        row += 1
+        f_sectionRow(row, "OPTIONAL DEBUG")
+        f_applyColVisibility(row)
         row += 1
 
         f_valueRow(row, "ATR / VolSMA", str.tostring(atr, "#.####") + " / " + str.tostring(volSma, "#"),
@@ -706,33 +732,8 @@ else
         f_applyColVisibility(row)
         row += 1
 
-        f_valueRow(row, "Trend strength (|EMA-SMA|/ATR)", str.tostring(trendStrength, "#.###"), str.tostring(trendStrength, "#.###"))
-        f_applyColVisibility(row)
-        row += 1
-
         srTxt = (na(nearestSupport) ? "-" : str.tostring(nearestSupport, "#.####")) + " / " + (na(nearestResist) ? "-" : str.tostring(nearestResist, "#.####"))
         f_valueRow(row, "Nearest S / R", srTxt, srTxt)
-        f_applyColVisibility(row)
-        row += 1
-
-        dayLvlTxt = (na(pdl) ? "-" : str.tostring(pdl, "#.####")) + " / " + (na(pdh) ? "-" : str.tostring(pdh, "#.####"))
-        f_valueRow(row, "PDL / PDH", dayLvlTxt, dayLvlTxt)
-        f_applyColVisibility(row)
-        row += 1
-
-        f_valueRow(row, "Stop (PUT/CALL)", na(putStop) ? "-" : str.tostring(putStop, "#.####"), na(callStop) ? "-" : str.tostring(callStop, "#.####"))
-        f_applyColVisibility(row)
-        row += 1
-
-        f_valueRow(row, "Risk (PUT/CALL)", na(putRisk) ? "-" : str.tostring(putRisk, "#.####"), na(callRisk) ? "-" : str.tostring(callRisk, "#.####"))
-        f_applyColVisibility(row)
-        row += 1
-
-        f_valueRow(row, "RR (PUT/CALL)", rrPutTxt, rrCallTxt)
-        f_applyColVisibility(row)
-        row += 1
-
-        f_valueRow(row, "1H gate state", h1PutStateTxt, h1CallStateTxt)
         f_applyColVisibility(row)
         row += 1
 

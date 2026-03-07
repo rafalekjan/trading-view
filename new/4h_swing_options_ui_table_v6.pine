@@ -7,7 +7,8 @@ indicator("Stock 4H", overlay=true, max_labels_count=500, max_lines_count=500)
 groupUI   = "UI"
 uiShow    = input.bool(true, "Show table", group=groupUI)
 uiOpacity = input.int(10, "Table visibility (0=solid, 100=invisible)", minval=0, maxval=100, group=groupUI)
-uiShowDetails = input.bool(true, "Show DETAILS section", group=groupUI)
+uiShowDetails = input.bool(true, "Show CHECKS section", group=groupUI)
+uiShowDebug = input.bool(false, "Show DEBUG metrics", group=groupUI)
 uiTextSize = input.string("small", "Text size", options=["tiny","small","normal","large"], group=groupUI)
 uiShowHintWhenNot4H = input.bool(false, "Show hint when not on 4H", group=groupUI)
 
@@ -110,9 +111,6 @@ f_gradeFromRank(_r) =>
 f_capGrade(_base, _cap) =>
     f_gradeFromRank(math.min(f_gradeRank(_base), f_gradeRank(_cap)))
 
-f_confBand(_v) =>
-    _v > 75 ? "HIGH" : (_v >= 55 ? "WATCH" : "LOW")
-
 f_score(_ok, _w) => _ok ? _w : 0
 
 f_pickSupport(_last, _prev, _px) =>
@@ -170,8 +168,16 @@ htfBear = htfClose < htfEma
 
 // Benchmark relative strength (ratio slope on current TF)
 benchClose = request.security(benchSymbol, timeframe.period, close)
-rs = close / benchClose
+rs = benchClose > 0 ? close / benchClose : na
 rsSlope = ta.linreg(rs, 14, 0) - ta.linreg(rs, 14, 1)
+benchEma20 = request.security(benchSymbol, timeframe.period, ta.ema(close, 20))
+benchEma50 = request.security(benchSymbol, timeframe.period, ta.ema(close, 50))
+marketBull = benchEma20 > benchEma50
+marketBear = benchEma20 < benchEma50
+callMarketHeadwind = marketBear
+putMarketHeadwind  = marketBull
+callMarketSupportive = marketBull
+putMarketSupportive  = marketBear
 
 // Pivots for structure
 ph = ta.pivothigh(high, pivLen, pivLen)
@@ -236,6 +242,13 @@ distTo50  = math.abs(close - sma50)
 distTo200 = math.abs(close - sma200)
 nearMA = (distTo20 <= atrLocMult * atr) or (distTo50 <= atrLocMult * atr) or (distTo200 <= atrLocMult * atr)
 
+// Structure quality (ModMark-style): trend slope normalized by ATR.
+emaTrend50 = ta.ema(close, 50)
+trendStrength = atr > 0 ? math.abs(ema20 - emaTrend50) / atr : na
+structureCleanTrend = not na(trendStrength) and trendStrength > 0.8 and not isChaos
+structureMixedTrend = not na(trendStrength) and trendStrength >= 0.4 and trendStrength <= 0.8 and not isChaos
+structureChop = isChaos or (not na(trendStrength) and trendStrength < 0.4)
+
 // Wick/body rejection at key area
 body = math.abs(close - open)
 upperWick = high - math.max(open, close)
@@ -243,20 +256,22 @@ lowerWick = math.min(open, close) - low
 bullRejection = body > 0 ? (lowerWick >= wickRejectionMult * body) : false
 bearRejection = body > 0 ? (upperWick >= wickRejectionMult * body) : false
 
-// Confirmation proxy: break of prior minor swing
-callConf = not na(prevPH) and close > prevPH
-putConf  = not na(prevPL) and close < prevPL
+// Volume behaviour: participation relative to rolling baseline.
+volRatio = volSma > 0 ? volume / volSma : na
+volStrong = not na(volRatio) and volRatio > volBreakMult
+volWeak = not na(volRatio) and volRatio < 0.8
+volNormal = not na(volRatio) and not volStrong and not volWeak
 
-// Volume/participation health: strong bars
-isBullStrong = close > open and volume >= volSma * volBreakMult
-isBearStrong = close < open and volume >= volSma * volBreakMult
-
-// Location: near structure OR near MA (avoid middle-of-nowhere)
-callLocationOk = (nearSupport or nearMA) and not nearResist
-putLocationOk  = (nearResist or nearMA) and not nearSupport
+// Location: prioritize structure distance; MA proximity acts as context.
+locDistAtr = atr > 0 ? (math.abs(close - ema20) / atr) : na
+locAtStructure = not na(locDistAtr) and locDistAtr <= 0.5
+locNearStructure = not na(locDistAtr) and locDistAtr > 0.5 and locDistAtr <= 1.0
+locExtended = not na(locDistAtr) and locDistAtr > 1.0
+callLocationOk = (nearSupport or locAtStructure or locNearStructure) and not nearResist and not locExtended
+putLocationOk  = (nearResist  or locAtStructure or locNearStructure) and not nearSupport and not locExtended
 
 // Extended/chasing proxy (ATR-normalized distance to EMA20)
-distEmaAtr = atr > 0 ? (math.abs(close - ema20) / atr) : na
+distEmaAtr = locDistAtr
 extended = not na(distEmaAtr) and distEmaAtr > extendedAtr
 
 // Invalidation levels + stop realism
@@ -272,9 +287,11 @@ putRisk  = not na(putStop)  ? math.abs(putStop - close) : na
 riskRealisticCall = not na(callRisk) and callRisk >= riskAtrMin*atr and callRisk <= riskAtrMax*atr
 riskRealisticPut  = not na(putRisk)  and putRisk  >= riskAtrMin*atr and putRisk  <= riskAtrMax*atr
 
-// Reward justification: next pivot opposite side + RR
-callTarget = nearestResist
-putTarget  = nearestSupport
+// Reward justification: RR to higher-timeframe levels with local fallback.
+htfTargetResist = not na(fallbackResist) and fallbackResist > close ? fallbackResist : nearestResist
+htfTargetSupport = not na(fallbackSupport) and fallbackSupport < close ? fallbackSupport : nearestSupport
+callTarget = htfTargetResist
+putTarget  = htfTargetSupport
 
 callRewardSr = not na(callTarget) ? math.abs(callTarget - close) : na
 putRewardSr  = not na(putTarget)  ? math.abs(close - putTarget) : na
@@ -309,12 +326,12 @@ putRsiOk  = rsi <= rsiBearCeil
 callMacdOk = macdHist >= 0 and macdHist >= macdHist[1]
 putMacdOk  = macdHist <= 0 and macdHist <= macdHist[1]
 
-// Volume/ATR realism: participation + risk realistic
-callVolAtrOk = (isBullStrong or (callConf and volume >= volSma)) and riskRealisticCall
-putVolAtrOk  = (isBearStrong or (putConf  and volume >= volSma)) and riskRealisticPut
+// Volume behaviour + risk realism
+callVolAtrOk = not volWeak and riskRealisticCall
+putVolAtrOk  = not volWeak and riskRealisticPut
 
 // Structure cleanliness (control-not-chaos)
-structureClean = (bullStructure or bearStructure or isRange) and not isChaos
+structureClean = structureCleanTrend or structureMixedTrend
 
 // Key levels + MA confluence: price on correct side of 200 & respects 20/50
 callKeyLvlsOk = close >= sma200 and (close >= sma50 or nearMA) and (close >= ema20 or nearMA)
@@ -364,9 +381,9 @@ putAligned  = htfBear
 // 2 Level reaction 12
 // 3 RSI 5
 // 4 MACD 4
-// 5 Volume/ATR realism 10
-// 6 Regime 12
-// 7 Structure clean 15
+// 5 Volume behaviour + risk realism 10
+// 6 Market/regime alignment 12
+// 7 Structure quality (not chop) 15
 // 8 Key levels + MA 8
 // 9 Invalidation 10
 // 10 Reward/RR 8
@@ -393,11 +410,11 @@ putQ4   = putMacdOk
 callQ5  = callVolAtrOk
 putQ5   = putVolAtrOk
 
-callQ6  = (regimeTxt != "UNSTABLE") and (isTrend or isRange)
-putQ6   = callQ6
+callQ6  = (regimeTxt != "UNSTABLE") and (isTrend or isRange) and not callMarketHeadwind
+putQ6   = (regimeTxt != "UNSTABLE") and (isTrend or isRange) and not putMarketHeadwind
 
-callQ7  = structureClean
-putQ7   = structureClean
+callQ7  = not structureChop
+putQ7   = not structureChop
 
 callQ8  = callKeyLvlsOk
 putQ8   = putKeyLvlsOk
@@ -468,11 +485,6 @@ putEntryScore  = entryW > 0 ? 100.0 * putEntryRaw  / entryW : 0.0
 callScore = math.min(callTrendScore, callEntryScore)
 putScore  = math.min(putTrendScore, putEntryScore)
 
-callConfidence = math.max(0.0, math.min(100.0, callScore + (callTrendScore - callEntryScore) / 4.0))
-putConfidence  = math.max(0.0, math.min(100.0, putScore  + (putTrendScore  - putEntryScore)  / 4.0))
-callConfTxt = str.tostring(callConfidence, "#.##") + " " + f_confBand(callConfidence)
-putConfTxt  = str.tostring(putConfidence,  "#.##") + " " + f_confBand(putConfidence)
-
 //------------------------------------------------------------------------------
 // Table rendering (Top Right)
 //------------------------------------------------------------------------------
@@ -533,11 +545,11 @@ f_failReason(_id, _isPut) =>
     else if _id == 4
         _isPut ? "MACD not bearish" : "MACD not bullish"
     else if _id == 5
-        _isPut ? (not (isBearStrong or (putConf and volume >= volSma)) ? "no strong volume" : "risk unrealistic") : (not (isBullStrong or (callConf and volume >= volSma)) ? "no strong volume" : "risk unrealistic")
+        _isPut ? (not riskRealisticPut ? "risk unrealistic" : "weak participation") : (not riskRealisticCall ? "risk unrealistic" : "weak participation")
     else if _id == 6
-        regimeTxt == "UNSTABLE" ? "unstable regime" : "not trend/range"
+        regimeTxt == "UNSTABLE" ? "unstable regime" : (_isPut ? (putMarketHeadwind ? "market headwind" : "not trend/range") : (callMarketHeadwind ? "market headwind" : "not trend/range"))
     else if _id == 7
-        isChaos ? "chaos overlap" : "no clean structure"
+        "structure chop"
     else if _id == 8
         _isPut ? (close > sma200 ? "above SMA200" : ((close > sma50 and not nearMA) ? "above SMA50" : ((close > ema20 and not nearMA) ? "above EMA20" : "key levels fail"))) : (close < sma200 ? "below SMA200" : ((close < sma50 and not nearMA) ? "below SMA50" : ((close < ema20 and not nearMA) ? "below EMA20" : "key levels fail")))
     else if _id == 9
@@ -551,7 +563,7 @@ f_failReason(_id, _isPut) =>
     else if _id == 13
         "pullback vol too high"
     else
-        _isPut ? (extended ? "price extended" : (not (nearResist or nearMA) ? "not near R/MA" : (nearSupport ? "too close support" : "location bad"))) : (extended ? "price extended" : (not (nearSupport or nearMA) ? "not near S/MA" : (nearResist ? "too close resistance" : "location bad")))
+        _isPut ? (locExtended ? "location extended" : "not at structure") : (locExtended ? "location extended" : "not at structure")
 
 f_checkRow(_r, _id, _name, _w, _putOk, _callOk, _putNa, _callNa) =>
     _putTxt = f_gateText(_putOk, _putNa, f_failReason(_id, true)) + " (" + str.tostring(_w) + ")"
@@ -595,8 +607,9 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    // SUMMARY
-    f_sectionRow(row, "SUMMARY")
+    // DECISION (single score for 4H opportunity scan)
+    f_sectionRow(row, "DECISION")
+    f_applyColVisibility(row)
     row += 1
 
     putBaseGrade  = f_grade(putScore)
@@ -608,25 +621,14 @@ else
     putGrade  = f_capGrade(putBaseGrade, putCapGrade)
     callGrade = f_capGrade(callBaseGrade, callCapGrade)
 
-    putTrendOkButEntryWeak = putTrendScore >= 55 and putEntryScore < 55
-    callTrendOkButEntryWeak = callTrendScore >= 55 and callEntryScore < 55
+    // Status uses hard HTF filters. Level reaction (Q2) and volume quality (Q5)
+    // remain soft quality modifiers via score/grade and do not block status.
+    putStatus = regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not putHasRR ? "NO TRADE (RR)" : (extended ? "WAIT PULLBACK" : (not putQ6 ? "WAIT MARKET" : (not putRSOk ? "WAIT EDGE" : (not putLocationOk ? "WAIT LOCATION" : (not putQ9 ? "NO TRADE (RISK)" : (not putQ7 ? "WAIT STRUCTURE" : "ENTRY NOW")))))))
+    callStatus = regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not callHasRR ? "NO TRADE (RR)" : (extended ? "WAIT PULLBACK" : (not callQ6 ? "WAIT MARKET" : (not callRSOk ? "WAIT EDGE" : (not callLocationOk ? "WAIT LOCATION" : (not callQ9 ? "NO TRADE (RISK)" : (not callQ7 ? "WAIT STRUCTURE" : "ENTRY NOW")))))))
+    putStatusCol = str.contains(putStatus, "NO TRADE") ? colBad : (putStatus == "ENTRY NOW" ? colOk : colBg)
+    callStatusCol = str.contains(callStatus, "NO TRADE") ? colBad : (callStatus == "ENTRY NOW" ? colOk : colBg)
 
-    putStatus = regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not putHasRR ? "NO TRADE (RR)" : (extended ? "WAIT PULLBACK" : (putTrendOkButEntryWeak ? "WAIT REVERSAL" : (f_gradeRank(putGrade) >= 3 ? "ENTRY NOW" : "WAIT PULLBACK"))))
-    callStatus = regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not callHasRR ? "NO TRADE (RR)" : (extended ? "WAIT PULLBACK" : (callTrendOkButEntryWeak ? "WAIT REVERSAL" : (f_gradeRank(callGrade) >= 3 ? "ENTRY NOW" : "WAIT PULLBACK"))))
-
-    f_metricRow(row, "Trend score (0-100)", str.tostring(putTrendScore, "#.##"), colBg, str.tostring(callTrendScore, "#.##"), colBg)
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "Entry score (0-100)", str.tostring(putEntryScore, "#.##"), colBg, str.tostring(callEntryScore, "#.##"), colBg)
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "Final score (0-100)", str.tostring(putScore, "#.##"), colBg, str.tostring(callScore, "#.##"), colBg)
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "Confidence", putConfTxt, colBg, callConfTxt, colBg)
+    f_metricRow(row, "Setup score (0-100)", str.tostring(putScore, "#.##"), colBg, str.tostring(callScore, "#.##"), colBg)
     f_applyColVisibility(row)
     row += 1
 
@@ -634,12 +636,12 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Status", putStatus, colBg, callStatus, colBg)
+    f_metricRow(row, "Status", putStatus, putStatusCol, callStatus, callStatusCol)
     f_applyColVisibility(row)
     row += 1
 
-    // Quick context without details
-    f_metricRow(row, "Regime", regimeTxt, colBg, regimeTxt, colBg)
+    // DIRECTION EDGE
+    f_sectionRow(row, "DIRECTION EDGE")
     f_applyColVisibility(row)
     row += 1
 
@@ -649,55 +651,88 @@ else
     f_applyColVisibility(row)
     row += 1
 
+    // LOCATION
+    f_sectionRow(row, "LOCATION")
+    f_applyColVisibility(row)
+    row += 1
+
+    putLocBand = locAtStructure ? "AT STRUCTURE" : (locNearStructure ? "NEAR STRUCTURE" : "EXTENDED")
+    callLocBand = locAtStructure ? "AT STRUCTURE" : (locNearStructure ? "NEAR STRUCTURE" : "EXTENDED")
+    locPut  = putLocationOk ? putLocBand : f_failReason(14, true)
+    locCall = callLocationOk ? callLocBand : f_failReason(14, false)
+    f_metricRow(row, "Location (structure distance)", locPut, f_statusColor(putLocationOk, false), locCall, f_statusColor(callLocationOk, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    // REWARD
+    f_sectionRow(row, "REWARD")
+    f_applyColVisibility(row)
+    row += 1
+
     rrPutTxt  = not na(putRR)  ? str.tostring(putRR, "#.##")  : "-"
     rrCallTxt = not na(callRR) ? str.tostring(callRR,"#.##") : "-"
-    f_metricRow(row, "RR (SR or 1.5R)", rrPutTxt, f_statusColor(putHasRR, na(putRR)), rrCallTxt, f_statusColor(callHasRR, na(callRR)))
+    f_metricRow(row, "RR to HTF level (or 1.5R)", rrPutTxt, f_statusColor(putHasRR, na(putRR)), rrCallTxt, f_statusColor(callHasRR, na(callRR)))
     f_applyColVisibility(row)
     row += 1
 
-    locPut  = putLocationOk and not extended ? "OK" : f_failReason(14, true)
-    locCall = callLocationOk and not extended ? "OK" : f_failReason(14, false)
-    f_metricRow(row, "Location (near structure/MA)", locPut, f_statusColor(locPut=="OK", false), locCall, f_statusColor(locCall=="OK", false))
+    // ENVIRONMENT
+    f_sectionRow(row, "ENVIRONMENT")
     f_applyColVisibility(row)
     row += 1
 
-    // DETAILS
+    putMarketAlignTxt = putMarketSupportive ? "SUPPORTIVE" : (putMarketHeadwind ? "HEADWIND" : "NEUTRAL")
+    callMarketAlignTxt = callMarketSupportive ? "SUPPORTIVE" : (callMarketHeadwind ? "HEADWIND" : "NEUTRAL")
+    putMarketAlignCol = putMarketSupportive ? colOk : (putMarketHeadwind ? colBad : colNA)
+    callMarketAlignCol = callMarketSupportive ? colOk : (callMarketHeadwind ? colBad : colNA)
+    f_metricRow(row, "Market alignment", putMarketAlignTxt, putMarketAlignCol, callMarketAlignTxt, callMarketAlignCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    structureQualityTxt = structureCleanTrend ? "CLEAN" : (structureMixedTrend ? "MIXED" : "CHOP")
+    structureQualityCol = structureCleanTrend ? colOk : (structureMixedTrend ? colNA : colBad)
+    f_metricRow(row, "Structure quality", structureQualityTxt, structureQualityCol, structureQualityTxt, structureQualityCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    volBehaviorTxt = volStrong ? "STRONG" : (volWeak ? "WEAK" : "NORMAL")
+    volBehaviorCol = volStrong ? colOk : (volWeak ? colBad : colNA)
+    f_metricRow(row, "Volume behaviour", volBehaviorTxt, volBehaviorCol, volBehaviorTxt, volBehaviorCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Regime", regimeTxt, colBg, regimeTxt, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    // CHECKS (compact)
     if uiShowDetails
         row += 1
-        f_sectionRow(row, "DETAILS (14 checks)")
+        f_sectionRow(row, "CHECKS")
+        f_applyColVisibility(row)
         row += 1
 
-        f_checkRow(row, 1, "1) RS/RW vs " + benchSymbol, w1, putQ1, callQ1, false, false)
+        f_checkRow(row, 2, "1) Level reaction (soft)", w2, putQ2, callQ2, false, false)
         row += 1
-        f_checkRow(row, 2, "2) Level reaction (hold/reject)", w2, putQ2, callQ2, false, false)
+        f_checkRow(row, 14, "2) Location at key area", w14, putQ14, callQ14, false, false)
         row += 1
-        f_checkRow(row, 3, "3) RSI confirms momentum", w3, putQ3, callQ3, false, false)
+        f_checkRow(row, 7, "3) Structure quality (not chop)", w7, putQ7, callQ7, false, false)
         row += 1
-        f_checkRow(row, 4, "4) MACD momentum not fading", w4, putQ4, callQ4, false, false)
+        f_checkRow(row, 5, "4) Volume behaviour (soft)", w5, putQ5, callQ5, false, false)
         row += 1
-        f_checkRow(row, 5, "5) Volume + ATR realism", w5, putQ5, callQ5, false, false)
+        f_checkRow(row, 6, "5) Market/regime aligned", w6, putQ6, callQ6, false, false)
         row += 1
-        f_checkRow(row, 6, "6) Regime not unstable", w6, putQ6, callQ6, false, false)
+        f_checkRow(row, 9, "6) Clear invalidation", w9, putQ9, callQ9, false, false)
         row += 1
-        f_checkRow(row, 7, "7) Clean structure (no chaos)", w7, putQ7, callQ7, false, false)
+        f_checkRow(row, 10, "7) Reward justified (RR>=min)", w10, putQ10, callQ10, na(putRR), na(callRR))
         row += 1
-        f_checkRow(row, 8, "8) Key levels + MA context", w8, putQ8, callQ8, false, false)
-        row += 1
-        f_checkRow(row, 9, "9) Clear invalidation", w9, putQ9, callQ9, false, false)
-        row += 1
-        f_checkRow(row, 10, "10) Reward justified (RR>=min)", w10, putQ10, callQ10, na(putRR), na(callRR))
-        row += 1
-        f_checkRow(row, 11, "11) FVG confluence (optional)", w11, putQ11, callQ11, false, false)
-        row += 1
-        f_checkRow(row, 12, "12) Tradeable look (no jumpy)", w12, putQ12, callQ12, false, false)
-        row += 1
-        f_checkRow(row, 13, "13) Pullback volume healthy", w13, putQ13, callQ13, false, false)
-        row += 1
-        f_checkRow(row, 14, "14) Location not extended", w14, putQ14, callQ14, false, false)
+        f_checkRow(row, 8, "8) Key levels context", w8, putQ8, callQ8, false, false)
         row += 1
 
+    // OPTIONAL DEBUG (collapsed by default)
+    if uiShowDebug
         row += 1
-        f_sectionRow(row, "DETAILS: values")
+        f_sectionRow(row, "OPTIONAL DEBUG")
+        f_applyColVisibility(row)
         row += 1
 
         f_valueRow(row, "ATR / TR", str.tostring(atr, "#.####") + " / " + str.tostring(tr, "#.####"), str.tostring(atr, "#.####") + " / " + str.tostring(tr, "#.####"))
