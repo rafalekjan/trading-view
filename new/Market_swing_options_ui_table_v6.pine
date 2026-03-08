@@ -48,7 +48,7 @@ minSpaceAtr = input.float(2.0, "Space to next level >= x ATR", minval=0.5, step=
 minRR = input.float(2.0, "RR >= ", minval=0.5, step=0.25, group=groupFilters)
 stopBufAtr = input.float(0.25, "Stop buffer (x ATR)", minval=0.0, step=0.05, group=groupFilters)
 
-extendedAtr = input.float(2.0, "Extended if distance to EMA20 > x ATR", minval=0.5, step=0.25, group=groupFilters)
+extendedAtr = input.float(2.0, "Extended if distance to structure > x ATR", minval=0.5, step=0.25, group=groupFilters)
 climaxBars = input.int(4, "Climax check window (bars)", minval=2, maxval=10, group=groupFilters)
 climaxTrAtr = input.float(2.0, "Climax: TR >= x ATR", minval=1.0, step=0.1, group=groupFilters)
 
@@ -151,6 +151,7 @@ bbWidth = (bbU - bbL) / math.max(1e-10, basis)
 bbWidthMA = ta.sma(bbWidth, bbLen)
 isCompression = bbWidth < bbWidthMA
 isExpansion = bbWidth > bbWidthMA
+wasCompression = bar_index > 0 ? (isCompression[1] == true) : false
 
 // Structure pivots
 ph = ta.pivothigh(high, pivLen, pivLen)
@@ -204,7 +205,7 @@ regimeTxt = regimeClass
 // Market phase (Blueprint-style context)
 phaseTxt = isUnstable ? "TRANSITION" : isTrend ? (isExpansion ? "EXPANSION" : "TREND CONT.") : (isRange ? (isCompression ? "COMPRESSION" : "ROTATION") : "TRANSITION")
 
-// Location health with fallback: W -> M -> 12M -> ATR proxy.
+// Location state with fallback: W -> M -> 12M -> ATR proxy.
 pivotSupport = f_pickSupport(lastPL, prevPL, close)
 pivotResist  = f_pickResist(lastPH, prevPH, close)
 
@@ -233,16 +234,23 @@ distToSupport = not na(nearestSupport) ? math.abs(close - nearestSupport) : na
 distToResist  = not na(nearestResist)  ? math.abs(close - nearestResist)  : na
 nearSupport = not na(distToSupport) and distToSupport <= 1.0*atr
 nearResist  = not na(distToResist)  and distToResist  <= 1.0*atr
+distToSupportAtr = atr > 0 and not na(distToSupport) ? (distToSupport / atr) : na
+distToResistAtr  = atr > 0 and not na(distToResist)  ? (distToResist  / atr) : na
+atSupport = not na(distToSupportAtr) and distToSupportAtr <= 0.5
+atResist  = not na(distToResistAtr)  and distToResistAtr  <= 0.5
 
-extended = distTo20 > extendedAtr * atr
+distSupportSafe = na(distToSupport) ? 1e10 : distToSupport
+distResistSafe = na(distToResist) ? 1e10 : distToResist
+nearestStructureDist = math.min(distSupportSafe, distResistSafe)
+extended = atr > 0 ? nearestStructureDist > extendedAtr * atr : false
 
 // Location anchor (priority: price levels -> EMA20/SMA50 -> SMA200)
 callLocAnchor = nearSupport ? "SUPPORT" : (nearEMA20 ? "EMA20" : (nearSMA50 ? "SMA50" : (nearSMA200 ? "SMA200" : "MID")))
 putLocAnchor  = nearResist  ? "RESISTANCE" : (nearEMA20 ? "EMA20" : (nearSMA50 ? "SMA50" : (nearSMA200 ? "SMA200" : "MID")))
 
 // Structure supports multi-day move
-structureSupportsMoveBull = bullStructure and (isTrend or (isCompression and isExpansion))
-structureSupportsMoveBear = bearStructure and (isTrend or (isCompression and isExpansion))
+structureSupportsMoveBull = bullStructure and (isTrend or (wasCompression and isExpansion))
+structureSupportsMoveBear = bearStructure and (isTrend or (wasCompression and isExpansion))
 
 // Volatility controlled
 volControlled = not isUnstable and not hasClimax
@@ -424,7 +432,7 @@ f_failReason(_id, _isPut) =>
     else if _id == 6
         not volControlled ? "volatility not controlled" : (extended ? "price extended" : "bias neutral")
     else if _id == 7
-        extended ? "price extended" : (_isPut ? (not (nearMA or nearResist or isCompression) ? "not near level" : "location weak") : (not (nearMA or nearSupport or isCompression) ? "not near level" : "location weak"))
+        extended ? "price extended" : (_isPut ? (not (nearMA or nearResist or isCompression) ? "not near level" : "location state weak") : (not (nearMA or nearSupport or isCompression) ? "not near level" : "location state weak"))
     else if _id == 8
         not isTrend ? "no trend regime" : (not volControlled ? "volatility not controlled" : "bias neutral")
     else if _id == 9
@@ -504,9 +512,9 @@ else
     f_applyColVisibility(t, row)
     row += 1
 
-    locPut  = putQ7 ? "OK" : (extended ? "EXT" : "MID")
-    locCall = callQ7 ? "OK" : (extended ? "EXT" : "MID")
-    f_metricRow(t, row, "Location health", locPut, f_statusColor(putQ7, false), locCall, f_statusColor(callQ7, false))
+    locPut  = extended ? "EXTENDED" : (atResist ? "AT RESISTANCE" : (nearResist ? "NEAR RESISTANCE" : (nearEMA20 ? "NEAR EMA20" : (nearSMA50 ? "NEAR SMA50" : (nearSMA200 ? "NEAR SMA200" : "MID")))))
+    locCall = extended ? "EXTENDED" : (atSupport ? "AT SUPPORT" : (nearSupport ? "NEAR SUPPORT" : (nearEMA20 ? "NEAR EMA20" : (nearSMA50 ? "NEAR SMA50" : (nearSMA200 ? "NEAR SMA200" : "MID")))))
+    f_metricRow(t, row, "Location state", locPut, f_statusColor(putQ7, false), locCall, f_statusColor(callQ7, false))
     f_applyColVisibility(t, row)
     row += 1
 
@@ -538,7 +546,7 @@ else
         row += 1
         f_checkRow(t, row, 6, "6) Overnight permission", w6, putQ6, callQ6, false, false)
         row += 1
-        f_checkRow(t, row, 7, "7) Location is healthy", w7, putQ7, callQ7, false, false)
+        f_checkRow(t, row, 7, "7) Location state", w7, putQ7, callQ7, false, false)
         row += 1
         f_checkRow(t, row, 8, "8) Index supports RS/RW stocks", w8, putQ8, callQ8, false, false)
         row += 1
