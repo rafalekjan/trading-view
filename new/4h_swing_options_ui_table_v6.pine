@@ -504,7 +504,7 @@ f_clearTable(_rows) =>
         for c = 0 to 2
             f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
 
-maxRows = 40
+maxRows = 44
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -623,14 +623,20 @@ else
     putGrade  = f_capGrade(putBaseGrade, putCapGrade)
     callGrade = f_capGrade(callBaseGrade, callCapGrade)
 
-    // Status uses hard HTF filters. Level reaction (Q2) and volume quality (Q5)
-    // remain soft quality modifiers via score/grade and do not block status.
-    putStatus = regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not putHasRR ? "NO TRADE (RR)" : (extended ? "WAIT PULLBACK" : (not putQ6 ? "WAIT MARKET" : (not putRSOk ? "WAIT EDGE" : (not putLocationOk ? "WAIT LOCATION" : (not putQ9 ? "NO TRADE (RISK)" : (not putQ7 ? "WAIT STRUCTURE" : "ENTRY NOW")))))))
-    callStatus = regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not callHasRR ? "NO TRADE (RR)" : (extended ? "WAIT PULLBACK" : (not callQ6 ? "WAIT MARKET" : (not callRSOk ? "WAIT EDGE" : (not callLocationOk ? "WAIT LOCATION" : (not callQ9 ? "NO TRADE (RISK)" : (not callQ7 ? "WAIT STRUCTURE" : "ENTRY NOW")))))))
-    putStatusCol = str.contains(putStatus, "NO TRADE") ? colBad : (putStatus == "ENTRY NOW" ? colOk : colBg)
-    callStatusCol = str.contains(callStatus, "NO TRADE") ? colBad : (callStatus == "ENTRY NOW" ? colOk : colBg)
+    // Raw status follows the decision pipeline: regime -> reward -> risk -> market -> structure -> edge -> location.
+    putStatus = regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not putHasRR ? "NO TRADE (RR)" : (not putQ9 ? "NO TRADE (RISK)" : (not putQ6 ? "WAIT MARKET" : (not putQ7 ? "WAIT STRUCTURE" : (not putRSOk ? "WAIT EDGE" : (extended ? "WAIT PULLBACK" : (not putLocationOk ? "WAIT LOCATION" : "ENTRY NOW")))))))
+    callStatus = regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not callHasRR ? "NO TRADE (RR)" : (not callQ9 ? "NO TRADE (RISK)" : (not callQ6 ? "WAIT MARKET" : (not callQ7 ? "WAIT STRUCTURE" : (not callRSOk ? "WAIT EDGE" : (extended ? "WAIT PULLBACK" : (not callLocationOk ? "WAIT LOCATION" : "ENTRY NOW")))))))
+    // Keep 4H state close to the raw engine so the scan shows what is missing.
+    putState = str.contains(putStatus, "NO TRADE") ? "NO TRADE" : (putStatus == "ENTRY NOW" ? "READY" : (putStatus == "WAIT PULLBACK" ? "WAIT PULLBACK" : (putStatus == "WAIT MARKET" ? "WAIT MARKET" : (putStatus == "WAIT EDGE" ? "WAIT EDGE" : (putStatus == "WAIT LOCATION" ? "WAIT LEVEL" : "WAIT STRUCTURE")))))
+    callState = str.contains(callStatus, "NO TRADE") ? "NO TRADE" : (callStatus == "ENTRY NOW" ? "READY" : (callStatus == "WAIT PULLBACK" ? "WAIT PULLBACK" : (callStatus == "WAIT MARKET" ? "WAIT MARKET" : (callStatus == "WAIT EDGE" ? "WAIT EDGE" : (callStatus == "WAIT LOCATION" ? "WAIT LEVEL" : "WAIT STRUCTURE")))))
+    putStateCol = putState == "READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
+    callStateCol = callState == "READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
+    putNextStep = putState == "READY" ? "DROP TO 1H" : (putState == "WAIT PULLBACK" ? "WAIT EMA20/LEVEL" : (putState == "WAIT LEVEL" ? "WAIT KEY LEVEL" : (putState == "WAIT MARKET" ? "CHECK MARKET" : (putState == "WAIT EDGE" ? "WAIT RS/RW" : (putState == "WAIT STRUCTURE" ? "WAIT CLEAN STRUCTURE" : "SKIP")))))
+    callNextStep = callState == "READY" ? "DROP TO 1H" : (callState == "WAIT PULLBACK" ? "WAIT EMA20/LEVEL" : (callState == "WAIT LEVEL" ? "WAIT KEY LEVEL" : (callState == "WAIT MARKET" ? "CHECK MARKET" : (callState == "WAIT EDGE" ? "WAIT RS/RW" : (callState == "WAIT STRUCTURE" ? "WAIT CLEAN STRUCTURE" : "SKIP")))))
+    putNextStepCol = putState == "READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
+    callNextStepCol = callState == "READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
 
-    f_metricRow(row, "Setup score (0-100)", str.tostring(putScore, "#.##"), colBg, str.tostring(callScore, "#.##"), colBg)
+    f_metricRow(row, "State", putState, putStateCol, callState, callStateCol)
     f_applyColVisibility(row)
     row += 1
 
@@ -638,7 +644,7 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Status", putStatus, putStatusCol, callStatus, callStatusCol)
+    f_metricRow(row, "Next step", putNextStep, putNextStepCol, callNextStep, callNextStepCol)
     f_applyColVisibility(row)
     row += 1
 
@@ -719,6 +725,10 @@ else
     if uiShowDetails
         row += 1
         f_sectionRow(row, "CHECKS")
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "Setup score (0-100)", str.tostring(putScore, "#.##"), colBg, str.tostring(callScore, "#.##"), colBg)
         f_applyColVisibility(row)
         row += 1
 

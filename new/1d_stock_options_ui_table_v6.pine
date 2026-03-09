@@ -472,7 +472,7 @@ f_clearTable(_rows) =>
         for c = 0 to 2
             f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
 
-maxRows = 56
+maxRows = 60
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -582,6 +582,31 @@ else
     putScoreCapped = f_capScoreByGrade(putScore, putCapGrade)
     callScoreCapped = f_capScoreByGrade(callScore, callCapGrade)
 
+    // DECISION
+    f_sectionRow(row, "DECISION")
+    f_applyColVisibility(row)
+    row += 1
+
+    putState = putDailyCandidate ? "SHORT CANDIDATE" : (putNoTradeDaily ? "NO TRADE" : "WATCH")
+    callState = callDailyCandidate ? "LONG CANDIDATE" : (callNoTradeDaily ? "NO TRADE" : "WATCH")
+    putStateCol = putDailyCandidate ? colOk : (putNoTradeDaily ? colBad : colBg)
+    callStateCol = callDailyCandidate ? colOk : (callNoTradeDaily ? colBad : colBg)
+    putNextStep = putDailyCandidate ? "SCAN 4H" : (putNoTradeDaily ? "SKIP" : "WAIT LOCATION")
+    callNextStep = callDailyCandidate ? "SCAN 4H" : (callNoTradeDaily ? "SKIP" : "WAIT LOCATION")
+    putNextStepCol = putDailyCandidate ? colOk : (putNoTradeDaily ? colBad : colBg)
+    callNextStepCol = callDailyCandidate ? colOk : (callNoTradeDaily ? colBad : colBg)
+    f_metricRow(row, "State", putState, putStateCol, callState, callStateCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Grade", putGrade, colBg, callGrade, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Next step", putNextStep, putNextStepCol, callNextStep, callNextStepCol)
+    f_applyColVisibility(row)
+    row += 1
+
     // DIRECTION
     f_sectionRow(row, "DIRECTION")
     f_applyColVisibility(row)
@@ -597,6 +622,14 @@ else
 
     structureUsableTxt = structureUsable ? "YES" : "NO"
     f_metricRow(row, "Structure usable", structureUsableTxt, f_statusColor(structureUsable, false), structureUsableTxt, f_statusColor(structureUsable, false))
+    f_applyColVisibility(row)
+    row += 1
+
+    putBiasTxt = putDirectionOk ? "SHORT BIAS" : "NEUTRAL"
+    callBiasTxt = callDirectionOk ? "LONG BIAS" : "NEUTRAL"
+    putBiasCol = putDirectionOk ? colOk : colNA
+    callBiasCol = callDirectionOk ? colOk : colNA
+    f_metricRow(row, "Bias", putBiasTxt, putBiasCol, callBiasTxt, callBiasCol)
     f_applyColVisibility(row)
     row += 1
 
@@ -656,27 +689,6 @@ else
     row += 1
 
     f_metricRow(row, "RR to next obstacle", rrPutTxt, f_statusColor(putHasRR, na(putRR)), rrCallTxt, f_statusColor(callHasRR, na(callRR)))
-    f_applyColVisibility(row)
-    row += 1
-
-    // DECISION
-    f_sectionRow(row, "DECISION")
-    f_applyColVisibility(row)
-    row += 1
-
-    putBiasTxt = putDirectionOk ? "SHORT BIAS" : "NEUTRAL"
-    callBiasTxt = callDirectionOk ? "LONG BIAS" : "NEUTRAL"
-    putBiasCol = putDirectionOk ? colOk : colNA
-    callBiasCol = callDirectionOk ? colOk : colNA
-    f_metricRow(row, "Bias", putBiasTxt, putBiasCol, callBiasTxt, callBiasCol)
-    f_applyColVisibility(row)
-    row += 1
-
-    putDecisionTxt = putDailyCandidate ? "VALID DAILY CANDIDATE" : (putNoTradeDaily ? "NO TRADE" : "WATCHLIST")
-    callDecisionTxt = callDailyCandidate ? "VALID DAILY CANDIDATE" : (callNoTradeDaily ? "NO TRADE" : "WATCHLIST")
-    putDecisionCol = putDailyCandidate ? colOk : (putNoTradeDaily ? colBad : colBg)
-    callDecisionCol = callDailyCandidate ? colOk : (callNoTradeDaily ? colBad : colBg)
-    f_metricRow(row, "Daily decision", putDecisionTxt, putDecisionCol, callDecisionTxt, callDecisionCol)
     f_applyColVisibility(row)
     row += 1
 

@@ -104,6 +104,15 @@ f_grade(_score) =>
     else
         "D"
 
+f_gradeRank(_g) =>
+    _g == "A" ? 4 : _g == "B" ? 3 : _g == "C" ? 2 : 1
+
+f_gradeFromRank(_r) =>
+    _r >= 4 ? "A" : _r == 3 ? "B" : _r == 2 ? "C" : "D"
+
+f_capGrade(_base, _cap) =>
+    f_gradeFromRank(math.min(f_gradeRank(_base), f_gradeRank(_cap)))
+
 f_score(_ok, _w) => _ok ? _w : 0
 
 f_pickSupport(_last, _prev, _px) =>
@@ -465,7 +474,7 @@ f_updateSrLine(_ln, _y, _col) =>
     _out
 
 var table t = table.new(position.top_right, 3, 1, border_width=1)
-maxRows = 44
+maxRows = 48
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -488,19 +497,36 @@ else
     f_applyColVisibility(t, row)
     row += 1
 
-    // SUMMARY
-    f_sectionRow(t, row, "SUMMARY")
+    // DECISION
+    f_sectionRow(t, row, "DECISION")
     row += 1
 
-    putGrade  = f_grade(putScore)
-    callGrade = f_grade(callScore)
+    putState = (isUnstable or hasClimax or regimeChangeRisk) ? "UNSTABLE" : (putQ2 and putQ3 and putQ7 and putHasRR and regimeTxt == "TREND" ? "TREND SHORT" : (regimeTxt == "RANGE" ? "RANGE" : "TRANSITION"))
+    callState = (isUnstable or hasClimax or regimeChangeRisk) ? "UNSTABLE" : (callQ2 and callQ3 and callQ7 and callHasRR and regimeTxt == "TREND" ? "TREND LONG" : (regimeTxt == "RANGE" ? "RANGE" : "TRANSITION"))
+    putStateCol = putState == "TREND SHORT" ? colOk : (putState == "UNSTABLE" ? colBad : colBg)
+    callStateCol = callState == "TREND LONG" ? colOk : (callState == "UNSTABLE" ? colBad : colBg)
+    putCapGrade = putState == "UNSTABLE" ? "D" : (putState == "TREND SHORT" ? "A" : "C")
+    callCapGrade = callState == "UNSTABLE" ? "D" : (callState == "TREND LONG" ? "A" : "C")
+    putGrade  = f_capGrade(f_grade(putScore), putCapGrade)
+    callGrade = f_capGrade(f_grade(callScore), callCapGrade)
+    putNextStep = putState == "TREND SHORT" ? "ALLOW SHORT SCANS" : (putState == "UNSTABLE" ? "NO SWING EDGE" : "DEFENSIVE ONLY")
+    callNextStep = callState == "TREND LONG" ? "ALLOW LONG SCANS" : (callState == "UNSTABLE" ? "NO SWING EDGE" : "DEFENSIVE ONLY")
+    putNextStepCol = putState == "TREND SHORT" ? colOk : (putState == "UNSTABLE" ? colBad : colBg)
+    callNextStepCol = callState == "TREND LONG" ? colOk : (callState == "UNSTABLE" ? colBad : colBg)
 
-    f_metricRow(t, row, "Total score (0-100)", str.tostring(putScore), colBg, str.tostring(callScore), colBg)
+    f_metricRow(t, row, "State", putState, putStateCol, callState, callStateCol)
     f_applyColVisibility(t, row)
     row += 1
 
     f_metricRow(t, row, "Grade", putGrade, colBg, callGrade, colBg)
     f_applyColVisibility(t, row)
+    row += 1
+
+    f_metricRow(t, row, "Next step", putNextStep, putNextStepCol, callNextStep, callNextStepCol)
+    f_applyColVisibility(t, row)
+    row += 1
+    
+    f_sectionRow(t, row, "")
     row += 1
 
     biasTxt = bullBias ? "BULL" : bearBias ? "BEAR" : "NEUTRAL"
@@ -559,8 +585,12 @@ else
         f_sectionRow(t, row, "DETAILS: values")
         row += 1
 
+        f_valueRow(t, row, "Core score (0-100)", str.tostring(putScore, "#.##"), str.tostring(callScore, "#.##"))
+        f_applyColVisibility(t, row)
+        row += 1
+
         f_valueRow(t, row, "ATR / ADX / TR", str.tostring(atr, "#.####") + " / " + str.tostring(adx, "#.##") + " / " + str.tostring(tr, "#.####"),
-                                  str.tostring(atr, "#.####") + " / " + str.tostring(adx, "#.##") + " / " + str.tostring(tr, "#.####"))
+                                   str.tostring(atr, "#.####") + " / " + str.tostring(adx, "#.##") + " / " + str.tostring(tr, "#.####"))
         f_applyColVisibility(t, row)
         row += 1
 

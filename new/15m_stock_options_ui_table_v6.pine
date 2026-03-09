@@ -490,7 +490,7 @@ f_clearTable(_rows) =>
         for c = 0 to 2
             f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
 
-maxRows = 40
+maxRows = 44
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -586,8 +586,8 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    // ENTRY DECISION (single score for fast read)
-    f_sectionRow(row, "ENTRY DECISION")
+    // DECISION
+    f_sectionRow(row, "DECISION")
     f_applyColVisibility(row)
     row += 1
 
@@ -604,10 +604,16 @@ else
 
     putStatus = putNoTradeState ? putNoTradeStatus : (putWaitPullbackState ? "WAIT PULLBACK" : (putWaitReversalState ? "WAIT REVERSAL" : (putEntryNowState ? "ENTRY NOW" : (putSetupDevelopingState ? "SETUP DEVELOPING" : "WAIT REVERSAL"))))
     callStatus = callNoTradeState ? callNoTradeStatus : (callWaitPullbackState ? "WAIT PULLBACK" : (callWaitReversalState ? "WAIT REVERSAL" : (callEntryNowState ? "ENTRY NOW" : (callSetupDevelopingState ? "SETUP DEVELOPING" : "WAIT REVERSAL"))))
-    putStatusCol = putEntryNowState ? colOk : (putNoTradeState ? colBad : colBg)
-    callStatusCol = callEntryNowState ? colOk : (callNoTradeState ? colBad : colBg)
+    putState = putNoTradeState ? "NO TRADE" : (putWaitPullbackState ? "WAIT PULLBACK" : (putEntryNowState ? "ENTRY READY" : "WAIT TRIGGER"))
+    callState = callNoTradeState ? "NO TRADE" : (callWaitPullbackState ? "WAIT PULLBACK" : (callEntryNowState ? "ENTRY READY" : "WAIT TRIGGER"))
+    putStateCol = putState == "ENTRY READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
+    callStateCol = callState == "ENTRY READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
+    putNextStep = putState == "ENTRY READY" ? "EXECUTE" : (putState == "NO TRADE" ? "SKIP" : "WAIT REACTION")
+    callNextStep = callState == "ENTRY READY" ? "EXECUTE" : (callState == "NO TRADE" ? "SKIP" : "WAIT REACTION")
+    putNextStepCol = putState == "ENTRY READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
+    callNextStepCol = callState == "ENTRY READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
 
-    f_metricRow(row, "Entry score (0-100)", str.tostring(putScore, "#.##"), colBg, str.tostring(callScore, "#.##"), colBg)
+    f_metricRow(row, "State", putState, putStateCol, callState, callStateCol)
     f_applyColVisibility(row)
     row += 1
 
@@ -615,7 +621,7 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Status", putStatus, putStatusCol, callStatus, callStatusCol)
+    f_metricRow(row, "Next step", putNextStep, putNextStepCol, callNextStep, callNextStepCol)
     f_applyColVisibility(row)
     row += 1
 
@@ -692,6 +698,10 @@ else
     if uiShowDetails
         row += 1
         f_sectionRow(row, "CHECKS")
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "Entry score (0-100)", str.tostring(putScore, "#.##"), colBg, str.tostring(callScore, "#.##"), colBg)
         f_applyColVisibility(row)
         row += 1
 

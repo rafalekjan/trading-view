@@ -536,7 +536,7 @@ f_clearTable(_rows) =>
 
 // Build table size dynamically (but table must be created with fixed rows)
 // We create max rows and use only what we need.
-maxRows = 60
+maxRows = 64
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -673,6 +673,18 @@ else
     putNoTradeStatus  = not putDirectionalOk  ? "NO TRADE (NO THESIS)" : (not putQ5  ? "NO TRADE (NO STOP)" : "NO TRADE (RR)")
     callStatus = callNoTradeState ? callNoTradeStatus : (callWaitPullbackState ? "WAIT PULLBACK" : (callWaitReversalState ? "WAIT REVERSAL" : (callSetupDevelopingState ? "SETUP DEVELOPING" : (callReadyForLtfState ? "READY FOR LTF CONFIRMATION" : "WAIT REVERSAL"))))
     putStatus  = putNoTradeState  ? putNoTradeStatus  : (putWaitPullbackState  ? "WAIT PULLBACK" : (putWaitReversalState  ? "WAIT REVERSAL" : (putSetupDevelopingState  ? "SETUP DEVELOPING" : (putReadyForLtfState  ? "READY FOR LTF CONFIRMATION" : "WAIT REVERSAL"))))
+    callState = callNoTradeState ? "NO TRADE" : (callReadyForLtfState ? "SETUP READY" : (callSetupDevelopingState ? "SETUP DEVELOPING" : "WAIT 1H CONFIRMATION"))
+    putState  = putNoTradeState  ? "NO TRADE" : (putReadyForLtfState  ? "SETUP READY" : (putSetupDevelopingState  ? "SETUP DEVELOPING" : "WAIT 1H CONFIRMATION"))
+    callStateCol = callState == "SETUP READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
+    putStateCol = putState == "SETUP READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
+    callNextStep = callState == "SETUP READY" ? "DROP TO 15M" : (callState == "NO TRADE" ? "SKIP" : "WAIT REACTION")
+    putNextStep  = putState == "SETUP READY" ? "DROP TO 15M" : (putState == "NO TRADE" ? "SKIP" : "WAIT REACTION")
+    callNextStepCol = callState == "SETUP READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
+    putNextStepCol = putState == "SETUP READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
+    callGradeCap = callState == "NO TRADE" ? "D" : (callState == "SETUP READY" ? "A" : (callState == "SETUP DEVELOPING" ? "B" : "C"))
+    putGradeCap  = putState == "NO TRADE" ? "D" : (putState == "SETUP READY" ? "A" : (putState == "SETUP DEVELOPING" ? "B" : "C"))
+    callGrade = f_capGrade(f_grade(callScore), callGradeCap)
+    putGrade  = f_capGrade(f_grade(putScore), putGradeCap)
 
     // Strict final decision gate for quick top-level answer.
     putFinalDecisionOk = putMarketOk and putTrendClarityOk and not messyStructure and putQ5 and putHasRR
@@ -721,11 +733,15 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Decision", putFinalDecisionTxt, putFinalDecisionOk ? colOk : colBad, callFinalDecisionTxt, callFinalDecisionOk ? colOk : colBad)
+    f_metricRow(row, "State", putState, putStateCol, callState, callStateCol)
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "Reason", putDecisionReason, colBg, callDecisionReason, colBg)
+    f_metricRow(row, "Grade", putGrade, colBg, callGrade, colBg)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Next step", putNextStep, putNextStepCol, callNextStep, callNextStepCol)
     f_applyColVisibility(row)
     row += 1
 
@@ -820,6 +836,10 @@ else
     if uiShowDetails
         row += 1
         f_sectionRow(row, "TRADE PLAN CHECKS")
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "Decision reason", putDecisionReason, colBg, callDecisionReason, colBg)
         f_applyColVisibility(row)
         row += 1
 
