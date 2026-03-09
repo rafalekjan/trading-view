@@ -20,6 +20,7 @@ groupTF = "Timeframe gating"
 onlyOn15m = input.bool(true, "Render table only on 15m", group=groupTF)
 
 groupBench = "HTF context (light)"
+benchSymbol = input.symbol("SPY", "Benchmark / market symbol", group=groupBench)
 htfTF = input.timeframe("60", "HTF for risk-compression compare", group=groupBench)
 dailyTF = input.timeframe("D", "Daily context TF (week type proxy)", group=groupBench)
 
@@ -182,12 +183,9 @@ bearMicro = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prev
 pivotSupport = f_pickSupport(lastPL, prevPL, close)
 pivotResist  = f_pickResist(lastPH, prevPH, close)
 
-wkLow  = request.security(syminfo.tickerid, "W", low[1])
-wkHigh = request.security(syminfo.tickerid, "W", high[1])
-moLow  = request.security(syminfo.tickerid, "M", low[1])
-moHigh = request.security(syminfo.tickerid, "M", high[1])
-yrLow  = request.security(syminfo.tickerid, "12M", low[1])
-yrHigh = request.security(syminfo.tickerid, "12M", high[1])
+[wkLow, wkHigh] = request.security(syminfo.tickerid, "W", [low[1], high[1]])
+[moLow, moHigh] = request.security(syminfo.tickerid, "M", [low[1], high[1]])
+[yrLow, yrHigh] = request.security(syminfo.tickerid, "12M", [low[1], high[1]])
 
 fallbackSupport = not na(wkLow) ? wkLow : (not na(moLow) ? moLow : (not na(yrLow) ? yrLow : na))
 fallbackResist  = not na(wkHigh) ? wkHigh : (not na(moHigh) ? moHigh : (not na(yrHigh) ? yrHigh : na))
@@ -201,8 +199,7 @@ nearSupport = not na(distS) and distS <= nearLevelAtr * atr
 nearResist  = not na(distR) and distR <= nearLevelAtr * atr
 
 // Day levels (intraday execution context): prior day high/low.
-pdh = request.security(syminfo.tickerid, "D", high[1])
-pdl = request.security(syminfo.tickerid, "D", low[1])
+[pdh, pdl] = request.security(syminfo.tickerid, "D", [high[1], low[1]])
 distPDH = not na(pdh) ? math.abs(close - pdh) : na
 distPDL = not na(pdl) ? math.abs(close - pdl) : na
 nearPDH = not na(distPDH) and distPDH <= nearLevelAtr * atr
@@ -301,9 +298,7 @@ callHasRR = not na(callRR) and callRR >= minRR
 putHasRR  = not na(putRR)  and putRR  >= minRR
 
 // Entry reduces risk (risk compression): compare to HTF pivot-based risk
-htfATR = request.security(syminfo.tickerid, htfTF, ta.atr(atrLen))
-htfPL  = request.security(syminfo.tickerid, htfTF, ta.pivotlow(low, pivLen, pivLen))
-htfPH  = request.security(syminfo.tickerid, htfTF, ta.pivothigh(high, pivLen, pivLen))
+[htfATR, htfPL, htfPH] = request.security(syminfo.tickerid, htfTF, [ta.atr(atrLen), ta.pivotlow(low, pivLen, pivLen), ta.pivothigh(high, pivLen, pivLen)])
 
 var float htfLastPL = na
 var float htfLastPH = na
@@ -333,8 +328,7 @@ callMomOk = (rsi >= rsiMid) and (macdHist >= 0) and (macdHist >= macdHist[1])
 putMomOk  = (rsi <= rsiMid) and (macdHist <= 0) and (macdHist <= macdHist[1])
 
 // Daily context (week-type proxy): avoid high-vol days; align with daily EMA50
-dATR = request.security(syminfo.tickerid, dailyTF, ta.atr(14))
-dATRsma20 = request.security(syminfo.tickerid, dailyTF, ta.sma(ta.atr(14), 20))
+[dATR, dATRsma20] = request.security(syminfo.tickerid, dailyTF, [ta.atr(14), ta.sma(ta.atr(14), 20)])
 dHighVol = dATR > dATRsma20 * 1.2
 
 callWeekOk = not dHighVol
@@ -342,13 +336,7 @@ putWeekOk  = not dHighVol
 
 // 1H gate: 15m is trigger only when 1H context is ready
 // Use closed 1H candle values to avoid intra-hour gate flicker.
-h1Close = request.security(syminfo.tickerid, "60", close[1])
-h1Ema20 = request.security(syminfo.tickerid, "60", ta.ema(close, 20)[1])
-h1Rsi = request.security(syminfo.tickerid, "60", ta.rsi(close, rsiLen)[1])
-h1MacdHist = request.security(syminfo.tickerid, "60", f_macdHist()[1])
-h1MacdHistPrev = request.security(syminfo.tickerid, "60", f_macdHist()[2])
-h1BullCtx = request.security(syminfo.tickerid, "60", close[1] > ta.ema(close, 50)[1])
-h1BearCtx = request.security(syminfo.tickerid, "60", close[1] < ta.ema(close, 50)[1])
+[h1Close, h1Ema20, h1Rsi, h1MacdHist, h1MacdHistPrev, h1BullCtx, h1BearCtx] = request.security(syminfo.tickerid, "60", [close[1], ta.ema(close, 20)[1], ta.rsi(close, rsiLen)[1], f_macdHist()[1], f_macdHist()[2], close[1] > ta.ema(close, 50)[1], close[1] < ta.ema(close, 50)[1]])
 
 h1MacdNearZeroAbs = h1Close * h1MacdNearZeroPct
 h1MacdNearZero = math.abs(h1MacdHist) <= h1MacdNearZeroAbs
@@ -360,6 +348,90 @@ h1PutReady  = h1BearCtx and h1Close <= h1Ema20 and h1PutMomentumOk
 
 h1CallStateTxt = h1CallReady ? "READY" : (h1BullCtx ? "PULLBACK" : "NEUTRAL")
 h1PutStateTxt  = h1PutReady  ? "READY" : (h1BearCtx ? "PULLBACK" : "NEUTRAL")
+
+// HTF CONTEXT (lightweight state-only summaries aligned to the higher-TF panels)
+// Market 1D context uses the benchmark symbol as the market proxy.
+[m1dClose, m1dAtr, m1dTr, m1dEma20, m1dEma20_5, m1dSma50, m1dSma50_5, m1dSma200, m1dStdev10, m1dStdev50] = request.security(benchSymbol, dailyTF, [close, ta.atr(14), ta.tr(true), ta.ema(close, 20), ta.ema(close, 20)[5], ta.sma(close, 50), ta.sma(close, 50)[5], ta.sma(close, 200), ta.stdev(close, 10), ta.stdev(close, 50)])
+m1dBullBias = m1dClose > m1dSma200 and m1dEma20 > m1dEma20_5 and m1dSma50 > m1dSma50_5
+m1dBearBias = m1dClose < m1dSma200 and m1dEma20 < m1dEma20_5 and m1dSma50 < m1dSma50_5
+m1dUnstable = (m1dTr >= 2.2 * m1dAtr) or (m1dStdev10 > 1.5 * m1dStdev50)
+m1dRange = not m1dUnstable and not m1dBullBias and not m1dBearBias
+m1dPutStateTxt = m1dUnstable ? "UNSTABLE" : (m1dBearBias ? "TREND SHORT" : (m1dRange ? "RANGE" : "TRANSITION"))
+m1dCallStateTxt = m1dUnstable ? "UNSTABLE" : (m1dBullBias ? "TREND LONG" : (m1dRange ? "RANGE" : "TRANSITION"))
+m1dPutStateCol = m1dPutStateTxt == "TREND SHORT" ? colOk : (m1dPutStateTxt == "UNSTABLE" ? colBad : colBg)
+m1dCallStateCol = m1dCallStateTxt == "TREND LONG" ? colOk : (m1dCallStateTxt == "UNSTABLE" ? colBad : colBg)
+
+// Stock 1D candidate filter uses Daily direction, location, and RR only.
+[d1Close, d1Atr, d1Ema20, d1Ema20_5, d1Sma50, d1Sma50_5, d1Sma200, d1LastPL, d1LastPH] = request.security(syminfo.tickerid, dailyTF, [close, ta.atr(atrLen), ta.ema(close, 20), ta.ema(close, 20)[5], ta.sma(close, 50), ta.sma(close, 50)[5], ta.sma(close, 200), ta.valuewhen(not na(ta.pivotlow(low, pivLen, pivLen)), ta.pivotlow(low, pivLen, pivLen), 0), ta.valuewhen(not na(ta.pivothigh(high, pivLen, pivLen)), ta.pivothigh(high, pivLen, pivLen), 0)])
+d1Support = not na(d1LastPL) ? d1LastPL : (d1Close - 2.0 * d1Atr)
+d1Resist = not na(d1LastPH) ? d1LastPH : (d1Close + 2.0 * d1Atr)
+d1NearSupport = math.abs(d1Close - d1Support) <= d1Atr
+d1NearResist = math.abs(d1Close - d1Resist) <= d1Atr
+d1NearEma20 = math.abs(d1Close - d1Ema20) <= d1Atr
+d1NearSma50 = math.abs(d1Close - d1Sma50) <= d1Atr
+d1BullBias = d1Close > d1Sma200 and d1Ema20 > d1Ema20_5 and d1Sma50 > d1Sma50_5
+d1BearBias = d1Close < d1Sma200 and d1Ema20 < d1Ema20_5 and d1Sma50 < d1Sma50_5
+d1CallLocationOk = d1NearSupport or d1NearEma20 or d1NearSma50
+d1PutLocationOk = d1NearResist or d1NearEma20 or d1NearSma50
+d1CallStop = d1Support - stopBufAtr * d1Atr
+d1PutStop = d1Resist + stopBufAtr * d1Atr
+d1CallRisk = math.abs(d1Close - d1CallStop)
+d1PutRisk = math.abs(d1PutStop - d1Close)
+d1CallReward = math.max(math.max(0.0, d1Resist - d1Close), 1.5 * d1CallRisk)
+d1PutReward = math.max(math.max(0.0, d1Close - d1Support), 1.5 * d1PutRisk)
+d1CallRR = d1CallRisk > 0 ? (d1CallReward / d1CallRisk) : na
+d1PutRR = d1PutRisk > 0 ? (d1PutReward / d1PutRisk) : na
+d1CallHasRR = not na(d1CallRR) and d1CallRR >= 2.0
+d1PutHasRR = not na(d1PutRR) and d1PutRR >= 2.0
+d1CallCandidate = d1BullBias and not m1dUnstable and not m1dBearBias and d1CallLocationOk and d1CallHasRR
+d1PutCandidate = d1BearBias and not m1dUnstable and not m1dBullBias and d1PutLocationOk and d1PutHasRR
+d1CallNoTrade = m1dUnstable or not d1CallHasRR
+d1PutNoTrade = m1dUnstable or not d1PutHasRR
+d1PutStateTxt = d1PutCandidate ? "SHORT CANDIDATE" : (d1PutNoTrade ? "NO TRADE" : "WATCH")
+d1CallStateTxt = d1CallCandidate ? "LONG CANDIDATE" : (d1CallNoTrade ? "NO TRADE" : "WATCH")
+d1PutStateCol = d1PutCandidate ? colOk : (d1PutNoTrade ? colBad : colBg)
+d1CallStateCol = d1CallCandidate ? colOk : (d1CallNoTrade ? colBad : colBg)
+
+// 4H opportunity scan mirrors the 4H vocabulary with lightweight gating.
+[h4Close, h4Atr, h4Tr, h4Ema20, h4Sma50, h4Sma200, h4Rsi, h4MacdHist, h4VolSma, h4Volume, h4LastPL, h4LastPH] = request.security(syminfo.tickerid, "240", [close, ta.atr(atrLen), ta.tr(true), ta.ema(close, 20), ta.sma(close, 50), ta.sma(close, 200), ta.rsi(close, rsiLen), f_macdHist(), ta.sma(volume, volLen), volume, ta.valuewhen(not na(ta.pivotlow(low, pivLen, pivLen)), ta.pivotlow(low, pivLen, pivLen), 0), ta.valuewhen(not na(ta.pivothigh(high, pivLen, pivLen)), ta.pivothigh(high, pivLen, pivLen), 0)])
+[h4BenchEma20, h4BenchEma50] = request.security(benchSymbol, "240", [ta.ema(close, 20), ta.ema(close, 50)])
+h4Support = not na(h4LastPL) ? h4LastPL : (h4Close - 2.0 * h4Atr)
+h4Resist = not na(h4LastPH) ? h4LastPH : (h4Close + 2.0 * h4Atr)
+h4NearSupport = math.abs(h4Close - h4Support) <= 0.9 * h4Atr
+h4NearResist = math.abs(h4Close - h4Resist) <= 0.9 * h4Atr
+h4NearMA = math.abs(h4Close - h4Ema20) <= 0.9 * h4Atr or math.abs(h4Close - h4Sma50) <= 0.9 * h4Atr or math.abs(h4Close - h4Sma200) <= 0.9 * h4Atr
+h4DistEmaAtr = h4Atr > 0 ? (math.abs(h4Close - h4Ema20) / h4Atr) : na
+h4Extended = not na(h4DistEmaAtr) and h4DistEmaAtr > 1.4
+h4StructureClean = h4Atr > 0 and math.abs(h4Ema20 - h4Sma50) / h4Atr > 0.4 and h4Volume >= 0.5 * h4VolSma
+h4Unstable = (h4Tr >= 2.2 * h4Atr)
+h4CallMarketOk = h4BenchEma20 >= h4BenchEma50
+h4PutMarketOk = h4BenchEma20 <= h4BenchEma50
+h4CallEdgeOk = h4Close >= h4Sma200 and h4Rsi >= 45 and h4MacdHist >= 0
+h4PutEdgeOk = h4Close <= h4Sma200 and h4Rsi <= 55 and h4MacdHist <= 0
+h4CallLocationOk = (h4NearSupport or h4NearMA) and not h4NearResist and not h4Extended
+h4PutLocationOk = (h4NearResist or h4NearMA) and not h4NearSupport and not h4Extended
+h4CallStop = h4Support - stopBufAtr * h4Atr
+h4PutStop = h4Resist + stopBufAtr * h4Atr
+h4CallRisk = math.abs(h4Close - h4CallStop)
+h4PutRisk = math.abs(h4PutStop - h4Close)
+h4CallReward = math.max(math.abs(h4Resist - h4Close), 1.5 * h4CallRisk)
+h4PutReward = math.max(math.abs(h4Close - h4Support), 1.5 * h4PutRisk)
+h4CallRR = h4CallRisk > 0 ? (h4CallReward / h4CallRisk) : na
+h4PutRR = h4PutRisk > 0 ? (h4PutReward / h4PutRisk) : na
+h4CallHasRR = not na(h4CallRR) and h4CallRR >= 2.0
+h4PutHasRR = not na(h4PutRR) and h4PutRR >= 2.0
+h4CallRiskOk = not na(h4CallStop) and h4CallRisk <= 4.5 * h4Atr
+h4PutRiskOk = not na(h4PutStop) and h4PutRisk <= 4.5 * h4Atr
+h4PutStateTxt = h4Unstable ? "NO TRADE" : (not h4PutHasRR ? "NO TRADE" : (not h4PutRiskOk ? "NO TRADE" : (not h4PutMarketOk ? "WAIT MARKET" : (not h4StructureClean ? "WAIT STRUCTURE" : (not h4PutEdgeOk ? "WAIT EDGE" : (h4Extended ? "WAIT PULLBACK" : (not h4PutLocationOk ? "WAIT LEVEL" : "READY")))))))
+h4CallStateTxt = h4Unstable ? "NO TRADE" : (not h4CallHasRR ? "NO TRADE" : (not h4CallRiskOk ? "NO TRADE" : (not h4CallMarketOk ? "WAIT MARKET" : (not h4StructureClean ? "WAIT STRUCTURE" : (not h4CallEdgeOk ? "WAIT EDGE" : (h4Extended ? "WAIT PULLBACK" : (not h4CallLocationOk ? "WAIT LEVEL" : "READY")))))))
+h4PutStateCol = h4PutStateTxt == "READY" ? colOk : (h4PutStateTxt == "NO TRADE" ? colBad : colBg)
+h4CallStateCol = h4CallStateTxt == "READY" ? colOk : (h4CallStateTxt == "NO TRADE" ? colBad : colBg)
+
+// 1H setup-planning context uses the existing 1H gate and momentum readiness already present in 15m.
+h1PutSetupStateTxt = not h1BearCtx ? "NO TRADE" : (h1PutReady ? "SETUP READY" : (h1PutMomentumOk ? "SETUP DEVELOPING" : "WAIT 1H CONFIRMATION"))
+h1CallSetupStateTxt = not h1BullCtx ? "NO TRADE" : (h1CallReady ? "SETUP READY" : (h1CallMomentumOk ? "SETUP DEVELOPING" : "WAIT 1H CONFIRMATION"))
+h1PutSetupStateCol = h1PutSetupStateTxt == "SETUP READY" ? colOk : (h1PutSetupStateTxt == "NO TRADE" ? colBad : colBg)
+h1CallSetupStateCol = h1CallSetupStateTxt == "SETUP READY" ? colOk : (h1CallSetupStateTxt == "NO TRADE" ? colBad : colBg)
 
 //------------------------------------------------------------------------------
 // 15m Questions & Weights (sum = 100 for checklist)
@@ -490,7 +562,7 @@ f_clearTable(_rows) =>
         for c = 0 to 2
             f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
 
-maxRows = 44
+maxRows = 48
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -625,20 +697,24 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    // CONTEXT (1H gate + local trend)
-    f_sectionRow(row, "CONTEXT")
+    // HTF CONTEXT
+    f_sectionRow(row, "HTF CONTEXT")
     f_applyColVisibility(row)
     row += 1
 
-    f_metricRow(row, "1H gate state", h1PutStateTxt, colBg, h1CallStateTxt, colBg)
+    f_metricRow(row, "Market 1D", m1dPutStateTxt, m1dPutStateCol, m1dCallStateTxt, m1dCallStateCol)
     f_applyColVisibility(row)
     row += 1
 
-    putTrendCtxTxt = trendBiasBear ? "BEARISH" : (trendBiasBull ? "BULLISH (HEADWIND)" : "NEUTRAL")
-    callTrendCtxTxt = trendBiasBull ? "BULLISH" : (trendBiasBear ? "BEARISH (HEADWIND)" : "NEUTRAL")
-    putTrendCtxCol = trendBiasBear ? colOk : (trendBiasBull ? colBad : colNA)
-    callTrendCtxCol = trendBiasBull ? colOk : (trendBiasBear ? colBad : colNA)
-    f_metricRow(row, "Trend context", putTrendCtxTxt, putTrendCtxCol, callTrendCtxTxt, callTrendCtxCol)
+    f_metricRow(row, "Stock 1D", d1PutStateTxt, d1PutStateCol, d1CallStateTxt, d1CallStateCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "4H", h4PutStateTxt, h4PutStateCol, h4CallStateTxt, h4CallStateCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "1H", h1PutSetupStateTxt, h1PutSetupStateCol, h1CallSetupStateTxt, h1CallSetupStateCol)
     f_applyColVisibility(row)
     row += 1
 
