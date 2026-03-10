@@ -11,6 +11,13 @@ uiShowDetails = input.bool(true, "Show CHECKS section", group=groupUI)
 uiShowDebug = input.bool(false, "Show DEBUG metrics", group=groupUI)
 uiTextSize = input.string("small", "Text size", options=["tiny","small","normal","large"], group=groupUI)
 uiShowHintWhenNot15m = input.bool(false, "Show hint when not on 15m", group=groupUI)
+uiShowEMarks = input.bool(true, "Show E marks", group=groupUI)
+uiShowMarket1DMarks = input.bool(true, "Show Market 1D marks", group=groupUI)
+uiShow1HMarks = input.bool(true, "Show 1H marks", group=groupUI)
+uiShow4HMarks = input.bool(true, "Show 4H marks", group=groupUI)
+uiShow1DMarks = input.bool(true, "Show 1D marks", group=groupUI)
+uiShowMarkSummary = input.bool(false, "Show mark summary", group=groupUI)
+markSummaryDays = input.int(30, "Mark summary lookback (days)", minval=1, maxval=365, group=groupUI)
 
 groupMode = "Mode"
 modeShowBoth = input.bool(true, "Show both PUT & CALL", group=groupMode)
@@ -83,6 +90,7 @@ txtSize = f_txtSize(uiTextSize)
 f_c(_col) => color.new(_col, uiOpacity)
 
 colOk  = f_c(color.lime)
+colWarn = f_c(color.orange)
 colBad = f_c(color.red)
 colNA  = f_c(color.gray)
 colHdr = f_c(color.silver)
@@ -147,6 +155,775 @@ f_pickResist(_last, _prev, _px) =>
     if not na(_prev) and _prev >= _px
         _r := na(_r) ? _prev : ((_prev - _px) < (_r - _px) ? _prev : _r)
     _r
+
+f_h1MirrorBlockerText(_directionalOk, _q5, _rrHardOk, _isExtended, _locationOk, _trendClarityOk, _isChaos, _hasRR) =>
+    if not _directionalOk
+        "NO THESIS"
+    else if not _q5
+        "NO STOP"
+    else if not _rrHardOk
+        "RR TOO LOW"
+    else if _isExtended
+        "WAIT PULLBACK"
+    else if not _locationOk
+        "WAIT LOCATION"
+    else if not _trendClarityOk
+        "WAIT STRUCTURE"
+    else if _isChaos
+        "MESSY STRUCTURE"
+    else if not _hasRR
+        "RR BELOW FULL"
+    else
+        "SETUP READY"
+
+f_h1MirrorBlockerPass(_directionalOk, _q5, _rrHardOk, _isExtended, _locationOk, _trendClarityOk, _isChaos, _hasRR) =>
+    if not _directionalOk
+        0
+    else if not _q5
+        1
+    else if not _rrHardOk
+        2
+    else if _isExtended
+        3
+    else if not _locationOk
+        4
+    else if not _trendClarityOk
+        5
+    else if _isChaos
+        6
+    else if not _hasRR
+        7
+    else
+        8
+
+f_h1MirrorStateColor(_txt) =>
+    _txt == "SETUP READY" ? colOk : ((_txt == "NO THESIS" or _txt == "NO STOP" or _txt == "RR TOO LOW") ? colBad : colWarn)
+
+f_d1MirrorStateColor(_txt) =>
+    (_txt == "LONG CANDIDATE" or _txt == "SHORT CANDIDATE") ? colOk : ((_txt == "STRUCTURE CHAOS" or _txt == "OPPOSITE STRUCTURE" or _txt == "NO STOP" or _txt == "RISK TOO WIDE" or _txt == "RR TOO LOW" or _txt == "SPACE TOO TIGHT") ? colBad : colWarn)
+
+f_lookbackBarsFromDays(_days) =>
+    if timeframe.isminutes
+        math.max(1, int(math.ceil(_days * 1440.0 / timeframe.multiplier)))
+    else if timeframe.isdaily
+        math.max(1, int(math.ceil(_days / timeframe.multiplier)))
+    else if timeframe.isweekly
+        math.max(1, int(math.ceil(_days / (7.0 * timeframe.multiplier))))
+    else if timeframe.ismonthly
+        math.max(1, int(math.ceil(_days / (30.0 * timeframe.multiplier))))
+    else
+        math.max(1, int(math.ceil(_days * 1440.0 / 15.0)))
+
+f_m1dMirrorStateColor(_txt) =>
+    _txt == "TREND SHORT" or _txt == "TREND LONG" ? colOk : (_txt == "UNSTABLE" ? colBad : colBg)
+
+f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20, _adxWeak, _momFlip, _regimeTxt, _biasOk, _crossOk, _q3, _q7, _extended, _hasRR) =>
+    if _unstableState
+        if _isUnstable
+            "VOL"
+        else if _hasClimax
+            "CLIMAX"
+        else if _lost20
+            "EMA20"
+        else if _adxWeak
+            "ADX"
+        else if _momFlip
+            "MACD"
+        else
+            "REGIME"
+    else if _regimeTxt == "RANGE"
+        "OK"
+    else if _regimeTxt != "TREND"
+        "REGIME"
+    else if not _biasOk
+        "BIAS"
+    else if not _crossOk
+        "CROSS"
+    else if not _q3
+        "STRUCTURE"
+    else if not _q7
+        _extended ? "EXTENDED" : "LOCATION"
+    else if not _hasRR
+        "RR"
+    else
+        "OK"
+
+f_m1dMirrorPass(_unstableState, _regimeTxt, _q2, _q3, _q7, _hasRR) =>
+    if _unstableState
+        0
+    else if _regimeTxt == "RANGE"
+        2
+    else if _regimeTxt != "TREND"
+        1
+    else if not _q2
+        2
+    else if not _q3
+        3
+    else if not _q7
+        4
+    else if not _hasRR
+        5
+    else
+        6
+
+// Mirror of the Market 1D panel's state engine, using the source script defaults.
+m1dMirrorCrossCheckEnabled = true
+m1dMirrorRsLen = 20
+m1dMirrorPivLen = 5
+m1dMirrorAtrLen = 14
+m1dMirrorAdxLen = 14
+m1dMirrorAdxTrend = 20.0
+m1dMirrorChaosOverlapThresh = 0.55
+m1dMirrorUnstableTrAtr = 2.2
+m1dMirrorMa20Len = 20
+m1dMirrorMa50Len = 50
+m1dMirrorMa200Len = 200
+m1dMirrorBbLen = 20
+m1dMirrorBbMult = 2.0
+m1dMirrorMinRR = 2.0
+m1dMirrorStopBufAtr = 0.25
+m1dMirrorExtendedAtr = 2.0
+m1dMirrorClimaxBars = 4
+m1dMirrorClimaxTrAtr = 2.0
+
+f_m1dMirrorState() =>
+    _atr = ta.atr(m1dMirrorAtrLen)
+    _tr = ta.tr(true)
+    [_diPlus, _diMinus, _adx] = ta.dmi(m1dMirrorAdxLen, m1dMirrorAdxLen)
+    _ema20 = ta.ema(close, m1dMirrorMa20Len)
+    _sma50 = ta.sma(close, m1dMirrorMa50Len)
+    _sma200 = ta.sma(close, m1dMirrorMa200Len)
+    _macdHist = f_macdHist()
+
+    _basis = ta.sma(close, m1dMirrorBbLen)
+    _dev = m1dMirrorBbMult * ta.stdev(close, m1dMirrorBbLen)
+    _bbU = _basis + _dev
+    _bbL = _basis - _dev
+    _bbWidth = (_bbU - _bbL) / math.max(1e-10, _basis)
+    _bbWidthMA = ta.sma(_bbWidth, m1dMirrorBbLen)
+    _isCompression = _bbWidth < _bbWidthMA
+    _isExpansion = _bbWidth > _bbWidthMA
+    _wasCompression = bar_index > 0 ? (_isCompression[1] == true) : false
+
+    _ph = ta.pivothigh(high, m1dMirrorPivLen, m1dMirrorPivLen)
+    _pl = ta.pivotlow(low, m1dMirrorPivLen, m1dMirrorPivLen)
+    _lastPH = ta.valuewhen(not na(_ph), _ph, 0)
+    _prevPH = ta.valuewhen(not na(_ph), _ph, 1)
+    _lastPL = ta.valuewhen(not na(_pl), _pl, 0)
+    _prevPL = ta.valuewhen(not na(_pl), _pl, 1)
+    _bullStructure = not na(_lastPH) and not na(_prevPH) and not na(_lastPL) and not na(_prevPL) and _lastPH > _prevPH and _lastPL > _prevPL
+    _bearStructure = not na(_lastPH) and not na(_prevPH) and not na(_lastPL) and not na(_prevPL) and _lastPH < _prevPH and _lastPL < _prevPL
+
+    _rng = high - low
+    _prevRng = high[1] - low[1]
+    _overlap = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1]))
+    _overlapRatio = (_rng > 0 and _prevRng > 0) ? (_overlap / math.min(_rng, _prevRng)) : na
+    _isChop = (_adx < (m1dMirrorAdxTrend - 2)) and not na(_overlapRatio) and _overlapRatio > m1dMirrorChaosOverlapThresh
+
+    _trSpike = _tr >= m1dMirrorUnstableTrAtr * _atr
+    _stdev10 = ta.stdev(close, 10)
+    _stdev50 = ta.stdev(close, 50)
+    _isUnstable = _trSpike or (_stdev10 > 1.5 * _stdev50)
+
+    _climaxSpikeSrc = ta.tr(true) >= m1dMirrorClimaxTrAtr * _atr ? 1.0 : 0.0
+    _climaxCount = f_rollSum(_climaxSpikeSrc, m1dMirrorClimaxBars)
+    _hasClimax = _climaxCount >= 2
+
+    _bullBias = close > _sma200 and _ema20 > _ema20[5] and _sma50 > _sma50[5]
+    _bearBias = close < _sma200 and _ema20 < _ema20[5] and _sma50 < _sma50[5]
+
+    _isTrend = _adx >= m1dMirrorAdxTrend and not _isChop and not _isUnstable
+    _isRange = (_adx < m1dMirrorAdxTrend) and _isChop
+    _regimeTxt = _isTrend ? "TREND" : (_isRange ? "RANGE" : "TRANSITION")
+
+    _pivotSupport = f_pickSupport(_lastPL, _prevPL, close)
+    _pivotResist = f_pickResist(_lastPH, _prevPH, close)
+    _wkLow = request.security(syminfo.tickerid, "W", low[1])
+    _wkHigh = request.security(syminfo.tickerid, "W", high[1])
+    _moLow = request.security(syminfo.tickerid, "M", low[1])
+    _moHigh = request.security(syminfo.tickerid, "M", high[1])
+    _yrLow = request.security(syminfo.tickerid, "12M", low[1])
+    _yrHigh = request.security(syminfo.tickerid, "12M", high[1])
+    _fallbackSupport = not na(_wkLow) ? _wkLow : (not na(_moLow) ? _moLow : (not na(_yrLow) ? _yrLow : na))
+    _fallbackResist = not na(_wkHigh) ? _wkHigh : (not na(_moHigh) ? _moHigh : (not na(_yrHigh) ? _yrHigh : na))
+    _nearestSupport = not na(_pivotSupport) ? _pivotSupport : (not na(_fallbackSupport) ? _fallbackSupport : (not na(_atr) ? close - 2.0 * _atr : low))
+    _nearestResist = not na(_pivotResist) ? _pivotResist : (not na(_fallbackResist) ? _fallbackResist : (not na(_atr) ? close + 2.0 * _atr : high))
+
+    _distTo20 = math.abs(close - _ema20)
+    _distTo50 = math.abs(close - _sma50)
+    _distTo200 = math.abs(close - _sma200)
+    _nearEMA20 = _distTo20 <= _atr
+    _nearSMA50 = _distTo50 <= _atr
+    _nearSMA200 = _distTo200 <= _atr
+    _nearMA = _nearEMA20 or _nearSMA50 or _nearSMA200
+
+    _distToSupport = not na(_nearestSupport) ? math.abs(close - _nearestSupport) : na
+    _distToResist = not na(_nearestResist) ? math.abs(close - _nearestResist) : na
+    _nearSupport = not na(_distToSupport) and _distToSupport <= _atr
+    _nearResist = not na(_distToResist) and _distToResist <= _atr
+    _distSupportSafe = na(_distToSupport) ? 1e10 : _distToSupport
+    _distResistSafe = na(_distToResist) ? 1e10 : _distToResist
+    _nearestStructureDist = math.min(_distSupportSafe, _distResistSafe)
+    _extended = _atr > 0 ? _nearestStructureDist > m1dMirrorExtendedAtr * _atr : false
+
+    _structureSupportsMoveBull = _bullStructure and (_isTrend or (_wasCompression and _isExpansion))
+    _structureSupportsMoveBear = _bearStructure and (_isTrend or (_wasCompression and _isExpansion))
+
+    _callInvalid = _nearestSupport
+    _putInvalid = _nearestResist
+    _callStop = not na(_callInvalid) ? _callInvalid - m1dMirrorStopBufAtr * _atr : na
+    _putStop = not na(_putInvalid) ? _putInvalid + m1dMirrorStopBufAtr * _atr : na
+    _callRisk = not na(_callStop) ? math.abs(close - _callStop) : na
+    _putRisk = not na(_putStop) ? math.abs(_putStop - close) : na
+    _callRewardSr = not na(_nearestResist) ? math.max(0.0, _nearestResist - close) : na
+    _putRewardSr = not na(_nearestSupport) ? math.max(0.0, close - _nearestSupport) : na
+    _callRewardAlt = not na(_callRisk) ? 1.5 * _callRisk : na
+    _putRewardAlt = not na(_putRisk) ? 1.5 * _putRisk : na
+    _callReward = not na(_callRewardSr) and not na(_callRewardAlt) ? math.max(_callRewardSr, _callRewardAlt) : (not na(_callRewardSr) ? _callRewardSr : _callRewardAlt)
+    _putReward = not na(_putRewardSr) and not na(_putRewardAlt) ? math.max(_putRewardSr, _putRewardAlt) : (not na(_putRewardSr) ? _putRewardSr : _putRewardAlt)
+    _callRR = not na(_callRisk) and _callRisk > 0 and not na(_callReward) ? (_callReward / _callRisk) : na
+    _putRR = not na(_putRisk) and _putRisk > 0 and not na(_putReward) ? (_putReward / _putRisk) : na
+    _callHasRR = not na(_callRR) and _callRR >= m1dMirrorMinRR
+    _putHasRR = not na(_putRR) and _putRR >= m1dMirrorMinRR
+
+    _crossDnEma20 = ta.crossunder(close, _ema20)
+    _crossUpEma20 = ta.crossover(close, _ema20)
+    _crossDnMacd0 = ta.crossunder(_macdHist, 0)
+    _crossUpMacd0 = ta.crossover(_macdHist, 0)
+    _lost20Bull = _crossDnEma20 and _bullBias
+    _lost20Bear = _crossUpEma20 and _bearBias
+    _momFlip = _crossDnMacd0 or _crossUpMacd0
+    _adxWeak = _adx < (m1dMirrorAdxTrend - 3) and _isTrend[10]
+    _regimeChangeRisk = (_lost20Bull or _lost20Bear) or _adxWeak or (_momFlip and (_isTrend == false))
+
+    _ticker = syminfo.ticker
+    _isSpyOrQqq = _ticker == "SPY" or _ticker == "QQQ"
+    _otherSymbol = _ticker == "QQQ" ? "SPY" : (_ticker == "SPY" ? "QQQ" : _ticker)
+    _otherClose = request.security(_otherSymbol, dailyTF, close)
+    _crossRatio = not na(_otherClose) and _otherClose != 0 ? (close / _otherClose) : na
+    _crossSlope = ta.linreg(_crossRatio, m1dMirrorRsLen, 0) - ta.linreg(_crossRatio, m1dMirrorRsLen, 1)
+    _crossCheckActive = m1dMirrorCrossCheckEnabled and _isSpyOrQqq
+    _crossOkBull = not _crossCheckActive or _crossSlope >= 0
+    _crossOkBear = not _crossCheckActive or _crossSlope <= 0
+
+    _callQ2 = _bullBias and _crossOkBull
+    _putQ2 = _bearBias and _crossOkBear
+    _callQ3 = _structureSupportsMoveBull
+    _putQ3 = _structureSupportsMoveBear
+    _callQ7 = (not _extended) and (_nearMA or _nearSupport or _isCompression)
+    _putQ7 = (not _extended) and (_nearMA or _nearResist or _isCompression)
+
+    _unstableState = _isUnstable or _hasClimax or _regimeChangeRisk
+    _putState = _unstableState ? "UNSTABLE" : (_putQ2 and _putQ3 and _putQ7 and _putHasRR and _regimeTxt == "TREND" ? "TREND SHORT" : (_regimeTxt == "RANGE" ? "RANGE" : "TRANSITION"))
+    _callState = _unstableState ? "UNSTABLE" : (_callQ2 and _callQ3 and _callQ7 and _callHasRR and _regimeTxt == "TREND" ? "TREND LONG" : (_regimeTxt == "RANGE" ? "RANGE" : "TRANSITION"))
+
+    _putReason = f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20Bear or _lost20Bull, _adxWeak, _momFlip, _regimeTxt, _bearBias, _crossOkBear, _putQ3, _putQ7, _extended, _putHasRR)
+    _callReason = f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20Bull or _lost20Bear, _adxWeak, _momFlip, _regimeTxt, _bullBias, _crossOkBull, _callQ3, _callQ7, _extended, _callHasRR)
+    _putPass = f_m1dMirrorPass(_unstableState, _regimeTxt, _putQ2, _putQ3, _putQ7, _putHasRR)
+    _callPass = f_m1dMirrorPass(_unstableState, _regimeTxt, _callQ2, _callQ3, _callQ7, _callHasRR)
+
+    [_putState, _callState, _putReason, _callReason, _putPass, _callPass]
+
+// Mirror of the 1H panel's READY FOR LTF state, using the 1H script's core defaults.
+h1MirrorHtfAlignTf = "D"
+h1MirrorAtrLocMult = 0.8
+h1MirrorMinRR = 2.0
+h1MirrorRrHardFloor = 1.5
+h1MirrorBbLen = 20
+h1MirrorBbMult = 2.0
+h1MirrorChaosOverlapThresh = 0.55
+h1MirrorExtendedAtr = 1.6
+h1MirrorStopBufAtr = 0.25
+h1MirrorMaPullbackAtr = 0.25
+
+f_h1ReadyForLtfClosed() =>
+    _atr = ta.atr(atrLen)
+    _ema20 = ta.ema(close, 20)
+
+    _htfClose = request.security(syminfo.tickerid, h1MirrorHtfAlignTf, close)
+    _htfEma = request.security(syminfo.tickerid, h1MirrorHtfAlignTf, ta.ema(close, 50))
+    _htfBull = _htfClose > _htfEma
+    _htfBear = _htfClose < _htfEma
+
+    _ph = ta.pivothigh(high, pivLen, pivLen)
+    _pl = ta.pivotlow(low, pivLen, pivLen)
+    _lastPH = ta.valuewhen(not na(_ph), _ph, 0)
+    _prevPH = ta.valuewhen(not na(_ph), _ph, 1)
+    _lastPL = ta.valuewhen(not na(_pl), _pl, 0)
+    _prevPL = ta.valuewhen(not na(_pl), _pl, 1)
+
+    _bullStructure = not na(_lastPH) and not na(_prevPH) and not na(_lastPL) and not na(_prevPL) and _lastPH > _prevPH and _lastPL > _prevPL
+    _bearStructure = not na(_lastPH) and not na(_prevPH) and not na(_lastPL) and not na(_prevPL) and _lastPH < _prevPH and _lastPL < _prevPL
+
+    _basis = ta.sma(close, h1MirrorBbLen)
+    _dev = h1MirrorBbMult * ta.stdev(close, h1MirrorBbLen)
+    _bbU = _basis + _dev
+    _bbL = _basis - _dev
+    _bbWidth = (_bbU - _bbL) / _basis
+    _bbWidthMA = ta.sma(_bbWidth, h1MirrorBbLen)
+    _isCompression = _bbWidth < _bbWidthMA
+
+    [_diPlus, _diMinus, _adx] = ta.dmi(14, 14)
+    _isRange = _adx < 18
+    _rng = high - low
+    _prevRng = high[1] - low[1]
+    _overlap = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1]))
+    _overlapRatio = (_rng > 0 and _prevRng > 0) ? (_overlap / math.min(_rng, _prevRng)) : na
+    _isChaos = not na(_overlapRatio) and _overlapRatio > h1MirrorChaosOverlapThresh and _isRange
+
+    _pivotSupport = f_pickSupport(_lastPL, _prevPL, close)
+    _pivotResist = f_pickResist(_lastPH, _prevPH, close)
+    _wkLow = request.security(syminfo.tickerid, "W", low[1])
+    _wkHigh = request.security(syminfo.tickerid, "W", high[1])
+    _moLow = request.security(syminfo.tickerid, "M", low[1])
+    _moHigh = request.security(syminfo.tickerid, "M", high[1])
+    _yrLow = request.security(syminfo.tickerid, "12M", low[1])
+    _yrHigh = request.security(syminfo.tickerid, "12M", high[1])
+    _fallbackSupport = not na(_wkLow) ? _wkLow : (not na(_moLow) ? _moLow : (not na(_yrLow) ? _yrLow : na))
+    _fallbackResist = not na(_wkHigh) ? _wkHigh : (not na(_moHigh) ? _moHigh : (not na(_yrHigh) ? _yrHigh : na))
+    _nearestSupport = not na(_pivotSupport) ? _pivotSupport : (not na(_fallbackSupport) ? _fallbackSupport : (not na(_atr) ? close - 2.0 * _atr : low))
+    _nearestResist = not na(_pivotResist) ? _pivotResist : (not na(_fallbackResist) ? _fallbackResist : (not na(_atr) ? close + 2.0 * _atr : high))
+
+    _distToSupport = not na(_nearestSupport) ? math.abs(close - _nearestSupport) : na
+    _distToResist = not na(_nearestResist) ? math.abs(close - _nearestResist) : na
+    _nearSupport = not na(_distToSupport) and _distToSupport <= h1MirrorAtrLocMult * _atr
+    _nearResist = not na(_distToResist) and _distToResist <= h1MirrorAtrLocMult * _atr
+    _nearEma20 = _atr > 0 ? math.abs(close - _ema20) <= h1MirrorAtrLocMult * _atr : false
+
+    _distToEma = math.abs(close - _ema20)
+    _distEmaAtr = _atr > 0 ? (_distToEma / _atr) : na
+    _isExtended = not na(_distEmaAtr) and _distEmaAtr > h1MirrorExtendedAtr
+
+    _callInvalid = _nearestSupport
+    _putInvalid = _nearestResist
+    _callStop = not na(_callInvalid) ? _callInvalid - h1MirrorStopBufAtr * _atr : na
+    _putStop = not na(_putInvalid) ? _putInvalid + h1MirrorStopBufAtr * _atr : na
+    _callRisk = not na(_callStop) ? math.abs(close - _callStop) : na
+    _putRisk = not na(_putStop) ? math.abs(_putStop - close) : na
+    _callTarget = _nearestResist
+    _putTarget = _nearestSupport
+    _callRewardSr = not na(_callTarget) ? math.abs(_callTarget - close) : na
+    _putRewardSr = not na(_putTarget) ? math.abs(close - _putTarget) : na
+    _callRewardAlt = not na(_callRisk) ? 1.5 * _callRisk : na
+    _putRewardAlt = not na(_putRisk) ? 1.5 * _putRisk : na
+    _callReward = not na(_callRewardSr) and not na(_callRewardAlt) ? math.max(_callRewardSr, _callRewardAlt) : (not na(_callRewardSr) ? _callRewardSr : _callRewardAlt)
+    _putReward = not na(_putRewardSr) and not na(_putRewardAlt) ? math.max(_putRewardSr, _putRewardAlt) : (not na(_putRewardSr) ? _putRewardSr : _putRewardAlt)
+    _callRR = not na(_callRisk) and _callRisk > 0 and not na(_callReward) ? (_callReward / _callRisk) : na
+    _putRR = not na(_putRisk) and _putRisk > 0 and not na(_putReward) ? (_putReward / _putRisk) : na
+    _rrHardFloorEff = math.min(h1MirrorRrHardFloor, h1MirrorMinRR)
+    _callRRHardOk = not na(_callRR) and _callRR >= _rrHardFloorEff
+    _putRRHardOk = not na(_putRR) and _putRR >= _rrHardFloorEff
+    _callHasRR = not na(_callRR) and _callRR >= h1MirrorMinRR
+    _putHasRR = not na(_putRR) and _putRR >= h1MirrorMinRR
+
+    _callReversalStructureOk = not na(_lastPL) and (na(_prevPL) or _lastPL >= _prevPL)
+    _putReversalStructureOk = not na(_lastPH) and (na(_prevPH) or _lastPH <= _prevPH)
+    _rangeStructureAcceptable = _isRange and not _isChaos
+    _callTrendClarityOk = _bullStructure or _callReversalStructureOk or _rangeStructureAcceptable
+    _putTrendClarityOk = _bearStructure or _putReversalStructureOk or _rangeStructureAcceptable
+
+    _callAligned = _htfBull
+    _putAligned = _htfBear
+    _callConf = not na(_prevPH) and close > _prevPH
+    _putConf = not na(_prevPL) and close < _prevPL
+    _callCountertrendOk = (not _callAligned) and (_bullStructure or _callReversalStructureOk or _callConf)
+    _putCountertrendOk = (not _putAligned) and (_bearStructure or _putReversalStructureOk or _putConf)
+    _callDirectionalOk = _callAligned or _callCountertrendOk
+    _putDirectionalOk = _putAligned or _putCountertrendOk
+
+    _callStructuralLoc = _nearSupport or _nearResist
+    _putStructuralLoc = _nearResist or _nearSupport
+    _callMaPullbackLoc = _nearEma20 and close <= _ema20 + h1MirrorMaPullbackAtr * _atr
+    _putMaPullbackLoc = _nearEma20 and close >= _ema20 - h1MirrorMaPullbackAtr * _atr
+    _callCompressionLoc = _isCompression and close >= _ema20 and _callTrendClarityOk
+    _putCompressionLoc = _isCompression and close <= _ema20 and _putTrendClarityOk
+    _callLocationOk = _callStructuralLoc or _callMaPullbackLoc or _callCompressionLoc
+    _putLocationOk = _putStructuralLoc or _putMaPullbackLoc or _putCompressionLoc
+
+    _callQ5 = not na(_callInvalid) and not na(_callStop) and _callRisk > 0
+    _putQ5 = not na(_putInvalid) and not na(_putStop) and _putRisk > 0
+    _callNoTradeState = (not _callDirectionalOk) or (not _callQ5) or (not _callRRHardOk)
+    _putNoTradeState = (not _putDirectionalOk) or (not _putQ5) or (not _putRRHardOk)
+    _callPlanBaseOk = _callDirectionalOk and _callLocationOk and _callQ5 and _callRRHardOk and not _isExtended
+    _putPlanBaseOk = _putDirectionalOk and _putLocationOk and _putQ5 and _putRRHardOk and not _isExtended
+    _callReadyForLtf = _callPlanBaseOk and _callTrendClarityOk and not _isChaos and _callHasRR
+    _putReadyForLtf = _putPlanBaseOk and _putTrendClarityOk and not _isChaos and _putHasRR
+    _callBlockerTxt = f_h1MirrorBlockerText(_callDirectionalOk, _callQ5, _callRRHardOk, _isExtended, _callLocationOk, _callTrendClarityOk, _isChaos, _callHasRR)
+    _putBlockerTxt = f_h1MirrorBlockerText(_putDirectionalOk, _putQ5, _putRRHardOk, _isExtended, _putLocationOk, _putTrendClarityOk, _isChaos, _putHasRR)
+    _callPass = f_h1MirrorBlockerPass(_callDirectionalOk, _callQ5, _callRRHardOk, _isExtended, _callLocationOk, _callTrendClarityOk, _isChaos, _callHasRR)
+    _putPass = f_h1MirrorBlockerPass(_putDirectionalOk, _putQ5, _putRRHardOk, _isExtended, _putLocationOk, _putTrendClarityOk, _isChaos, _putHasRR)
+
+    [_putReadyForLtf, _callReadyForLtf, _putBlockerTxt, _callBlockerTxt, _putPass, _callPass]
+
+// Mirror of the 1D panel's SCAN 4H state, using the 1D script's core defaults.
+d1MirrorTf = "D"
+d1MirrorRsLen = 20
+d1MirrorPivLen = 5
+d1MirrorAtrLen = 14
+d1MirrorStopBufAtr = 0.25
+d1MirrorLocAtAtr = 0.5
+d1MirrorAtrLocMult = 1.0
+d1MirrorLocExtendedAtr = 1.8
+d1MirrorMinRR = 2.0
+d1MirrorMinSpaceAtr = 2.0
+d1MirrorAdxLen = 14
+d1MirrorAdxTrend = 20.0
+d1MirrorUnstableTrAtr = 2.2
+d1MirrorChaosOverlapThresh = 0.55
+d1MirrorMa20Len = 20
+d1MirrorMa50Len = 50
+d1MirrorMa200Len = 200
+d1MirrorRiskAtrMax = 6.0
+
+f_d1MirrorLocState(_distAtr) =>
+    if na(_distAtr)
+        "MID"
+    else if _distAtr <= d1MirrorLocAtAtr
+        "AT LEVEL"
+    else if _distAtr <= d1MirrorAtrLocMult
+        "NEAR LEVEL"
+    else if _distAtr <= d1MirrorLocExtendedAtr
+        "MID"
+    else
+        "EXTENDED"
+
+f_d1MirrorLocValid(_state) =>
+    _state == "AT LEVEL" or _state == "NEAR LEVEL"
+
+f_d1MirrorState() =>
+    _atr = ta.atr(d1MirrorAtrLen)
+    [_diPlus, _diMinus, _adx] = ta.dmi(d1MirrorAdxLen, d1MirrorAdxLen)
+    _tr = ta.tr(true)
+    _ema20 = ta.ema(close, d1MirrorMa20Len)
+    _sma50 = ta.sma(close, d1MirrorMa50Len)
+    _sma200 = ta.sma(close, d1MirrorMa200Len)
+
+    [_benchClose, _benchEma20, _benchEma50] = request.security(benchSymbol, d1MirrorTf, [close, ta.ema(close, 20), ta.ema(close, 50)])
+    _rs = _benchClose > 0 ? close / _benchClose : na
+    _rsSlope = ta.linreg(_rs, d1MirrorRsLen, 0) - ta.linreg(_rs, d1MirrorRsLen, 1)
+    _marketBull = _benchEma20 > _benchEma50
+    _marketBear = _benchEma20 < _benchEma50
+
+    _ph = ta.pivothigh(high, d1MirrorPivLen, d1MirrorPivLen)
+    _pl = ta.pivotlow(low, d1MirrorPivLen, d1MirrorPivLen)
+    _lastPH = ta.valuewhen(not na(_ph), _ph, 0)
+    _prevPH = ta.valuewhen(not na(_ph), _ph, 1)
+    _lastPL = ta.valuewhen(not na(_pl), _pl, 0)
+    _prevPL = ta.valuewhen(not na(_pl), _pl, 1)
+
+    _bullStructure = not na(_lastPH) and not na(_prevPH) and not na(_lastPL) and not na(_prevPL) and _lastPH > _prevPH and _lastPL > _prevPL
+    _bearStructure = not na(_lastPH) and not na(_prevPH) and not na(_lastPL) and not na(_prevPL) and _lastPH < _prevPH and _lastPL < _prevPL
+    _structureDirectional = _bullStructure or _bearStructure
+
+    _rng = high - low
+    _prevRng = high[1] - low[1]
+    _overlap = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1]))
+    _overlapRatio = (_rng > 0 and _prevRng > 0) ? (_overlap / math.min(_rng, _prevRng)) : na
+    _isChaos = not na(_overlapRatio) and _overlapRatio > d1MirrorChaosOverlapThresh and _adx < (d1MirrorAdxTrend - 2)
+    _trSpike = _tr >= d1MirrorUnstableTrAtr * _atr
+    _structureChaos = _isChaos or _trSpike
+    _structureClear = _structureDirectional and not _structureChaos
+
+    _pivotSupport = f_pickSupport(_lastPL, _prevPL, close)
+    _pivotResist = f_pickResist(_lastPH, _prevPH, close)
+    [_wkLow, _wkHigh] = request.security(syminfo.tickerid, "W", [low[1], high[1]])
+    [_moLow, _moHigh] = request.security(syminfo.tickerid, "M", [low[1], high[1]])
+    [_yrLow, _yrHigh] = request.security(syminfo.tickerid, "12M", [low[1], high[1]])
+    _fallbackSupport = not na(_wkLow) ? _wkLow : (not na(_moLow) ? _moLow : (not na(_yrLow) ? _yrLow : na))
+    _fallbackResist = not na(_wkHigh) ? _wkHigh : (not na(_moHigh) ? _moHigh : (not na(_yrHigh) ? _yrHigh : na))
+    _nearestSupport = not na(_pivotSupport) ? _pivotSupport : (not na(_fallbackSupport) ? _fallbackSupport : (not na(_atr) ? close - 2.0 * _atr : low))
+    _nearestResist = not na(_pivotResist) ? _pivotResist : (not na(_fallbackResist) ? _fallbackResist : (not na(_atr) ? close + 2.0 * _atr : high))
+
+    _distToSupport = not na(_nearestSupport) ? math.abs(close - _nearestSupport) : na
+    _distToResist = not na(_nearestResist) ? math.abs(close - _nearestResist) : na
+    _nearSupport = not na(_distToSupport) and _distToSupport <= d1MirrorAtrLocMult * _atr
+    _nearResist = not na(_distToResist) and _distToResist <= d1MirrorAtrLocMult * _atr
+
+    _distTo20 = math.abs(close - _ema20)
+    _distTo50 = math.abs(close - _sma50)
+    _distTo200 = math.abs(close - _sma200)
+    _distTo20Atr = _atr > 0 ? (_distTo20 / _atr) : na
+    _distTo50Atr = _atr > 0 ? (_distTo50 / _atr) : na
+    _distTo200Atr = _atr > 0 ? (_distTo200 / _atr) : na
+
+    _callDistSupportAtr = _atr > 0 and not na(_distToSupport) ? (_distToSupport / _atr) : na
+    _putDistResistAtr = _atr > 0 and not na(_distToResist) ? (_distToResist / _atr) : na
+
+    _callNearSupport = not na(_callDistSupportAtr) and _callDistSupportAtr <= d1MirrorAtrLocMult
+    _callNearEMA20 = _bullStructure and not na(_distTo20Atr) and _distTo20Atr <= d1MirrorAtrLocMult
+    _callNearSMA50 = _bullStructure and not na(_distTo50Atr) and _distTo50Atr <= d1MirrorAtrLocMult
+    _callNearSMA200 = not na(_distTo200Atr) and _distTo200Atr <= d1MirrorAtrLocMult
+
+    float _callAnchorDistAtr = na
+    if _callNearSupport
+        _callAnchorDistAtr := _callDistSupportAtr
+    else if _callNearEMA20
+        _callAnchorDistAtr := _distTo20Atr
+    else if _callNearSMA50
+        _callAnchorDistAtr := _distTo50Atr
+    else if _callNearSMA200
+        _callAnchorDistAtr := _distTo200Atr
+    else if not na(_callDistSupportAtr)
+        _callAnchorDistAtr := _callDistSupportAtr
+    else if _bullStructure and not na(_distTo20Atr)
+        _callAnchorDistAtr := _distTo20Atr
+    else if _bullStructure and not na(_distTo50Atr)
+        _callAnchorDistAtr := _distTo50Atr
+    else if not na(_distTo200Atr)
+        _callAnchorDistAtr := _distTo200Atr
+
+    _putNearResist = not na(_putDistResistAtr) and _putDistResistAtr <= d1MirrorAtrLocMult
+    _putNearEMA20 = _bearStructure and not na(_distTo20Atr) and _distTo20Atr <= d1MirrorAtrLocMult
+    _putNearSMA50 = _bearStructure and not na(_distTo50Atr) and _distTo50Atr <= d1MirrorAtrLocMult
+    _putNearSMA200 = not na(_distTo200Atr) and _distTo200Atr <= d1MirrorAtrLocMult
+
+    float _putAnchorDistAtr = na
+    if _putNearResist
+        _putAnchorDistAtr := _putDistResistAtr
+    else if _putNearEMA20
+        _putAnchorDistAtr := _distTo20Atr
+    else if _putNearSMA50
+        _putAnchorDistAtr := _distTo50Atr
+    else if _putNearSMA200
+        _putAnchorDistAtr := _distTo200Atr
+    else if not na(_putDistResistAtr)
+        _putAnchorDistAtr := _putDistResistAtr
+    else if _bearStructure and not na(_distTo20Atr)
+        _putAnchorDistAtr := _distTo20Atr
+    else if _bearStructure and not na(_distTo50Atr)
+        _putAnchorDistAtr := _distTo50Atr
+    else if not na(_distTo200Atr)
+        _putAnchorDistAtr := _distTo200Atr
+
+    _callLocationState = f_d1MirrorLocState(_callAnchorDistAtr)
+    _putLocationState = f_d1MirrorLocState(_putAnchorDistAtr)
+
+    _callInvalid = _nearestSupport
+    _putInvalid = _nearestResist
+    _callStop = not na(_callInvalid) ? _callInvalid - d1MirrorStopBufAtr * _atr : na
+    _putStop = not na(_putInvalid) ? _putInvalid + d1MirrorStopBufAtr * _atr : na
+    _callRisk = not na(_callStop) ? math.abs(close - _callStop) : na
+    _putRisk = not na(_putStop) ? math.abs(_putStop - close) : na
+    _riskRealisticCall = not na(_callRisk) and _callRisk > 0 and _callRisk <= d1MirrorRiskAtrMax * _atr
+    _riskRealisticPut = not na(_putRisk) and _putRisk > 0 and _putRisk <= d1MirrorRiskAtrMax * _atr
+
+    _callObstacle = _nearestResist
+    _putObstacle = _nearestSupport
+    _callSpaceSr = not na(_callObstacle) ? math.abs(_callObstacle - close) : na
+    _putSpaceSr = not na(_putObstacle) ? math.abs(close - _putObstacle) : na
+    _callSpaceAlt = not na(_callRisk) ? 1.5 * _callRisk : na
+    _putSpaceAlt = not na(_putRisk) ? 1.5 * _putRisk : na
+    _callSpace = not na(_callSpaceSr) and not na(_callSpaceAlt) ? math.max(_callSpaceSr, _callSpaceAlt) : (not na(_callSpaceSr) ? _callSpaceSr : _callSpaceAlt)
+    _putSpace = not na(_putSpaceSr) and not na(_putSpaceAlt) ? math.max(_putSpaceSr, _putSpaceAlt) : (not na(_putSpaceSr) ? _putSpaceSr : _putSpaceAlt)
+    _callSpaceOk = not na(_callSpace) and _callSpace >= d1MirrorMinSpaceAtr * _atr
+    _putSpaceOk = not na(_putSpace) and _putSpace >= d1MirrorMinSpaceAtr * _atr
+    _callRR = not na(_callRisk) and _callRisk > 0 and not na(_callSpace) ? (_callSpace / _callRisk) : na
+    _putRR = not na(_putRisk) and _putRisk > 0 and not na(_putSpace) ? (_putSpace / _putRisk) : na
+    _callHasRR = not na(_callRR) and _callRR >= d1MirrorMinRR
+    _putHasRR = not na(_putRR) and _putRR >= d1MirrorMinRR
+
+    _callLocationOk = f_d1MirrorLocValid(_callLocationState) and not _nearResist
+    _putLocationOk = f_d1MirrorLocValid(_putLocationState) and not _nearSupport
+    _callRSOk = _rsSlope > 0
+    _putRSOk = _rsSlope < 0
+    _callMarketAligned = _marketBull
+    _putMarketAligned = _marketBear
+    _callDirectionOk = _structureClear and _bullStructure and _callRSOk and _callMarketAligned
+    _putDirectionOk = _structureClear and _bearStructure and _putRSOk and _putMarketAligned
+    _callRiskDefined = not na(_callInvalid) and not na(_callStop) and _riskRealisticCall
+    _putRiskDefined = not na(_putInvalid) and not na(_putStop) and _riskRealisticPut
+    _callRewardDefined = _callHasRR and _callSpaceOk
+    _putRewardDefined = _putHasRR and _putSpaceOk
+    _callDailyCandidate = _callDirectionOk and _callLocationOk and _callRiskDefined and _callRewardDefined
+    _putDailyCandidate = _putDirectionOk and _putLocationOk and _putRiskDefined and _putRewardDefined
+    _callPass = not _callDirectionOk ? 0 : (not _callLocationOk ? 1 : (not _callRiskDefined ? 2 : (not _callRewardDefined ? 3 : 4)))
+    _putPass = not _putDirectionOk ? 0 : (not _putLocationOk ? 1 : (not _putRiskDefined ? 2 : (not _putRewardDefined ? 3 : 4)))
+
+    _callState = _callDailyCandidate ? "LONG CANDIDATE" : (_structureChaos ? "STRUCTURE CHAOS" : (not _structureDirectional ? "WAIT STRUCTURE" : (not _bullStructure ? "OPPOSITE STRUCTURE" : (not _callRSOk ? "WAIT RS" : (not _callMarketAligned ? "WAIT MARKET" : (not _callLocationOk ? "WAIT LOCATION" : ((na(_callInvalid) or na(_callStop)) ? "NO STOP" : (not _riskRealisticCall ? "RISK TOO WIDE" : (not _callHasRR ? "RR TOO LOW" : (not _callSpaceOk ? "SPACE TOO TIGHT" : "WAIT LOCATION"))))))))))
+    _putState = _putDailyCandidate ? "SHORT CANDIDATE" : (_structureChaos ? "STRUCTURE CHAOS" : (not _structureDirectional ? "WAIT STRUCTURE" : (not _bearStructure ? "OPPOSITE STRUCTURE" : (not _putRSOk ? "WAIT RS" : (not _putMarketAligned ? "WAIT MARKET" : (not _putLocationOk ? "WAIT LOCATION" : ((na(_putInvalid) or na(_putStop)) ? "NO STOP" : (not _riskRealisticPut ? "RISK TOO WIDE" : (not _putHasRR ? "RR TOO LOW" : (not _putSpaceOk ? "SPACE TOO TIGHT" : "WAIT LOCATION"))))))))))
+
+    [_putDailyCandidate, _callDailyCandidate, _putState, _callState, _putPass, _callPass]
+
+// Mirror of the 4H panel's state engine, using the 4H script's core defaults.
+h4MirrorAtrLen = 14
+h4MirrorPivLen = 5
+h4MirrorAtrLocMult = 0.9
+h4MirrorMinRR = 2.0
+h4MirrorVolLen = 20
+h4MirrorVolBreakMult = 1.2
+h4MirrorRsiLen = 14
+h4MirrorAdxLen = 14
+h4MirrorAdxTrend = 20.0
+h4MirrorUnstableTrAtr = 2.2
+h4MirrorWickRejectionMult = 0.9
+h4MirrorStopBufAtr = 0.25
+h4MirrorRiskAtrMin = 0.6
+h4MirrorRiskAtrMax = 4.5
+h4MirrorExtendedAtr = 1.4
+h4MirrorMa20Len = 20
+h4MirrorMa50Len = 50
+h4MirrorMa200Len = 200
+h4MirrorBbLen = 20
+h4MirrorBbMult = 2.0
+h4MirrorPbWindow = 20
+h4MirrorChaosOverlapThresh = 0.55
+
+f_h4MirrorState() =>
+    _atr = ta.atr(h4MirrorAtrLen)
+    _tr = ta.tr(true)
+    _volSma = ta.sma(volume, h4MirrorVolLen)
+    _rsi = ta.rsi(close, h4MirrorRsiLen)
+    _macdHist = f_macdHist()
+    [_diPlus, _diMinus, _adx] = ta.dmi(h4MirrorAdxLen, h4MirrorAdxLen)
+
+    _basis = ta.sma(close, h4MirrorBbLen)
+    _dev = h4MirrorBbMult * ta.stdev(close, h4MirrorBbLen)
+    _bbU = _basis + _dev
+    _bbL = _basis - _dev
+    _bbWidth = (_bbU - _bbL) / math.max(1e-10, _basis)
+    _bbWidthMA = ta.sma(_bbWidth, h4MirrorBbLen)
+    _isCompression = _bbWidth < _bbWidthMA
+
+    _ema20 = ta.ema(close, h4MirrorMa20Len)
+    _sma50 = ta.sma(close, h4MirrorMa50Len)
+    _sma200 = ta.sma(close, h4MirrorMa200Len)
+    _emaTrend50 = ta.ema(close, 50)
+
+    [_benchClose, _benchEma20, _benchEma50] = request.security(benchSymbol, "240", [close, ta.ema(close, 20), ta.ema(close, 50)])
+    _rs = _benchClose > 0 ? close / _benchClose : na
+    _rsSlope = ta.linreg(_rs, 14, 0) - ta.linreg(_rs, 14, 1)
+    _marketBull = _benchEma20 > _benchEma50
+    _marketBear = _benchEma20 < _benchEma50
+    _callMarketHeadwind = _marketBear
+    _putMarketHeadwind = _marketBull
+
+    _ph = ta.pivothigh(high, h4MirrorPivLen, h4MirrorPivLen)
+    _pl = ta.pivotlow(low, h4MirrorPivLen, h4MirrorPivLen)
+    _lastPH = ta.valuewhen(not na(_ph), _ph, 0)
+    _prevPH = ta.valuewhen(not na(_ph), _ph, 1)
+    _lastPL = ta.valuewhen(not na(_pl), _pl, 0)
+    _prevPL = ta.valuewhen(not na(_pl), _pl, 1)
+
+    _rng = high - low
+    _overlap = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1]))
+    _overlapRatio = (_rng > 0 and (high[1] - low[1]) > 0) ? (_overlap / math.min(_rng, (high[1] - low[1]))) : na
+    _isRange = _adx < (h4MirrorAdxTrend - 2)
+    _isChaos = not na(_overlapRatio) and _overlapRatio > h4MirrorChaosOverlapThresh and _isRange
+
+    _trSpike = _tr >= h4MirrorUnstableTrAtr * _atr
+    _stdev10 = ta.stdev(close, 10)
+    _stdev50 = ta.stdev(close, 50)
+    _volatilitySpike = _stdev10 > 1.5 * _stdev50
+    _unstableNow = _trSpike or _volatilitySpike
+
+    _pivotSupport = f_pickSupport(_lastPL, _prevPL, close)
+    _pivotResist = f_pickResist(_lastPH, _prevPH, close)
+    [_wkLow, _wkHigh] = request.security(syminfo.tickerid, "W", [low[1], high[1]])
+    [_moLow, _moHigh] = request.security(syminfo.tickerid, "M", [low[1], high[1]])
+    [_yrLow, _yrHigh] = request.security(syminfo.tickerid, "12M", [low[1], high[1]])
+    _fallbackSupport = not na(_wkLow) ? _wkLow : (not na(_moLow) ? _moLow : (not na(_yrLow) ? _yrLow : na))
+    _fallbackResist = not na(_wkHigh) ? _wkHigh : (not na(_moHigh) ? _moHigh : (not na(_yrHigh) ? _yrHigh : na))
+    _nearestSupport = not na(_pivotSupport) ? _pivotSupport : (not na(_fallbackSupport) ? _fallbackSupport : (not na(_atr) ? close - 2.0 * _atr : low))
+    _nearestResist = not na(_pivotResist) ? _pivotResist : (not na(_fallbackResist) ? _fallbackResist : (not na(_atr) ? close + 2.0 * _atr : high))
+
+    _distToSupport = not na(_nearestSupport) ? math.abs(close - _nearestSupport) : na
+    _distToResist = not na(_nearestResist) ? math.abs(close - _nearestResist) : na
+    _nearSupport = not na(_distToSupport) and _distToSupport <= h4MirrorAtrLocMult * _atr
+    _nearResist = not na(_distToResist) and _distToResist <= h4MirrorAtrLocMult * _atr
+    _nearMA = math.abs(close - _ema20) <= h4MirrorAtrLocMult * _atr or math.abs(close - _sma50) <= h4MirrorAtrLocMult * _atr or math.abs(close - _sma200) <= h4MirrorAtrLocMult * _atr
+
+    _trendStrength = _atr > 0 ? math.abs(_ema20 - _emaTrend50) / _atr : na
+    _structureChop = _isChaos or (not na(_trendStrength) and _trendStrength < 0.4)
+
+    _body = math.abs(close - open)
+    _upperWick = high - math.max(open, close)
+    _lowerWick = math.min(open, close) - low
+    _bullRejection = _body > 0 ? (_lowerWick >= h4MirrorWickRejectionMult * _body) : false
+    _bearRejection = _body > 0 ? (_upperWick >= h4MirrorWickRejectionMult * _body) : false
+
+    _volRatio = _volSma > 0 ? volume / _volSma : na
+    _volWeak = not na(_volRatio) and _volRatio < 0.8
+
+    _locDistAtr = _atr > 0 ? (math.abs(close - _ema20) / _atr) : na
+    _locAtStructure = not na(_locDistAtr) and _locDistAtr <= 0.5
+    _locNearStructure = not na(_locDistAtr) and _locDistAtr > 0.5 and _locDistAtr <= 1.0
+    _locExtended = not na(_locDistAtr) and _locDistAtr > 1.0
+    _callLocationOk = (_nearSupport or _locAtStructure or _locNearStructure) and not _nearResist and not _locExtended
+    _putLocationOk = (_nearResist or _locAtStructure or _locNearStructure) and not _nearSupport and not _locExtended
+
+    _extended = not na(_locDistAtr) and _locDistAtr > h4MirrorExtendedAtr
+
+    _callInvalid = _nearestSupport
+    _putInvalid = _nearestResist
+    _callStop = not na(_callInvalid) ? _callInvalid - h4MirrorStopBufAtr * _atr : na
+    _putStop = not na(_putInvalid) ? _putInvalid + h4MirrorStopBufAtr * _atr : na
+    _callRisk = not na(_callStop) ? math.abs(close - _callStop) : na
+    _putRisk = not na(_putStop) ? math.abs(_putStop - close) : na
+    _riskRealisticCall = not na(_callRisk) and _callRisk >= h4MirrorRiskAtrMin * _atr and _callRisk <= h4MirrorRiskAtrMax * _atr
+    _riskRealisticPut = not na(_putRisk) and _putRisk >= h4MirrorRiskAtrMin * _atr and _putRisk <= h4MirrorRiskAtrMax * _atr
+
+    _htfTargetResist = not na(_fallbackResist) and _fallbackResist > close ? _fallbackResist : _nearestResist
+    _htfTargetSupport = not na(_fallbackSupport) and _fallbackSupport < close ? _fallbackSupport : _nearestSupport
+    _callRewardSr = not na(_htfTargetResist) ? math.abs(_htfTargetResist - close) : na
+    _putRewardSr = not na(_htfTargetSupport) ? math.abs(close - _htfTargetSupport) : na
+    _callRewardAlt = not na(_callRisk) ? (1.5 * _callRisk) : na
+    _putRewardAlt = not na(_putRisk) ? (1.5 * _putRisk) : na
+    _callReward = not na(_callRewardSr) and not na(_callRewardAlt) ? math.max(_callRewardSr, _callRewardAlt) : (not na(_callRewardSr) ? _callRewardSr : _callRewardAlt)
+    _putReward = not na(_putRewardSr) and not na(_putRewardAlt) ? math.max(_putRewardSr, _putRewardAlt) : (not na(_putRewardSr) ? _putRewardSr : _putRewardAlt)
+    _callRR = not na(_callRisk) and _callRisk > 0 and not na(_callReward) ? (_callReward / _callRisk) : na
+    _putRR = not na(_putRisk) and _putRisk > 0 and not na(_putReward) ? (_putReward / _putRisk) : na
+    _callHasRR = not na(_callRR) and _callRR >= h4MirrorMinRR
+    _putHasRR = not na(_putRR) and _putRR >= h4MirrorMinRR
+
+    _isTrend = _adx >= h4MirrorAdxTrend and not _isChaos
+    _regimeTxt = _unstableNow ? "UNSTABLE" : (_isTrend ? "TREND" : (_isRange ? "RANGE" : "MIXED"))
+
+    _crossUpEma20 = ta.crossover(close, _ema20)
+    _crossDnEma20 = ta.crossunder(close, _ema20)
+    _callLevelReaction = (_nearSupport and _bullRejection) or (_nearMA and _crossUpEma20)
+    _putLevelReaction = (_nearResist and _bearRejection) or (_nearMA and _crossDnEma20)
+    _callRsiOk = _rsi >= 45.0
+    _putRsiOk = _rsi <= 55.0
+    _callMacdOk = _macdHist >= 0 and _macdHist >= _macdHist[1]
+    _putMacdOk = _macdHist <= 0 and _macdHist <= _macdHist[1]
+    _callVolAtrOk = not _volWeak and _riskRealisticCall
+    _putVolAtrOk = not _volWeak and _riskRealisticPut
+    _callKeyLvlsOk = close >= _sma200 and (close >= _sma50 or _nearMA) and (close >= _ema20 or _nearMA)
+    _putKeyLvlsOk = close <= _sma200 and (close <= _sma50 or _nearMA) and (close <= _ema20 or _nearMA)
+    _callRSOk = _rsSlope > 0
+    _putRSOk = _rsSlope < 0
+    _callInvalidOk = not na(_callInvalid) and _riskRealisticCall
+    _putInvalidOk = not na(_putInvalid) and _riskRealisticPut
+    _tradeable = not _unstableNow and volume > 0 and (volume >= 0.5 * _volSma)
+
+    _bullImpulseVolSrc = (close > open and volume > _volSma) ? volume : 0.0
+    _bearImpulseVolSrc = (close < open and volume > _volSma) ? volume : 0.0
+    _bullPullbackVolSrc = close < open ? volume : 0.0
+    _bearPullbackVolSrc = close > open ? volume : 0.0
+    _impulseVolBull = f_rollSum(_bullImpulseVolSrc, h4MirrorPbWindow)
+    _impulseVolBear = f_rollSum(_bearImpulseVolSrc, h4MirrorPbWindow)
+    _pullbackVolBull = f_rollSum(_bullPullbackVolSrc, h4MirrorPbWindow)
+    _pullbackVolBear = f_rollSum(_bearPullbackVolSrc, h4MirrorPbWindow)
+    _callPBVolOk = _impulseVolBull > _pullbackVolBull
+    _putPBVolOk = _impulseVolBear > _pullbackVolBear
+
+    _callQ6 = (_regimeTxt != "UNSTABLE") and (_isTrend or _isRange) and not _callMarketHeadwind
+    _putQ6 = (_regimeTxt != "UNSTABLE") and (_isTrend or _isRange) and not _putMarketHeadwind
+    _callQ7 = not _structureChop
+    _putQ7 = not _structureChop
+    _callQ9 = _callInvalidOk
+    _putQ9 = _putInvalidOk
+
+    _putStatus = _regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not _putHasRR ? "NO TRADE (RR)" : (not _putQ9 ? "NO TRADE (RISK)" : (not _putQ6 ? "WAIT MARKET" : (not _putQ7 ? "WAIT STRUCTURE" : (not _putRSOk ? "WAIT EDGE" : (_extended ? "WAIT PULLBACK" : (not _putLocationOk ? "WAIT LOCATION" : "ENTRY NOW")))))))
+    _callStatus = _regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not _callHasRR ? "NO TRADE (RR)" : (not _callQ9 ? "NO TRADE (RISK)" : (not _callQ6 ? "WAIT MARKET" : (not _callQ7 ? "WAIT STRUCTURE" : (not _callRSOk ? "WAIT EDGE" : (_extended ? "WAIT PULLBACK" : (not _callLocationOk ? "WAIT LOCATION" : "ENTRY NOW")))))))
+
+    _putState = str.contains(_putStatus, "NO TRADE") ? "NO TRADE" : (_putStatus == "ENTRY NOW" ? "READY" : (_putStatus == "WAIT PULLBACK" ? "WAIT PULLBACK" : (_putStatus == "WAIT MARKET" ? "WAIT MARKET" : (_putStatus == "WAIT EDGE" ? "WAIT EDGE" : (_putStatus == "WAIT LOCATION" ? "WAIT LEVEL" : "WAIT STRUCTURE")))))
+    _callState = str.contains(_callStatus, "NO TRADE") ? "NO TRADE" : (_callStatus == "ENTRY NOW" ? "READY" : (_callStatus == "WAIT PULLBACK" ? "WAIT PULLBACK" : (_callStatus == "WAIT MARKET" ? "WAIT MARKET" : (_callStatus == "WAIT EDGE" ? "WAIT EDGE" : (_callStatus == "WAIT LOCATION" ? "WAIT LEVEL" : "WAIT STRUCTURE")))))
+
+    _putPass = _regimeTxt == "UNSTABLE" ? 0 : (not _putHasRR ? 1 : (not _putQ9 ? 2 : (not _putQ6 ? 3 : (not _putQ7 ? 4 : (not _putRSOk ? 5 : ((_extended or not _putLocationOk) ? 6 : 7))))))
+    _callPass = _regimeTxt == "UNSTABLE" ? 0 : (not _callHasRR ? 1 : (not _callQ9 ? 2 : (not _callQ6 ? 3 : (not _callQ7 ? 4 : (not _callRSOk ? 5 : ((_extended or not _callLocationOk) ? 6 : 7))))))
+
+    [_putState, _callState, _putPass, _callPass]
 
 //------------------------------------------------------------------------------
 // Data (15m)
@@ -334,9 +1111,8 @@ dHighVol = dATR > dATRsma20 * 1.2
 callWeekOk = not dHighVol
 putWeekOk  = not dHighVol
 
-// 1H gate: 15m is trigger only when 1H context is ready
-// Use closed 1H candle values to avoid intra-hour gate flicker.
-[h1Close, h1Ema20, h1Rsi, h1MacdHist, h1MacdHistPrev, h1BullCtx, h1BearCtx] = request.security(syminfo.tickerid, "60", [close[1], ta.ema(close, 20)[1], ta.rsi(close, rsiLen)[1], f_macdHist()[1], f_macdHist()[2], close[1] > ta.ema(close, 50)[1], close[1] < ta.ema(close, 50)[1]])
+// 1H gate: 15m is trigger only when the current 1H context is ready.
+[h1Close, h1Ema20, h1Rsi, h1MacdHist, h1MacdHistPrev, h1BullCtx, h1BearCtx] = request.security(syminfo.tickerid, "60", [close, ta.ema(close, 20), ta.rsi(close, rsiLen), f_macdHist(), f_macdHist()[1], close > ta.ema(close, 50), close < ta.ema(close, 50)])
 
 h1MacdNearZeroAbs = h1Close * h1MacdNearZeroPct
 h1MacdNearZero = math.abs(h1MacdHist) <= h1MacdNearZeroAbs
@@ -348,90 +1124,38 @@ h1PutReady  = h1BearCtx and h1Close <= h1Ema20 and h1PutMomentumOk
 
 h1CallStateTxt = h1CallReady ? "READY" : (h1BullCtx ? "PULLBACK" : "NEUTRAL")
 h1PutStateTxt  = h1PutReady  ? "READY" : (h1BearCtx ? "PULLBACK" : "NEUTRAL")
+[h1PutReadyForLtfState, h1CallReadyForLtfState, h1PutBlockerTxt, h1CallBlockerTxt, h1PutReadyForLtfPass, h1CallReadyForLtfPass] = request.security(syminfo.tickerid, "60", f_h1ReadyForLtfClosed())
 
-// HTF CONTEXT (lightweight state-only summaries aligned to the higher-TF panels)
-// Market 1D context uses the benchmark symbol as the market proxy.
-[m1dClose, m1dAtr, m1dTr, m1dEma20, m1dEma20_5, m1dSma50, m1dSma50_5, m1dSma200, m1dStdev10, m1dStdev50] = request.security(benchSymbol, dailyTF, [close, ta.atr(14), ta.tr(true), ta.ema(close, 20), ta.ema(close, 20)[5], ta.sma(close, 50), ta.sma(close, 50)[5], ta.sma(close, 200), ta.stdev(close, 10), ta.stdev(close, 50)])
-m1dBullBias = m1dClose > m1dSma200 and m1dEma20 > m1dEma20_5 and m1dSma50 > m1dSma50_5
-m1dBearBias = m1dClose < m1dSma200 and m1dEma20 < m1dEma20_5 and m1dSma50 < m1dSma50_5
-m1dUnstable = (m1dTr >= 2.2 * m1dAtr) or (m1dStdev10 > 1.5 * m1dStdev50)
-m1dRange = not m1dUnstable and not m1dBullBias and not m1dBearBias
-m1dPutStateTxt = m1dUnstable ? "UNSTABLE" : (m1dBearBias ? "TREND SHORT" : (m1dRange ? "RANGE" : "TRANSITION"))
-m1dCallStateTxt = m1dUnstable ? "UNSTABLE" : (m1dBullBias ? "TREND LONG" : (m1dRange ? "RANGE" : "TRANSITION"))
-m1dPutStateCol = m1dPutStateTxt == "TREND SHORT" ? colOk : (m1dPutStateTxt == "UNSTABLE" ? colBad : colBg)
-m1dCallStateCol = m1dCallStateTxt == "TREND LONG" ? colOk : (m1dCallStateTxt == "UNSTABLE" ? colBad : colBg)
+// HTF CONTEXT mirrors the higher-timeframe state engines used by the source panels.
+[m1dPutStateTxt, m1dCallStateTxt, m1dPutReason, m1dCallReason, m1dPutPass, m1dCallPass] = request.security(benchSymbol, dailyTF, f_m1dMirrorState())
+m1dPutStateDisplay = (m1dPutReason == "OK" ? m1dPutStateTxt : (m1dPutStateTxt + " " + m1dPutReason)) + " (" + str.tostring(m1dPutPass) + "/6)"
+m1dCallStateDisplay = (m1dCallReason == "OK" ? m1dCallStateTxt : (m1dCallStateTxt + " " + m1dCallReason)) + " (" + str.tostring(m1dCallPass) + "/6)"
+m1dPutStateCol = f_m1dMirrorStateColor(m1dPutStateTxt)
+m1dCallStateCol = f_m1dMirrorStateColor(m1dCallStateTxt)
 
-// Stock 1D candidate filter uses Daily direction, location, and RR only.
-[d1Close, d1Atr, d1Ema20, d1Ema20_5, d1Sma50, d1Sma50_5, d1Sma200, d1LastPL, d1LastPH] = request.security(syminfo.tickerid, dailyTF, [close, ta.atr(atrLen), ta.ema(close, 20), ta.ema(close, 20)[5], ta.sma(close, 50), ta.sma(close, 50)[5], ta.sma(close, 200), ta.valuewhen(not na(ta.pivotlow(low, pivLen, pivLen)), ta.pivotlow(low, pivLen, pivLen), 0), ta.valuewhen(not na(ta.pivothigh(high, pivLen, pivLen)), ta.pivothigh(high, pivLen, pivLen), 0)])
-d1Support = not na(d1LastPL) ? d1LastPL : (d1Close - 2.0 * d1Atr)
-d1Resist = not na(d1LastPH) ? d1LastPH : (d1Close + 2.0 * d1Atr)
-d1NearSupport = math.abs(d1Close - d1Support) <= d1Atr
-d1NearResist = math.abs(d1Close - d1Resist) <= d1Atr
-d1NearEma20 = math.abs(d1Close - d1Ema20) <= d1Atr
-d1NearSma50 = math.abs(d1Close - d1Sma50) <= d1Atr
-d1BullBias = d1Close > d1Sma200 and d1Ema20 > d1Ema20_5 and d1Sma50 > d1Sma50_5
-d1BearBias = d1Close < d1Sma200 and d1Ema20 < d1Ema20_5 and d1Sma50 < d1Sma50_5
-d1CallLocationOk = d1NearSupport or d1NearEma20 or d1NearSma50
-d1PutLocationOk = d1NearResist or d1NearEma20 or d1NearSma50
-d1CallStop = d1Support - stopBufAtr * d1Atr
-d1PutStop = d1Resist + stopBufAtr * d1Atr
-d1CallRisk = math.abs(d1Close - d1CallStop)
-d1PutRisk = math.abs(d1PutStop - d1Close)
-d1CallReward = math.max(math.max(0.0, d1Resist - d1Close), 1.5 * d1CallRisk)
-d1PutReward = math.max(math.max(0.0, d1Close - d1Support), 1.5 * d1PutRisk)
-d1CallRR = d1CallRisk > 0 ? (d1CallReward / d1CallRisk) : na
-d1PutRR = d1PutRisk > 0 ? (d1PutReward / d1PutRisk) : na
-d1CallHasRR = not na(d1CallRR) and d1CallRR >= 2.0
-d1PutHasRR = not na(d1PutRR) and d1PutRR >= 2.0
-d1CallCandidate = d1BullBias and not m1dUnstable and not m1dBearBias and d1CallLocationOk and d1CallHasRR
-d1PutCandidate = d1BearBias and not m1dUnstable and not m1dBullBias and d1PutLocationOk and d1PutHasRR
-d1CallNoTrade = m1dUnstable or not d1CallHasRR
-d1PutNoTrade = m1dUnstable or not d1PutHasRR
-d1PutStateTxt = d1PutCandidate ? "SHORT CANDIDATE" : (d1PutNoTrade ? "NO TRADE" : "WATCH")
-d1CallStateTxt = d1CallCandidate ? "LONG CANDIDATE" : (d1CallNoTrade ? "NO TRADE" : "WATCH")
-d1PutStateCol = d1PutCandidate ? colOk : (d1PutNoTrade ? colBad : colBg)
-d1CallStateCol = d1CallCandidate ? colOk : (d1CallNoTrade ? colBad : colBg)
+// Stock 1D context mirrors the native 1D panel's SCAN 4H candidate pipeline, plus a first-blocker label and pass count.
+[d1PutCandidate, d1CallCandidate, d1PutStateTxt, d1CallStateTxt, d1PutPass, d1CallPass] = request.security(syminfo.tickerid, d1MirrorTf, f_d1MirrorState())
+d1PutStateDisplay = d1PutStateTxt + " (" + str.tostring(d1PutPass) + "/4)"
+d1CallStateDisplay = d1CallStateTxt + " (" + str.tostring(d1CallPass) + "/4)"
+d1PutStateCol = f_d1MirrorStateColor(d1PutStateTxt)
+d1CallStateCol = f_d1MirrorStateColor(d1CallStateTxt)
 
-// 4H opportunity scan mirrors the 4H vocabulary with lightweight gating.
-[h4Close, h4Atr, h4Tr, h4Ema20, h4Sma50, h4Sma200, h4Rsi, h4MacdHist, h4VolSma, h4Volume, h4LastPL, h4LastPH] = request.security(syminfo.tickerid, "240", [close, ta.atr(atrLen), ta.tr(true), ta.ema(close, 20), ta.sma(close, 50), ta.sma(close, 200), ta.rsi(close, rsiLen), f_macdHist(), ta.sma(volume, volLen), volume, ta.valuewhen(not na(ta.pivotlow(low, pivLen, pivLen)), ta.pivotlow(low, pivLen, pivLen), 0), ta.valuewhen(not na(ta.pivothigh(high, pivLen, pivLen)), ta.pivothigh(high, pivLen, pivLen), 0)])
-[h4BenchEma20, h4BenchEma50] = request.security(benchSymbol, "240", [ta.ema(close, 20), ta.ema(close, 50)])
-h4Support = not na(h4LastPL) ? h4LastPL : (h4Close - 2.0 * h4Atr)
-h4Resist = not na(h4LastPH) ? h4LastPH : (h4Close + 2.0 * h4Atr)
-h4NearSupport = math.abs(h4Close - h4Support) <= 0.9 * h4Atr
-h4NearResist = math.abs(h4Close - h4Resist) <= 0.9 * h4Atr
-h4NearMA = math.abs(h4Close - h4Ema20) <= 0.9 * h4Atr or math.abs(h4Close - h4Sma50) <= 0.9 * h4Atr or math.abs(h4Close - h4Sma200) <= 0.9 * h4Atr
-h4DistEmaAtr = h4Atr > 0 ? (math.abs(h4Close - h4Ema20) / h4Atr) : na
-h4Extended = not na(h4DistEmaAtr) and h4DistEmaAtr > 1.4
-h4StructureClean = h4Atr > 0 and math.abs(h4Ema20 - h4Sma50) / h4Atr > 0.4 and h4Volume >= 0.5 * h4VolSma
-h4Unstable = (h4Tr >= 2.2 * h4Atr)
-h4CallMarketOk = h4BenchEma20 >= h4BenchEma50
-h4PutMarketOk = h4BenchEma20 <= h4BenchEma50
-h4CallEdgeOk = h4Close >= h4Sma200 and h4Rsi >= 45 and h4MacdHist >= 0
-h4PutEdgeOk = h4Close <= h4Sma200 and h4Rsi <= 55 and h4MacdHist <= 0
-h4CallLocationOk = (h4NearSupport or h4NearMA) and not h4NearResist and not h4Extended
-h4PutLocationOk = (h4NearResist or h4NearMA) and not h4NearSupport and not h4Extended
-h4CallStop = h4Support - stopBufAtr * h4Atr
-h4PutStop = h4Resist + stopBufAtr * h4Atr
-h4CallRisk = math.abs(h4Close - h4CallStop)
-h4PutRisk = math.abs(h4PutStop - h4Close)
-h4CallReward = math.max(math.abs(h4Resist - h4Close), 1.5 * h4CallRisk)
-h4PutReward = math.max(math.abs(h4Close - h4Support), 1.5 * h4PutRisk)
-h4CallRR = h4CallRisk > 0 ? (h4CallReward / h4CallRisk) : na
-h4PutRR = h4PutRisk > 0 ? (h4PutReward / h4PutRisk) : na
-h4CallHasRR = not na(h4CallRR) and h4CallRR >= 2.0
-h4PutHasRR = not na(h4PutRR) and h4PutRR >= 2.0
-h4CallRiskOk = not na(h4CallStop) and h4CallRisk <= 4.5 * h4Atr
-h4PutRiskOk = not na(h4PutStop) and h4PutRisk <= 4.5 * h4Atr
-h4PutStateTxt = h4Unstable ? "NO TRADE" : (not h4PutHasRR ? "NO TRADE" : (not h4PutRiskOk ? "NO TRADE" : (not h4PutMarketOk ? "WAIT MARKET" : (not h4StructureClean ? "WAIT STRUCTURE" : (not h4PutEdgeOk ? "WAIT EDGE" : (h4Extended ? "WAIT PULLBACK" : (not h4PutLocationOk ? "WAIT LEVEL" : "READY")))))))
-h4CallStateTxt = h4Unstable ? "NO TRADE" : (not h4CallHasRR ? "NO TRADE" : (not h4CallRiskOk ? "NO TRADE" : (not h4CallMarketOk ? "WAIT MARKET" : (not h4StructureClean ? "WAIT STRUCTURE" : (not h4CallEdgeOk ? "WAIT EDGE" : (h4Extended ? "WAIT PULLBACK" : (not h4CallLocationOk ? "WAIT LEVEL" : "READY")))))))
+// 4H context mirrors the native 4H panel's state pipeline.
+[h4PutStateTxt, h4CallStateTxt, h4PutPass, h4CallPass] = request.security(syminfo.tickerid, "240", f_h4MirrorState())
+h4PutStateDisplay = h4PutStateTxt + " (" + str.tostring(h4PutPass) + "/7)"
+h4CallStateDisplay = h4CallStateTxt + " (" + str.tostring(h4CallPass) + "/7)"
 h4PutStateCol = h4PutStateTxt == "READY" ? colOk : (h4PutStateTxt == "NO TRADE" ? colBad : colBg)
 h4CallStateCol = h4CallStateTxt == "READY" ? colOk : (h4CallStateTxt == "NO TRADE" ? colBad : colBg)
 
-// 1H setup-planning context uses the existing 1H gate and momentum readiness already present in 15m.
-h1PutSetupStateTxt = not h1BearCtx ? "NO TRADE" : (h1PutReady ? "SETUP READY" : (h1PutMomentumOk ? "SETUP DEVELOPING" : "WAIT 1H CONFIRMATION"))
-h1CallSetupStateTxt = not h1BullCtx ? "NO TRADE" : (h1CallReady ? "SETUP READY" : (h1CallMomentumOk ? "SETUP DEVELOPING" : "WAIT 1H CONFIRMATION"))
-h1PutSetupStateCol = h1PutSetupStateTxt == "SETUP READY" ? colOk : (h1PutSetupStateTxt == "NO TRADE" ? colBad : colBg)
-h1CallSetupStateCol = h1CallSetupStateTxt == "SETUP READY" ? colOk : (h1CallSetupStateTxt == "NO TRADE" ? colBad : colBg)
+// 1H context shows the highest-priority blocker from the mirrored READY FOR LTF pipeline.
+h1PutSetupStateTxt = h1PutBlockerTxt
+h1CallSetupStateTxt = h1CallBlockerTxt
+h1PutPass = h1PutReadyForLtfPass
+h1CallPass = h1CallReadyForLtfPass
+h1PutSetupStateDisplay = h1PutSetupStateTxt + " (" + str.tostring(h1PutPass) + "/8)"
+h1CallSetupStateDisplay = h1CallSetupStateTxt + " (" + str.tostring(h1CallPass) + "/8)"
+h1PutSetupStateCol = f_h1MirrorStateColor(h1PutSetupStateTxt)
+h1CallSetupStateCol = f_h1MirrorStateColor(h1CallSetupStateTxt)
 
 //------------------------------------------------------------------------------
 // 15m Questions & Weights (sum = 100 for checklist)
@@ -529,6 +1253,8 @@ callSetupDevelopingState = h1CallReady and not isOverextended and callLevelOk an
 putSetupDevelopingState  = h1PutReady  and not isOverextended and putLevelOk  and putReactionOk  and (not putEntryPattern)
 callEntryNowState = h1CallReady and not isOverextended and callLevelOk and callReactionOk and callEntryPattern
 putEntryNowState  = h1PutReady  and not isOverextended and putLevelOk  and putReactionOk  and putEntryPattern
+callEntryReadyState = callEntryNowState and not callNoTradeState
+putEntryReadyState  = putEntryNowState  and not putNoTradeState
 
 callNoTradeStatus = not callBiasOk ? "NO TRADE (NO BIAS)" : ((na(callInvalid) or na(callStop)) ? "NO TRADE (NO STOP)" : "NO TRADE (RR)")
 putNoTradeStatus  = not putBiasOk  ? "NO TRADE (NO BIAS)" : ((na(putInvalid)  or na(putStop))  ? "NO TRADE (NO STOP)" : "NO TRADE (RR)")
@@ -562,7 +1288,7 @@ f_clearTable(_rows) =>
         for c = 0 to 2
             f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
 
-maxRows = 48
+maxRows = 55
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -643,9 +1369,71 @@ var line srSupportLine = na
 var line srResistLine = na
 
 render = uiShow and (not onlyOn15m or is15m)
+showEMarks = uiShowEMarks and (not onlyOn15m or is15m)
+showMarket1DMarks = uiShowMarket1DMarks and (not onlyOn15m or is15m)
+show1HMarks = uiShow1HMarks and (not onlyOn15m or is15m)
+show4HMarks = uiShow4HMarks and (not onlyOn15m or is15m)
+show1DMarks = uiShow1DMarks and (not onlyOn15m or is15m)
 
 srSupportLine := f_updateSrLine(srSupportLine, render ? nearestSupport : na, f_c(color.teal))
 srResistLine := f_updateSrLine(srResistLine, render ? nearestResist : na, f_c(color.orange))
+
+// Render markers at the top of the pane so they stay above price action.
+plotchar(showEMarks and putEntryReadyState, title="PUT entry ready", char="E", location=location.top, color=colBad, size=size.tiny)
+plotchar(showEMarks and callEntryReadyState, title="CALL entry ready", char="E", location=location.top, color=colOk, size=size.tiny)
+
+// HTF readiness markers are event-based to avoid repeating the same higher-timeframe state on every 15m bar.
+m1dPutReadyEvent = m1dPutStateTxt == "TREND SHORT" and m1dPutStateTxt[1] != "TREND SHORT"
+m1dCallReadyEvent = m1dCallStateTxt == "TREND LONG" and m1dCallStateTxt[1] != "TREND LONG"
+d1PutReadyEvent = d1PutCandidate and not d1PutCandidate[1]
+d1CallReadyEvent = d1CallCandidate and not d1CallCandidate[1]
+h4PutReadyEvent = h4PutStateTxt == "READY" and h4PutStateTxt[1] != "READY"
+h4CallReadyEvent = h4CallStateTxt == "READY" and h4CallStateTxt[1] != "READY"
+h1PutReadyEvent = h1PutReadyForLtfState and not h1PutReadyForLtfState[1]
+h1CallReadyEvent = h1CallReadyForLtfState and not h1CallReadyForLtfState[1]
+
+var float putEAccum = 0.0
+var float callEAccum = 0.0
+var float putMAccum = 0.0
+var float callMAccum = 0.0
+var float put1Accum = 0.0
+var float call1Accum = 0.0
+var float put4Accum = 0.0
+var float call4Accum = 0.0
+var float putDAccum = 0.0
+var float callDAccum = 0.0
+
+putEAccum := nz(putEAccum[1]) + (putEntryReadyState ? 1.0 : 0.0)
+callEAccum := nz(callEAccum[1]) + (callEntryReadyState ? 1.0 : 0.0)
+putMAccum := nz(putMAccum[1]) + (m1dPutReadyEvent ? 1.0 : 0.0)
+callMAccum := nz(callMAccum[1]) + (m1dCallReadyEvent ? 1.0 : 0.0)
+put1Accum := nz(put1Accum[1]) + (h1PutReadyEvent ? 1.0 : 0.0)
+call1Accum := nz(call1Accum[1]) + (h1CallReadyEvent ? 1.0 : 0.0)
+put4Accum := nz(put4Accum[1]) + (h4PutReadyEvent ? 1.0 : 0.0)
+call4Accum := nz(call4Accum[1]) + (h4CallReadyEvent ? 1.0 : 0.0)
+putDAccum := nz(putDAccum[1]) + (d1PutReadyEvent ? 1.0 : 0.0)
+callDAccum := nz(callDAccum[1]) + (d1CallReadyEvent ? 1.0 : 0.0)
+
+markSummaryBars = f_lookbackBarsFromDays(markSummaryDays)
+putECount = putEAccum - nz(putEAccum[markSummaryBars], 0.0)
+callECount = callEAccum - nz(callEAccum[markSummaryBars], 0.0)
+putMCount = putMAccum - nz(putMAccum[markSummaryBars], 0.0)
+callMCount = callMAccum - nz(callMAccum[markSummaryBars], 0.0)
+put1Count = put1Accum - nz(put1Accum[markSummaryBars], 0.0)
+call1Count = call1Accum - nz(call1Accum[markSummaryBars], 0.0)
+put4Count = put4Accum - nz(put4Accum[markSummaryBars], 0.0)
+call4Count = call4Accum - nz(call4Accum[markSummaryBars], 0.0)
+putDCount = putDAccum - nz(putDAccum[markSummaryBars], 0.0)
+callDCount = callDAccum - nz(callDAccum[markSummaryBars], 0.0)
+
+plotchar(showMarket1DMarks and m1dPutReadyEvent, title="PUT Market 1D ready", char="M", location=location.top, color=colBad, size=size.tiny)
+plotchar(showMarket1DMarks and m1dCallReadyEvent, title="CALL Market 1D ready", char="M", location=location.top, color=colOk, size=size.tiny)
+plotchar(show1DMarks and d1PutReadyEvent, title="PUT 1D ready", char="D", location=location.top, color=colBad, size=size.tiny)
+plotchar(show1DMarks and d1CallReadyEvent, title="CALL 1D ready", char="D", location=location.top, color=colOk, size=size.tiny)
+plotchar(show4HMarks and h4PutReadyEvent, title="PUT 4H ready", char="4", location=location.top, color=colBad, size=size.tiny)
+plotchar(show4HMarks and h4CallReadyEvent, title="CALL 4H ready", char="4", location=location.top, color=colOk, size=size.tiny)
+plotchar(show1HMarks and h1PutReadyEvent, title="PUT 1H ready", char="1", location=location.top, color=colBad, size=size.tiny)
+plotchar(show1HMarks and h1CallReadyEvent, title="CALL 1H ready", char="1", location=location.top, color=colOk, size=size.tiny)
 
 if not render
     f_clearTable(maxRows)
@@ -655,11 +1443,6 @@ if not render
 else
     row = 0
     f_hdrRow(row, "STOCK 15m - OPTIONS UI")
-    f_applyColVisibility(row)
-    row += 1
-
-    // DECISION
-    f_sectionRow(row, "DECISION")
     f_applyColVisibility(row)
     row += 1
 
@@ -685,6 +1468,57 @@ else
     putNextStepCol = putState == "ENTRY READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
     callNextStepCol = callState == "ENTRY READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
 
+    // HTF CONTEXT
+    f_sectionRow(row, "HTF CONTEXT")
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Market 1D", m1dPutStateDisplay, m1dPutStateCol, m1dCallStateDisplay, m1dCallStateCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Stock 1D", d1PutStateDisplay, d1PutStateCol, d1CallStateDisplay, d1CallStateCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "4H", h4PutStateDisplay, h4PutStateCol, h4CallStateDisplay, h4CallStateCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "1H", h1PutSetupStateDisplay, h1PutSetupStateCol, h1CallSetupStateDisplay, h1CallSetupStateCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    if uiShowMarkSummary
+        f_sectionRow(row, "MARK SUMMARY (" + str.tostring(markSummaryDays) + "D)")
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "E", str.tostring(int(math.round(putECount))), colBg, str.tostring(int(math.round(callECount))), colBg)
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "1", str.tostring(int(math.round(put1Count))), colBg, str.tostring(int(math.round(call1Count))), colBg)
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "4", str.tostring(int(math.round(put4Count))), colBg, str.tostring(int(math.round(call4Count))), colBg)
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "D", str.tostring(int(math.round(putDCount))), colBg, str.tostring(int(math.round(callDCount))), colBg)
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "M", str.tostring(int(math.round(putMCount))), colBg, str.tostring(int(math.round(callMCount))), colBg)
+        f_applyColVisibility(row)
+        row += 1
+
+    // DECISION
+    f_sectionRow(row, "DECISION")
+    f_applyColVisibility(row)
+    row += 1
+
     f_metricRow(row, "State", putState, putStateCol, callState, callStateCol)
     f_applyColVisibility(row)
     row += 1
@@ -694,27 +1528,6 @@ else
     row += 1
 
     f_metricRow(row, "Next step", putNextStep, putNextStepCol, callNextStep, callNextStepCol)
-    f_applyColVisibility(row)
-    row += 1
-
-    // HTF CONTEXT
-    f_sectionRow(row, "HTF CONTEXT")
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "Market 1D", m1dPutStateTxt, m1dPutStateCol, m1dCallStateTxt, m1dCallStateCol)
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "Stock 1D", d1PutStateTxt, d1PutStateCol, d1CallStateTxt, d1CallStateCol)
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "4H", h4PutStateTxt, h4PutStateCol, h4CallStateTxt, h4CallStateCol)
-    f_applyColVisibility(row)
-    row += 1
-
-    f_metricRow(row, "1H", h1PutSetupStateTxt, h1PutSetupStateCol, h1CallSetupStateTxt, h1CallSetupStateCol)
     f_applyColVisibility(row)
     row += 1
 

@@ -68,6 +68,7 @@ txtSize = f_txtSize(uiTextSize)
 f_c(_col) => color.new(_col, uiOpacity)
 
 colOk  = f_c(color.lime)
+colWarn = f_c(color.orange)
 colBad = f_c(color.red)
 colNA  = f_c(color.gray)
 colHdr = f_c(color.silver)
@@ -123,6 +124,55 @@ f_pickResist(_last, _prev, _px) =>
     if not na(_prev) and _prev >= _px
         _r := na(_r) ? _prev : ((_prev - _px) < (_r - _px) ? _prev : _r)
     _r
+
+f_h1BlockerText(_directionalOk, _q5, _rrHardOk, _isExtended, _locationOk, _trendClarityOk, _isChaos, _hasRR) =>
+    if not _directionalOk
+        "NO THESIS"
+    else if not _q5
+        "NO STOP"
+    else if not _rrHardOk
+        "RR TOO LOW"
+    else if _isExtended
+        "WAIT PULLBACK"
+    else if not _locationOk
+        "WAIT LOCATION"
+    else if not _trendClarityOk
+        "WAIT STRUCTURE"
+    else if _isChaos
+        "MESSY STRUCTURE"
+    else if not _hasRR
+        "RR BELOW FULL"
+    else
+        "SETUP READY"
+
+f_h1BlockerPass(_directionalOk, _q5, _rrHardOk, _isExtended, _locationOk, _trendClarityOk, _isChaos, _hasRR) =>
+    if not _directionalOk
+        0
+    else if not _q5
+        1
+    else if not _rrHardOk
+        2
+    else if _isExtended
+        3
+    else if not _locationOk
+        4
+    else if not _trendClarityOk
+        5
+    else if _isChaos
+        6
+    else if not _hasRR
+        7
+    else
+        8
+
+f_h1BlockerColor(_txt) =>
+    _txt == "SETUP READY" ? colOk : ((_txt == "NO THESIS" or _txt == "NO STOP" or _txt == "RR TOO LOW") ? colBad : colWarn)
+
+f_h1BlockerNextStep(_txt) =>
+    _txt == "SETUP READY" ? "DROP TO 15M" : (_txt == "NO THESIS" ? "SKIP" : (_txt == "NO STOP" ? "WAIT INVALIDATION" : (_txt == "RR TOO LOW" ? "SKIP" : (_txt == "WAIT PULLBACK" ? "WAIT PULLBACK" : (_txt == "WAIT LOCATION" ? "WAIT LEVEL" : (_txt == "WAIT STRUCTURE" ? "WAIT STRUCTURE" : (_txt == "MESSY STRUCTURE" ? "WAIT CLEAN STRUCTURE" : "WAIT BETTER RR")))))))
+
+f_h1BlockerGradeCap(_txt) =>
+    _txt == "SETUP READY" ? "A" : (_txt == "RR BELOW FULL" ? "B" : ((_txt == "NO THESIS" or _txt == "NO STOP" or _txt == "RR TOO LOW") ? "D" : "C"))
 
 //------------------------------------------------------------------------------
 // Data
@@ -673,16 +723,20 @@ else
     putNoTradeStatus  = not putDirectionalOk  ? "NO TRADE (NO THESIS)" : (not putQ5  ? "NO TRADE (NO STOP)" : "NO TRADE (RR)")
     callStatus = callNoTradeState ? callNoTradeStatus : (callWaitPullbackState ? "WAIT PULLBACK" : (callWaitReversalState ? "WAIT REVERSAL" : (callSetupDevelopingState ? "SETUP DEVELOPING" : (callReadyForLtfState ? "READY FOR LTF CONFIRMATION" : "WAIT REVERSAL"))))
     putStatus  = putNoTradeState  ? putNoTradeStatus  : (putWaitPullbackState  ? "WAIT PULLBACK" : (putWaitReversalState  ? "WAIT REVERSAL" : (putSetupDevelopingState  ? "SETUP DEVELOPING" : (putReadyForLtfState  ? "READY FOR LTF CONFIRMATION" : "WAIT REVERSAL"))))
-    callState = callNoTradeState ? "NO TRADE" : (callReadyForLtfState ? "SETUP READY" : (callSetupDevelopingState ? "SETUP DEVELOPING" : "WAIT 1H CONFIRMATION"))
-    putState  = putNoTradeState  ? "NO TRADE" : (putReadyForLtfState  ? "SETUP READY" : (putSetupDevelopingState  ? "SETUP DEVELOPING" : "WAIT 1H CONFIRMATION"))
-    callStateCol = callState == "SETUP READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
-    putStateCol = putState == "SETUP READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
-    callNextStep = callState == "SETUP READY" ? "DROP TO 15M" : (callState == "NO TRADE" ? "SKIP" : "WAIT REACTION")
-    putNextStep  = putState == "SETUP READY" ? "DROP TO 15M" : (putState == "NO TRADE" ? "SKIP" : "WAIT REACTION")
-    callNextStepCol = callState == "SETUP READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
-    putNextStepCol = putState == "SETUP READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
-    callGradeCap = callState == "NO TRADE" ? "D" : (callState == "SETUP READY" ? "A" : (callState == "SETUP DEVELOPING" ? "B" : "C"))
-    putGradeCap  = putState == "NO TRADE" ? "D" : (putState == "SETUP READY" ? "A" : (putState == "SETUP DEVELOPING" ? "B" : "C"))
+    callBlockerTxt = f_h1BlockerText(callDirectionalOk, callQ5, callRRHardOk, isExtended, callLocationOk, callTrendClarityOk, messyStructure, callHasRR)
+    putBlockerTxt  = f_h1BlockerText(putDirectionalOk, putQ5, putRRHardOk, isExtended, putLocationOk, putTrendClarityOk, messyStructure, putHasRR)
+    callBlockerPass = f_h1BlockerPass(callDirectionalOk, callQ5, callRRHardOk, isExtended, callLocationOk, callTrendClarityOk, messyStructure, callHasRR)
+    putBlockerPass  = f_h1BlockerPass(putDirectionalOk, putQ5, putRRHardOk, isExtended, putLocationOk, putTrendClarityOk, messyStructure, putHasRR)
+    callState = callBlockerTxt + " (" + str.tostring(callBlockerPass) + "/8)"
+    putState  = putBlockerTxt + " (" + str.tostring(putBlockerPass) + "/8)"
+    callStateCol = f_h1BlockerColor(callBlockerTxt)
+    putStateCol = f_h1BlockerColor(putBlockerTxt)
+    callNextStep = f_h1BlockerNextStep(callBlockerTxt)
+    putNextStep  = f_h1BlockerNextStep(putBlockerTxt)
+    callNextStepCol = f_h1BlockerColor(callBlockerTxt)
+    putNextStepCol = f_h1BlockerColor(putBlockerTxt)
+    callGradeCap = f_h1BlockerGradeCap(callBlockerTxt)
+    putGradeCap  = f_h1BlockerGradeCap(putBlockerTxt)
     callGrade = f_capGrade(f_grade(callScore), callGradeCap)
     putGrade  = f_capGrade(f_grade(putScore), putGradeCap)
 
