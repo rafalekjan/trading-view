@@ -214,10 +214,22 @@ f_lookbackBarsFromDays(_days) =>
     else
         math.max(1, int(math.ceil(_days * 1440.0 / 15.0)))
 
-f_m1dMirrorStateColor(_txt) =>
-    _txt == "TREND SHORT" or _txt == "TREND LONG" ? colOk : (_txt == "UNSTABLE" ? colBad : colBg)
+f_lookbackDaysFromBars(_bars) =>
+    if timeframe.isminutes
+        _bars * timeframe.multiplier / 1440.0
+    else if timeframe.isdaily
+        _bars * timeframe.multiplier
+    else if timeframe.isweekly
+        _bars * timeframe.multiplier * 7.0
+    else if timeframe.ismonthly
+        _bars * timeframe.multiplier * 30.0
+    else
+        _bars * 15.0 / 1440.0
 
-f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20, _adxWeak, _momFlip, _regimeTxt, _biasOk, _crossOk, _q3, _q7, _extended, _hasRR) =>
+f_m1dMirrorStateColor(_txt) =>
+    (_txt == "BEARISH" or _txt == "BULLISH") ? colOk : (_txt == "SUPPORTIVE" ? colWarn : (_txt == "UNSTABLE" ? colBad : colBg))
+
+f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20, _adxWeak, _momFlip, _regimeTxt, _biasOk, _crossOk, _structureSoft, _locationSoft, _hasRR) =>
     if _unstableState
         if _isUnstable
             "VOL"
@@ -231,40 +243,44 @@ f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20, _adxWeak, _m
             "MACD"
         else
             "REGIME"
-    else if _regimeTxt == "RANGE"
-        "OK"
-    else if _regimeTxt != "TREND"
-        "REGIME"
     else if not _biasOk
         "BIAS"
     else if not _crossOk
         "CROSS"
-    else if not _q3
+    else if not _structureSoft
         "STRUCTURE"
-    else if not _q7
-        _extended ? "EXTENDED" : "LOCATION"
+    else if _regimeTxt == "RANGE"
+        "RANGE"
+    else if _regimeTxt != "TREND"
+        "TRANSITION"
+    else if not _locationSoft
+        "LOCATION"
     else if not _hasRR
         "RR"
     else
         "OK"
 
-f_m1dMirrorPass(_unstableState, _regimeTxt, _q2, _q3, _q7, _hasRR) =>
+f_m1dMirrorCorePass(_unstableState, _biasCore, _structureSoft, _regimeTxt) =>
     if _unstableState
         0
-    else if _regimeTxt == "RANGE"
-        2
-    else if _regimeTxt != "TREND"
+    else if not _biasCore
+        0
+    else if not _structureSoft
         1
-    else if not _q2
+    else if _regimeTxt != "TREND"
         2
-    else if not _q3
-        3
-    else if not _q7
-        4
-    else if not _hasRR
-        5
     else
-        6
+        3
+
+f_m1dMirrorQualityPass(_unstableState, _locationSoft, _hasRR) =>
+    if _unstableState
+        0
+    else if not _locationSoft
+        0
+    else if not _hasRR
+        1
+    else
+        2
 
 // Mirror of the Market 1D panel's state engine, using the source script defaults.
 m1dMirrorCrossCheckEnabled = true
@@ -406,23 +422,29 @@ f_m1dMirrorState() =>
     _crossOkBull = not _crossCheckActive or _crossSlope >= 0
     _crossOkBear = not _crossCheckActive or _crossSlope <= 0
 
-    _callQ2 = _bullBias and _crossOkBull
-    _putQ2 = _bearBias and _crossOkBear
-    _callQ3 = _structureSupportsMoveBull
-    _putQ3 = _structureSupportsMoveBear
-    _callQ7 = (not _extended) and (_nearMA or _nearSupport or _isCompression)
-    _putQ7 = (not _extended) and (_nearMA or _nearResist or _isCompression)
-
+    _callBiasCore = _bullBias and _crossOkBull
+    _putBiasCore = _bearBias and _crossOkBear
+    _callStructureSoft = _bullStructure or _structureSupportsMoveBull
+    _putStructureSoft = _bearStructure or _structureSupportsMoveBear
+    _callLocationSoft = (not _extended) and (_nearMA or _nearSupport or _isCompression)
+    _putLocationSoft = (not _extended) and (_nearMA or _nearResist or _isCompression)
     _unstableState = _isUnstable or _hasClimax or _regimeChangeRisk
-    _putState = _unstableState ? "UNSTABLE" : (_putQ2 and _putQ3 and _putQ7 and _putHasRR and _regimeTxt == "TREND" ? "TREND SHORT" : (_regimeTxt == "RANGE" ? "RANGE" : "TRANSITION"))
-    _callState = _unstableState ? "UNSTABLE" : (_callQ2 and _callQ3 and _callQ7 and _callHasRR and _regimeTxt == "TREND" ? "TREND LONG" : (_regimeTxt == "RANGE" ? "RANGE" : "TRANSITION"))
+    _callSupportive = _callBiasCore and _callStructureSoft and not _unstableState
+    _putSupportive = _putBiasCore and _putStructureSoft and not _unstableState
+    _callStrong = _callSupportive and _regimeTxt == "TREND"
+    _putStrong = _putSupportive and _regimeTxt == "TREND"
 
-    _putReason = f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20Bear or _lost20Bull, _adxWeak, _momFlip, _regimeTxt, _bearBias, _crossOkBear, _putQ3, _putQ7, _extended, _putHasRR)
-    _callReason = f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20Bull or _lost20Bear, _adxWeak, _momFlip, _regimeTxt, _bullBias, _crossOkBull, _callQ3, _callQ7, _extended, _callHasRR)
-    _putPass = f_m1dMirrorPass(_unstableState, _regimeTxt, _putQ2, _putQ3, _putQ7, _putHasRR)
-    _callPass = f_m1dMirrorPass(_unstableState, _regimeTxt, _callQ2, _callQ3, _callQ7, _callHasRR)
+    _putState = _unstableState ? "UNSTABLE" : (_putStrong and _putLocationSoft ? "BEARISH" : (_putSupportive ? "SUPPORTIVE" : "NEUTRAL"))
+    _callState = _unstableState ? "UNSTABLE" : (_callStrong and _callLocationSoft ? "BULLISH" : (_callSupportive ? "SUPPORTIVE" : "NEUTRAL"))
 
-    [_putState, _callState, _putReason, _callReason, _putPass, _callPass]
+    _putReason = f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20Bear or _lost20Bull, _adxWeak, _momFlip, _regimeTxt, _bearBias, _crossOkBear, _putStructureSoft, _putLocationSoft, _putHasRR)
+    _callReason = f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20Bull or _lost20Bear, _adxWeak, _momFlip, _regimeTxt, _bullBias, _crossOkBull, _callStructureSoft, _callLocationSoft, _callHasRR)
+    _putCorePass = f_m1dMirrorCorePass(_unstableState, _putBiasCore, _putStructureSoft, _regimeTxt)
+    _callCorePass = f_m1dMirrorCorePass(_unstableState, _callBiasCore, _callStructureSoft, _regimeTxt)
+    _putQualityPass = f_m1dMirrorQualityPass(_unstableState, _putLocationSoft, _putHasRR)
+    _callQualityPass = f_m1dMirrorQualityPass(_unstableState, _callLocationSoft, _callHasRR)
+
+    [_putState, _callState, _putReason, _callReason, _putCorePass, _callCorePass, _putQualityPass, _callQualityPass]
 
 // Mirror of the 1H panel's READY FOR LTF state, using the 1H script's core defaults.
 h1MirrorHtfAlignTf = "D"
@@ -1127,9 +1149,9 @@ h1PutStateTxt  = h1PutReady  ? "READY" : (h1BearCtx ? "PULLBACK" : "NEUTRAL")
 [h1PutReadyForLtfState, h1CallReadyForLtfState, h1PutBlockerTxt, h1CallBlockerTxt, h1PutReadyForLtfPass, h1CallReadyForLtfPass] = request.security(syminfo.tickerid, "60", f_h1ReadyForLtfClosed())
 
 // HTF CONTEXT mirrors the higher-timeframe state engines used by the source panels.
-[m1dPutStateTxt, m1dCallStateTxt, m1dPutReason, m1dCallReason, m1dPutPass, m1dCallPass] = request.security(benchSymbol, dailyTF, f_m1dMirrorState())
-m1dPutStateDisplay = (m1dPutReason == "OK" ? m1dPutStateTxt : (m1dPutStateTxt + " " + m1dPutReason)) + " (" + str.tostring(m1dPutPass) + "/6)"
-m1dCallStateDisplay = (m1dCallReason == "OK" ? m1dCallStateTxt : (m1dCallStateTxt + " " + m1dCallReason)) + " (" + str.tostring(m1dCallPass) + "/6)"
+[m1dPutStateTxt, m1dCallStateTxt, m1dPutReason, m1dCallReason, m1dPutCorePass, m1dCallCorePass, m1dPutQualityPass, m1dCallQualityPass] = request.security(benchSymbol, dailyTF, f_m1dMirrorState())
+m1dPutStateDisplay = (m1dPutReason == "OK" ? m1dPutStateTxt : (m1dPutStateTxt + " " + m1dPutReason)) + " (" + str.tostring(m1dPutCorePass) + "/3 | " + str.tostring(m1dPutQualityPass) + "/2)"
+m1dCallStateDisplay = (m1dCallReason == "OK" ? m1dCallStateTxt : (m1dCallStateTxt + " " + m1dCallReason)) + " (" + str.tostring(m1dCallCorePass) + "/3 | " + str.tostring(m1dCallQualityPass) + "/2)"
 m1dPutStateCol = f_m1dMirrorStateColor(m1dPutStateTxt)
 m1dCallStateCol = f_m1dMirrorStateColor(m1dCallStateTxt)
 
@@ -1288,7 +1310,7 @@ f_clearTable(_rows) =>
         for c = 0 to 2
             f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
 
-maxRows = 55
+maxRows = 56
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -1383,8 +1405,16 @@ plotchar(showEMarks and putEntryReadyState, title="PUT entry ready", char="E", l
 plotchar(showEMarks and callEntryReadyState, title="CALL entry ready", char="E", location=location.top, color=colOk, size=size.tiny)
 
 // HTF readiness markers are event-based to avoid repeating the same higher-timeframe state on every 15m bar.
-m1dPutReadyEvent = m1dPutStateTxt == "TREND SHORT" and m1dPutStateTxt[1] != "TREND SHORT"
-m1dCallReadyEvent = m1dCallStateTxt == "TREND LONG" and m1dCallStateTxt[1] != "TREND LONG"
+m1dPutSoftActive = m1dPutStateTxt == "BEARISH" or m1dPutStateTxt == "SUPPORTIVE"
+m1dCallSoftActive = m1dCallStateTxt == "BULLISH" or m1dCallStateTxt == "SUPPORTIVE"
+m1dPutStrictActive = m1dPutStateTxt == "BEARISH"
+m1dCallStrictActive = m1dCallStateTxt == "BULLISH"
+m1dPutSoftEvent = m1dPutSoftActive and not m1dPutSoftActive[1]
+m1dCallSoftEvent = m1dCallSoftActive and not m1dCallSoftActive[1]
+m1dPutSoftOutEvent = not m1dPutSoftActive and m1dPutSoftActive[1]
+m1dCallSoftOutEvent = not m1dCallSoftActive and m1dCallSoftActive[1]
+m1dPutStrictEvent = m1dPutStrictActive and not m1dPutStrictActive[1]
+m1dCallStrictEvent = m1dCallStrictActive and not m1dCallStrictActive[1]
 d1PutReadyEvent = d1PutCandidate and not d1PutCandidate[1]
 d1CallReadyEvent = d1CallCandidate and not d1CallCandidate[1]
 h4PutReadyEvent = h4PutStateTxt == "READY" and h4PutStateTxt[1] != "READY"
@@ -1394,8 +1424,10 @@ h1CallReadyEvent = h1CallReadyForLtfState and not h1CallReadyForLtfState[1]
 
 var float putEAccum = 0.0
 var float callEAccum = 0.0
-var float putMAccum = 0.0
-var float callMAccum = 0.0
+var float putMSoftAccum = 0.0
+var float callMSoftAccum = 0.0
+var float putMStrictAccum = 0.0
+var float callMStrictAccum = 0.0
 var float put1Accum = 0.0
 var float call1Accum = 0.0
 var float put4Accum = 0.0
@@ -1405,8 +1437,10 @@ var float callDAccum = 0.0
 
 putEAccum := nz(putEAccum[1]) + (putEntryReadyState ? 1.0 : 0.0)
 callEAccum := nz(callEAccum[1]) + (callEntryReadyState ? 1.0 : 0.0)
-putMAccum := nz(putMAccum[1]) + (m1dPutReadyEvent ? 1.0 : 0.0)
-callMAccum := nz(callMAccum[1]) + (m1dCallReadyEvent ? 1.0 : 0.0)
+putMSoftAccum := nz(putMSoftAccum[1]) + (m1dPutSoftEvent ? 1.0 : 0.0)
+callMSoftAccum := nz(callMSoftAccum[1]) + (m1dCallSoftEvent ? 1.0 : 0.0)
+putMStrictAccum := nz(putMStrictAccum[1]) + (m1dPutStrictEvent ? 1.0 : 0.0)
+callMStrictAccum := nz(callMStrictAccum[1]) + (m1dCallStrictEvent ? 1.0 : 0.0)
 put1Accum := nz(put1Accum[1]) + (h1PutReadyEvent ? 1.0 : 0.0)
 call1Accum := nz(call1Accum[1]) + (h1CallReadyEvent ? 1.0 : 0.0)
 put4Accum := nz(put4Accum[1]) + (h4PutReadyEvent ? 1.0 : 0.0)
@@ -1414,11 +1448,17 @@ call4Accum := nz(call4Accum[1]) + (h4CallReadyEvent ? 1.0 : 0.0)
 putDAccum := nz(putDAccum[1]) + (d1PutReadyEvent ? 1.0 : 0.0)
 callDAccum := nz(callDAccum[1]) + (d1CallReadyEvent ? 1.0 : 0.0)
 
-markSummaryBars = f_lookbackBarsFromDays(markSummaryDays)
+maxDynamicHistoryBars = 5000
+markSummaryBarsRaw = f_lookbackBarsFromDays(markSummaryDays)
+// Pine limits dynamic history indexing to 5000 bars.
+markSummaryBars = math.min(markSummaryBarsRaw, maxDynamicHistoryBars)
+markSummaryLabel = markSummaryBarsRaw > markSummaryBars ? str.tostring(f_lookbackDaysFromBars(markSummaryBars), "#.##") + "D eff." : str.tostring(markSummaryDays) + "D"
 putECount = putEAccum - nz(putEAccum[markSummaryBars], 0.0)
 callECount = callEAccum - nz(callEAccum[markSummaryBars], 0.0)
-putMCount = putMAccum - nz(putMAccum[markSummaryBars], 0.0)
-callMCount = callMAccum - nz(callMAccum[markSummaryBars], 0.0)
+putMSoftCount = putMSoftAccum - nz(putMSoftAccum[markSummaryBars], 0.0)
+callMSoftCount = callMSoftAccum - nz(callMSoftAccum[markSummaryBars], 0.0)
+putMStrictCount = putMStrictAccum - nz(putMStrictAccum[markSummaryBars], 0.0)
+callMStrictCount = callMStrictAccum - nz(callMStrictAccum[markSummaryBars], 0.0)
 put1Count = put1Accum - nz(put1Accum[markSummaryBars], 0.0)
 call1Count = call1Accum - nz(call1Accum[markSummaryBars], 0.0)
 put4Count = put4Accum - nz(put4Accum[markSummaryBars], 0.0)
@@ -1426,8 +1466,10 @@ call4Count = call4Accum - nz(call4Accum[markSummaryBars], 0.0)
 putDCount = putDAccum - nz(putDAccum[markSummaryBars], 0.0)
 callDCount = callDAccum - nz(callDAccum[markSummaryBars], 0.0)
 
-plotchar(showMarket1DMarks and m1dPutReadyEvent, title="PUT Market 1D ready", char="M", location=location.top, color=colBad, size=size.tiny)
-plotchar(showMarket1DMarks and m1dCallReadyEvent, title="CALL Market 1D ready", char="M", location=location.top, color=colOk, size=size.tiny)
+plotshape(showMarket1DMarks and m1dPutSoftEvent, title="PUT Market 1D in", style=shape.labeldown, location=location.top, color=colBad, text="Min", textcolor=color.white, size=size.tiny)
+plotshape(showMarket1DMarks and m1dPutSoftOutEvent, title="PUT Market 1D out", style=shape.labeldown, location=location.top, color=colBad, text="Mout", textcolor=color.white, size=size.tiny)
+plotshape(showMarket1DMarks and m1dCallSoftEvent, title="CALL Market 1D in", style=shape.labeldown, location=location.top, color=colOk, text="Min", textcolor=color.white, size=size.tiny)
+plotshape(showMarket1DMarks and m1dCallSoftOutEvent, title="CALL Market 1D out", style=shape.labeldown, location=location.top, color=colOk, text="Mout", textcolor=color.white, size=size.tiny)
 plotchar(show1DMarks and d1PutReadyEvent, title="PUT 1D ready", char="D", location=location.top, color=colBad, size=size.tiny)
 plotchar(show1DMarks and d1CallReadyEvent, title="CALL 1D ready", char="D", location=location.top, color=colOk, size=size.tiny)
 plotchar(show4HMarks and h4PutReadyEvent, title="PUT 4H ready", char="4", location=location.top, color=colBad, size=size.tiny)
@@ -1490,7 +1532,7 @@ else
     row += 1
 
     if uiShowMarkSummary
-        f_sectionRow(row, "MARK SUMMARY (" + str.tostring(markSummaryDays) + "D)")
+        f_sectionRow(row, "MARK SUMMARY (" + markSummaryLabel + ")")
         f_applyColVisibility(row)
         row += 1
 
@@ -1510,7 +1552,11 @@ else
         f_applyColVisibility(row)
         row += 1
 
-        f_metricRow(row, "M", str.tostring(int(math.round(putMCount))), colBg, str.tostring(int(math.round(callMCount))), colBg)
+        f_metricRow(row, "Min soft", str.tostring(int(math.round(putMSoftCount))), colBg, str.tostring(int(math.round(callMSoftCount))), colBg)
+        f_applyColVisibility(row)
+        row += 1
+
+        f_metricRow(row, "Min strict", str.tostring(int(math.round(putMStrictCount))), colBg, str.tostring(int(math.round(callMStrictCount))), colBg)
         f_applyColVisibility(row)
         row += 1
 
