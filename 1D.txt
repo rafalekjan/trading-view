@@ -1,0 +1,255 @@
+Jasne — poniżej masz **gotowy szablon opisu/oceny tickera na 1D pod swing option**, zrobiony **wyłącznie** na bazie *ModMark Blueprint*. To jest format, którym możesz opisać każdy ticker w kilku punktach.
+
+* **Market support (SPY/QQQ 1D):** Bullish / Bearish / Sideways-Chop / High Volatility
+  Przykładowe odpowiedzi:
+  `Market support: Bullish`
+  `Market support: Bearish`
+  `Market support: Chop – size down / less aggressive`
+  W blueprint najpierw ocenia się rynek na daily, bo swingi mają największy sens, gdy kierunek rynku wspiera pomysł.
+
+* **Bias (ticker 1D):** Bullish / Bearish / Neutral
+  Przykładowe odpowiedzi:
+  `Bias: Bullish – higher highs / higher lows`
+  `Bias: Bearish – lower highs / lower lows`
+  `Bias: Neutral – sideways / overlapping candles`
+  Kierunek ma być jasny; w frameworku „maybe” nie jest biasem.
+
+* **Relative Strength / Weakness vs market:** Strong / Weak / In-line
+  Przykładowe odpowiedzi:
+  `Relative Strength: Bullish – stock holds levels while market pulls back`
+  `Relative Weakness: Bearish – stock breaks down faster than QQQ/SPY`
+  `Relative Performance: Neutral – moving with market, no edge`
+  W blueprint ticker ma być **lepszy lub gorszy od rynku**, a nie tylko „ruszać się”.
+
+* **Daily structure:** Trend / Range / Breakout / Breakdown
+  Przykładowe odpowiedzi:
+  `Structure: Uptrend pullback`
+  `Structure: Consolidation near resistance`
+  `Structure: Breakdown below support`
+  `Structure: Range – no clean directional edge`
+  Dla swingu autor szuka głównie: **trend pullback** albo **breakout/breakdown z konsolidacji**.
+
+* **Chart quality:** Clean / Messy
+  Przykładowe odpowiedzi:
+  `Chart quality: Clean – readable trend, obvious levels`
+  `Chart quality: Messy – whipsaws, overlapping candles, random wicks`
+  Jeśli wykresu nie da się wyjaśnić w jednym zdaniu, blueprint traktuje to jako słabą jakość.
+
+* **Key level:** Support / Resistance / Prior high-low / Consolidation edge / 20-50-200 MA
+  Przykładowe odpowiedzi:
+  `Key level: prior swing low support`
+  `Key level: resistance at prior breakout area`
+  `Key level: 50 MA aligned with structure`
+  `Key level: top of consolidation`
+  Cena ma być **blisko poziomu**, nie „w środku niczego”.
+
+* **Location:** Near structure / Extended / Middle of range
+  Przykładowe odpowiedzi:
+  `Location: Near support`
+  `Location: Near resistance`
+  `Location: Extended from structure – wait`
+  `Location: Mid-range – lower quality`
+  W frameworku dobre trade’y zaczynają się od dobrej lokalizacji.
+
+* **Moving averages context (1D):** Above / Below / Reclaiming / Losing
+  Przykładowe odpowiedzi:
+  `20 EMA: holding = short-term bullish momentum`
+  `50 MA: acting as support`
+  `200 MA: above = long bias / below = short bias`
+  `Price around 200 MA = caution / mixed regime`
+  MA są tu **kontekstem**, a nie samodzielnym sygnałem wejścia.
+
+* **Volume:** Confirming / Weak / Mixed
+  Przykładowe odpowiedzi:
+  `Volume: Rising with move = healthy`
+  `Volume: Breakout without volume = caution`
+  `Volume: Pullback on lighter volume = constructive`
+  Blueprint używa wolumenu do potwierdzenia ruchu, nie do przewidywania kierunku.
+
+* **Volatility / ATR:** Normal / Elevated / Too volatile
+  Przykładowe odpowiedzi:
+  `ATR: supports realistic swing expectations`
+  `Volatility: Elevated – smaller size, wider logical stop`
+  `Volatility: Too high for normal sizing`
+  ATR ma pomagać ocenić, czy target i stop są realistyczne.
+
+* **Entry idea (na 1D):** Pullback / Breakout / Breakdown / Rejection
+  Przykładowe odpowiedzi:
+  `Entry: After confirmation near support`
+  `Entry: Break and hold above resistance`
+  `Entry: Breakdown below support`
+  `Entry: Failed bounce at resistance`
+  Autor nie lubi wejść „bo wygląda dobrze”; wejście ma wynikać z reakcji ceny przy poziomie.
+
+* **Invalidation / Stop:** Below support / Above resistance / Beyond structure
+  Przykładowe odpowiedzi:
+  `Stop: Below support`
+  `Stop: Above resistance`
+  `Invalidation: Reclaim and hold above broken level`
+  `Invalidation: Break above last lower high`
+  Stop ma oznaczać moment, w którym **teza jest błędna**, a nie poziom „bólu”.
+
+* **Target:** Next major level on daily
+  Przykładowe odpowiedzi:
+  `Target 1: next resistance`
+  `Target 1: first major support zone`
+  `Target 2: measured move / next daily level`
+  Blueprint każe definiować target przed wejściem i opierać go o logiczne poziomy z wykresu.
+
+* **Risk/Reward:** <2R / 2R / 3R+
+  Przykładowe odpowiedzi:
+  `R/R: <2:1 = low quality`
+  `R/R: 2:1 = acceptable`
+  `R/R: 3:1+ = strong`
+  Jeśli reward jest „życzeniowy”, trade odpada.
+
+* **Setup grade:** A / B / C / D
+  Przykładowe odpowiedzi:
+  `Grade: A – market aligned, RS/RW clear, near key level, defined risk, asymmetric reward`
+  `Grade: B – solid, but market neutral / volatility higher / timing not ideal`
+  `Grade: C – unclear market, poor location, vague risk`
+  `Grade: D – extended, emotional, no stop, no structure`
+  To jest centralny system oceniania jakości setupu w blueprintcie.
+
+* **Option fit (pod swing option):** Yes / No
+  Przykładowe odpowiedzi:
+  `Option fit: Yes – 7–14 DTE preferred, ATM / slightly ITM, tight spreads, decent OI`
+  `Option fit: No – wide spreads / thin chain / far OTM only`
+  Dla swing options blueprint preferuje **7–14 DTE**, **ATM lub lekko ITM**, z dobrą płynnością; unika dalekich OTM.
+
+* **Execution decision:** Take / Reduced size / Pass
+  Przykładowe odpowiedzi:
+  `Decision: Take`
+  `Decision: Reduced size`
+  `Decision: Pass – extended / chop / no clean level`
+  Jedna z głównych zasad blueprintu: jeśli trade nie daje się jasno opisać i nie przechodzi filtrów, lepiej **nic nie robić**.
+
+Możesz to sobie spisać w **bardzo krótkim formacie roboczym**:
+
+`Bias:` Bullish / Bearish / Neutral
+`Market support:` Supportive / Chop / Volatile
+`Relative strength:` Strong / Weak / Neutral
+`Structure:` Trend pullback / Breakout / Breakdown / Range
+`Key level:` Support / Resistance / 20EMA / 50MA / 200MA / Prior high-low
+`Location:` Near level / Extended / Mid-range
+`Volume:` Confirming / Weak / Mixed
+`Volatility:` Normal / Elevated / Too high
+`Entry:` After confirmation near level / Break-hold / Rejection
+`Stop:` Below support / Above resistance / Beyond structure
+`Target:` Next daily level
+`R/R:` <2 / 2 / 3+
+`Grade:` A / B / C / D
+`Option fit:` 7–14 DTE, ATM/slightly ITM, liquid / Not liquid
+`Decision:` Take / Reduced size / Pass
+
+
+
+
+
+Najczyściej w *ModMark Blueprint* wygląda to tak:
+
+## 1) To jest naprawdę **rdzeń oceny tickera na 1D**
+
+To bym zostawił jako właściwy format opisu **samego stocka/tickera na daily** pod swing option:
+
+* **Bias / Direction:** Bullish / Bearish / Neutral
+  W blueprintcie kierunek jest nienegocjowalny: musisz wiedzieć, czy jesteś bullish czy bearish; „maybe” nie jest kierunkiem.
+
+* **Relative Strength / Weakness vs SPY/QQQ:** Strong / Weak / Neutral
+  To jest wprost jeden z głównych filtrów: ticker ma być mocniejszy albo słabszy od rynku, a nie tylko „ruszać się razem”.
+
+* **Clean Daily Chart / Chart Quality:** Clean / Messy
+  To jest **osobny, bardzo wyraźny element** w PDF: clean daily = czytelny trend, oczywiste poziomy, gładkie świece, logiczne miejsca na stop i target; messy = whipsawy, overlap, random wicki. 
+
+* **Structure:** Trend / Range / Breakout / Breakdown
+  To też jest wprost. Dodatkowo w walkthrough swingowym ModMark mówi, że na daily szuka głównie:
+  `trend pullback to support`
+  albo
+  `breakout/breakdown from consolidation`.
+
+* **Key Level:** prior high/low / swing high-low / support-resistance / MA confluence
+  Kluczowy poziom to jeden z centralnych elementów oceny jakości trade’u i walkthroughu swingowego. Cena ma być **blisko poziomu**, nie „w środku niczego”.
+
+* **Location:** Near level / Extended / Mid-range
+  To jest dokładnie filtr „location”: dobry trade zaczyna się od logicznej ceny, blisko supportu/oporu, pullbacku trendowego albo breakout area. Jeśli cena jest wyciągnięta albo daleko od struktury, jakość spada. 
+
+* **Moving Averages Context (20 / 50 / 200):** supportive / caution / losing
+  To jest poprawny punkt, ale tylko jako **context, not signal**.
+  20 EMA = short-term momentum / healthy pullbacks
+  50 MA = intermediate structure
+  200 MA = regime filter / long bias vs short bias.
+
+* **Volume:** confirming / weak / mixed
+  To też jest poprawne i wprost z PDF: volume służy do potwierdzania breakoutów, siły trendu i słabych ruchów.
+
+* **ATR / Volatility:** normal / elevated / too volatile
+  Tak — to należy do oceny tickera, bo ATR i volatility mają odpowiedzieć, czy stop i target są realistyczne i czy trzeba zmniejszyć size.
+
+* **Entry / Stop / Target:**
+  `Entry: after confirmation near the level`
+  `Stop: where thesis is invalidated`
+  `Target: next major daily level`
+  To jest w blueprintcie bardzo wprost i bardzo centralnie.
+
+* **Reward Justification / R:R:** weak / acceptable / strong
+  W rdzeniu frameworku ModMark nie tyle „lubi R 2 albo 3”, co wymaga, żeby reward był **realistic and justified**, a nie życzeniowy. Sam skrót `<2R / 2R / 3R+` jest OK jako Twój format roboczy, ale w PDF fundamentalnie chodzi o **reward justification**. 
+
+## 2) Tego Ci **brakowało**, jeśli chcesz mieć „pełniejszy” ticker 1D z blueprintu
+
+To są rzeczy z PDF, które dotyczą oceny tickera na wyższym TF i które warto dopisać, jeśli chcesz być bliżej blueprintu:
+
+* **RSI (daily):** momentum confirmation / trend strength / divergence heads-up
+  ModMark używa RSI na swingach głównie na **daily, 4H, 1H**. Nie jako trigger, tylko do potwierdzania momentum i zdrowia trendu.
+
+* **MACD (daily):** momentum supporting / fading
+  To też jest w blueprintcie jako narzędzie potwierdzające momentum na higher timeframes, szczególnie dla swingów. Nie jako samodzielny sygnał.
+
+* **Liquidity / Tradability:** liquid / thin
+  Jeśli oceniasz ticker **pod swing option**, to to jest bardzo ważne. ModMark każe odrzucać nazwy z cienkim stock volume, szerokimi spreadami albo słabym OI. To nie jest „czysty chart read 1D”, ale jest częścią selekcji tickera do swing options.
+
+* **FVG:** only as confluence / optional
+  FVG istnieje w blueprintcie, ale **nie jest rdzeniem** checklisty tickera 1D. ModMark używa go oszczędnie i tylko jako dodatkowy confluence przy strukturze.
+
+## 3) To bym **przeniósł poza sekcję „ticker 1D”**
+
+Te punkty są ważne, ale to nie jest już „sam ticker na daily”:
+
+* **Market support (SPY/QQQ 1D)**
+  To jest **najpierw market filter**, nie opis samego tickera. Nadal trzeba to mieć, ale jako osobny blok nad tickerem.
+
+* **Setup grade: A / B / C / D**
+  To jest **ocena całego trade idea**, nie samego wykresu tickera. Powstaje po połączeniu marketu, stock behavior, location, risk i reward.
+
+* **Option fit / contract choice**
+  To jest ważne dla swing option, ale to już jest **warstwa kontraktu**, nie warstwa samego tickera 1D.
+
+* **Execution decision: Take / Reduced size / Pass**
+  To jest finalna decyzja po wszystkich filtrach, a nie pole opisujące sam ticker.
+
+## Wniosek
+
+Gdybym miał to poprawić **ściśle pod „ticker na 1D”**, to finalny format z blueprintu zrobiłbym tak:
+
+`Bias:` Bullish / Bearish / Neutral
+`RS/RW vs SPY/QQQ:` Strong / Weak / Neutral
+`Daily chart quality:` Clean / Messy
+`Structure:` Trend / Range / Breakout / Breakdown
+`Key level:` Support / Resistance / Prior high-low / Swing high-low / 20-50-200 MA confluence
+`Location:` Near level / Extended / Mid-range
+`MA context:` 20 EMA / 50 MA / 200 MA supportive-caution-losing
+`Volume:` Confirming / Weak / Mixed
+`RSI:` Confirming / Not confirming / Divergence heads-up
+`MACD:` Momentum supporting / Fading / Neutral
+`ATR / Volatility:` Normal / Elevated / Too high
+`Entry:` After confirmation near level
+`Stop / Invalidation:` Thesis fails here
+`Target:` Next major daily level
+`Reward justification:` Weak / Acceptable / Strong
+`Liquidity:` Liquid / Thin
+
+A **osobno pod tym**, już nie jako ticker 1D, tylko jako warstwa trade’u:
+
+`Market support:` Bullish / Bearish / Chop / Unstable
+`Setup grade:` A / B / C / D
+`Contract:` 7–14 DTE / ATM or slightly ITM / tight spreads / decent OI
+`Decision:` Take / Size down / Pass

@@ -1,0 +1,714 @@
+﻿//@version=6
+indicator("1D", overlay = true, max_lines_count = 100, max_labels_count = 100)
+
+//------------------------------------------------------------------------------
+// INPUTS
+//------------------------------------------------------------------------------
+groupBench = "Market / benchmark"
+benchmark = input.symbol("AMEX:SPY", "Benchmark (SPY / QQQ)", group = groupBench)
+
+groupCore = "Core"
+swingLen = input.int(5, "Swing pivot length", minval = 2, maxval = 20, group = groupCore)
+baseLen  = input.int(20, "Consolidation lookback", minval = 10, maxval = 60, group = groupCore)
+atrLen   = input.int(14, "ATR length", minval = 5, maxval = 50, group = groupCore)
+diLen    = input.int(14, "DMI / ADX length", minval = 5, maxval = 50, group = groupCore)
+
+groupFlex = "Flexibility"
+nearATR     = input.float(0.85, "Near level <= ATR x", minval = 0.20, maxval = 3.00, step = 0.05, group = groupFlex)
+extendedATR = input.float(1.90, "Extended > ATR x", minval = 0.50, maxval = 5.00, step = 0.05, group = groupFlex)
+baseATRMax  = input.float(4.50, "Max base width for breakout/breakdown (ATR)", minval = 1.0, maxval = 10.0, step = 0.1, group = groupFlex)
+highVolPct  = input.float(3.20, "High-vol threshold ATR%", minval = 0.5, maxval = 10.0, step = 0.1, group = groupFlex)
+
+groupVis = "Visuals"
+showEMAs    = input.bool(true, "Show EMA 20 / 50 + 200 MA", group = groupVis)
+showLevels  = input.bool(true, "Show nearest support / resistance", group = groupVis)
+showSignals = input.bool(true, "Show breakout / breakdown markers", group = groupVis)
+
+//------------------------------------------------------------------------------
+// HELPERS
+//------------------------------------------------------------------------------
+f_clamp(float x, float lo, float hi) =>
+    math.max(lo, math.min(hi, x))
+
+f_safeMin(float a, float b) =>
+    na(a) ? b : na(b) ? a : math.min(a, b)
+
+f_safeMax(float a, float b) =>
+    na(a) ? b : na(b) ? a : math.max(a, b)
+
+f_rrText(float rr) =>
+    na(rr) ? "n/a" : "1 : " + str.tostring(rr, "#.##")
+
+f_macdHist() =>
+    [_, __, hist] = ta.macd(close, 12, 26, 9)
+    hist
+
+f_biasLabel(float score, float chopScore) =>
+    chopScore > 60 and math.abs(score) < 18 ? "Neutral / Chop" :
+     score >= 55 ? "Strong Bullish" :
+     score >= 28 ? "Bullish" :
+     score >= 10 ? "Bullish lean" :
+     score <= -55 ? "Strong Bearish" :
+     score <= -28 ? "Bearish" :
+     score <= -10 ? "Bearish lean" :
+     "Neutral"
+
+f_marketLabel(float score, float chopScore, float atrPctVal, float hvPct) =>
+    atrPctVal > hvPct ? "High Volatility" :
+     chopScore > 60 and math.abs(score) < 18 ? "Sideways-Chop" :
+     score > 15 ? "Bullish" :
+     score < -15 ? "Bearish" :
+     "Sideways-Chop"
+
+f_relLabel(float score) =>
+    score >= 50 ? "Strong" :
+     score >= 20 ? "Slightly strong" :
+     score <= -50 ? "Weak" :
+     score <= -20 ? "Slightly weak" :
+     "In-line"
+
+f_qualityLabel(float q) =>
+    q >= 70 ? "Clean" :
+     q >= 55 ? "Fairly clean" :
+     q >= 40 ? "Mixed" :
+     "Messy"
+
+f_rrLabel(float rr) =>
+    na(rr) ? "Weak" :
+     rr >= 3.0 ? "Strong" :
+     rr >= 2.0 ? "Acceptable" :
+     rr >= 1.25 ? "Weak" :
+     "Weak"
+
+f_grade(float score) =>
+    score >= 75 ? "A" :
+     score >= 58 ? "B" :
+     score >= 42 ? "C" :
+     "D"
+
+f_biasBg(float score, float chopScore) =>
+    chopScore > 60 and math.abs(score) < 18 ? color.new(color.orange, 10) :
+     score >= 20 ? color.new(color.green, 20) :
+     score <= -20 ? color.new(color.red, 15) :
+     color.new(color.orange, 35)
+
+f_marketBg(string state) =>
+    state == "Bullish" ? color.new(color.green, 25) :
+     state == "Bearish" ? color.new(color.red, 20) :
+     state == "High Volatility" ? color.new(color.maroon, 10) :
+     color.new(color.orange, 20)
+
+f_relBg(string state) =>
+    state == "Strong" or state == "Slightly strong" ? color.new(color.green, 25) :
+     state == "Weak" or state == "Slightly weak" ? color.new(color.red, 20) :
+     color.new(color.orange, 25)
+
+f_qualityBg(string state) =>
+    state == "Clean" ? color.new(color.green, 25) :
+     state == "Fairly clean" ? color.new(color.green, 45) :
+     state == "Mixed" ? color.new(color.orange, 20) :
+     color.new(color.red, 20)
+
+f_gradeBg(string g) =>
+    g == "A" ? color.new(color.green, 15) :
+     g == "B" ? color.new(color.green, 35) :
+     g == "C" ? color.new(color.orange, 15) :
+     color.new(color.red, 10)
+
+f_decisionBg(string d) =>
+    d == "Take" ? color.new(color.green, 20) :
+     d == "Reduced size" ? color.new(color.orange, 15) :
+     color.new(color.red, 5)
+
+f_row(table t, int row, string item, string result, string details, color resultBg) =>
+    table.cell(t, 0, row, item, text_color = color.white, bgcolor = color.new(color.black, 0), text_halign = text.align_left)
+    table.cell(t, 1, row, result, text_color = color.white, bgcolor = resultBg, text_halign = text.align_left)
+    table.cell(t, 2, row, details, text_color = color.silver, bgcolor = color.new(color.black, 0), text_halign = text.align_left)
+
+//------------------------------------------------------------------------------
+// CORE PRICE / TREND
+//------------------------------------------------------------------------------
+ema20  = ta.ema(close, 20)
+ema50  = ta.ema(close, 50)
+ema200 = ta.sma(close, 200)
+
+atr    = ta.atr(atrLen)
+atrPct = atr / close * 100.0
+
+[diPlus, diMinus, adx] = ta.dmi(diLen, diLen)
+
+isDailyChart = timeframe.in_seconds(timeframe.period) == timeframe.in_seconds("1D")
+if not isDailyChart
+    runtime.error("Use this script on the 1D chart. Pine does not allow indicator(timeframe = \"D\") when the script uses a table.")
+
+tickerUpper = str.upper(syminfo.ticker)
+isSpyOrQqq = tickerUpper == "SPY" or tickerUpper == "QQQ"
+if isSpyOrQqq
+    runtime.error("Do not use 1D.pine on SPY or QQQ. Use the dedicated SPY_1D script instead.")
+
+rsi = ta.rsi(close, 14)
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+
+volSma20 = ta.sma(volume, 20)
+rvol = volume / math.max(volSma20, 1.0)
+avgDollarVol20 = ta.sma(volume * close, 20)
+
+//------------------------------------------------------------------------------
+// BENCHMARK / MARKET SUPPORT
+//------------------------------------------------------------------------------
+benchOpen  = request.security(benchmark, "D", open,  gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+benchHigh  = request.security(benchmark, "D", high,  gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+benchLow   = request.security(benchmark, "D", low,   gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+benchClose = request.security(benchmark, "D", close, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+benchAtr   = request.security(benchmark, "D", ta.atr(atrLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+benchAtrPct = request.security(benchmark, "D", ta.atr(atrLen) / close * 100.0, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+
+benchEma20  = ta.ema(benchClose, 20)
+benchEma50  = ta.ema(benchClose, 50)
+benchEma200 = ta.sma(benchClose, 200)
+
+benchRangeHigh60 = ta.highest(benchHigh, 60)
+benchRangeLow60  = ta.lowest(benchLow, 60)
+benchRangeWidth60 = math.max(benchRangeHigh60 - benchRangeLow60, syminfo.mintick)
+benchRangePos60 = (benchClose - benchRangeLow60) / benchRangeWidth60
+
+benchOverlapNow = math.max(0.0, math.min(benchHigh, benchHigh[1]) - math.max(benchLow, benchLow[1]))
+benchOverlapPct = benchOverlapNow / math.max(benchHigh - benchLow, syminfo.mintick)
+benchOverlapAvg = ta.sma(benchOverlapPct, 5)
+benchBodyToRange = ta.sma(math.abs(benchClose - benchOpen) / math.max(benchHigh - benchLow, syminfo.mintick), 5)
+benchCompression = (math.abs(benchEma20 - benchEma50) + math.abs(benchEma50 - benchEma200)) / math.max(benchAtr, syminfo.mintick)
+
+benchStackScore = 0.0
+benchStackScore += benchClose > benchEma20 ? 8 : -8
+benchStackScore += benchEma20 > benchEma50 ? 10 : -10
+benchStackScore += benchEma50 > benchEma200 ? 12 : -12
+
+benchSlopeFast = f_clamp((benchEma20 - benchEma20[5]) / math.max(benchAtr * 1.20, syminfo.mintick), -1.0, 1.0) * 12.0
+benchSlopeMid  = f_clamp((benchEma50 - benchEma50[10]) / math.max(benchAtr * 1.80, syminfo.mintick), -1.0, 1.0) * 8.0
+benchRangeScore = (benchRangePos60 - 0.5) * 12.0
+marketScore = f_clamp(benchStackScore + benchSlopeFast + benchSlopeMid + benchRangeScore, -100.0, 100.0)
+
+marketChopScore = f_clamp(
+     benchOverlapAvg * 35.0 +
+     (1.0 - benchBodyToRange) * 20.0 +
+     (1.0 - math.min(math.abs(marketScore) / 30.0, 1.0)) * 25.0 +
+     (1.0 - math.min(benchCompression / 4.0, 1.0)) * 20.0,
+     0.0, 100.0
+)
+
+marketSupport = f_marketLabel(marketScore, marketChopScore, benchAtrPct, highVolPct)
+marketBiasDir = marketSupport == "Bullish" ? 1 : marketSupport == "Bearish" ? -1 : 0
+marketHighVol = marketSupport == "High Volatility"
+
+//------------------------------------------------------------------------------
+// PIVOTS / SWINGS
+//------------------------------------------------------------------------------
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSwingHigh = na
+var float prevSwingHigh = na
+var float lastSwingLow  = na
+var float prevSwingLow  = na
+
+if not na(ph)
+    prevSwingHigh := lastSwingHigh
+    lastSwingHigh := ph
+
+if not na(pl)
+    prevSwingLow := lastSwingLow
+    lastSwingLow := pl
+
+priorDayHigh = high[1]
+priorDayLow  = low[1]
+priorWeekHigh = request.security(syminfo.tickerid, "W", high[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+priorWeekLow  = request.security(syminfo.tickerid, "W", low[1],  gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+
+recent20High = ta.highest(high[1], 20)
+recent20Low  = ta.lowest(low[1], 20)
+
+baseHigh = ta.highest(high[1], baseLen)
+baseLow  = ta.lowest(low[1], baseLen)
+baseWidthATR = (baseHigh - baseLow) / math.max(atr, syminfo.mintick)
+
+rangeHigh60 = ta.highest(high, 60)
+rangeLow60  = ta.lowest(low, 60)
+rangeWidth60 = math.max(rangeHigh60 - rangeLow60, syminfo.mintick)
+rangePos60 = (close - rangeLow60) / rangeWidth60
+
+//------------------------------------------------------------------------------
+// SOFT BIAS
+//------------------------------------------------------------------------------
+maStackScore = 0.0
+maStackScore += close > ema20 ? 8 : -8
+maStackScore += ema20 > ema50 ? 10 : -10
+maStackScore += ema50 > ema200 ? 12 : -12
+
+slopeFastScore = f_clamp((ema20 - ema20[5]) / math.max(atr * 1.20, syminfo.mintick), -1.0, 1.0) * 12.0
+slopeMidScore  = f_clamp((ema50 - ema50[10]) / math.max(atr * 1.80, syminfo.mintick), -1.0, 1.0) * 8.0
+
+swingHighScore = na(lastSwingHigh) or na(prevSwingHigh) ? 0.0 : f_clamp((lastSwingHigh - prevSwingHigh) / math.max(atr * 2.0, syminfo.mintick), -1.0, 1.0) * 12.0
+swingLowScore  = na(lastSwingLow) or na(prevSwingLow) ? 0.0 : f_clamp((lastSwingLow - prevSwingLow) / math.max(atr * 2.0, syminfo.mintick), -1.0, 1.0) * 12.0
+rangeScore     = (rangePos60 - 0.5) * 16.0
+dmiScore       = ((diPlus - diMinus) / math.max(diPlus + diMinus, 1.0)) * 18.0
+trendBoost     = 0.75 + 0.25 * math.min(adx / 35.0, 1.0)
+
+biasScoreRaw = maStackScore + slopeFastScore + slopeMidScore + swingHighScore + swingLowScore + rangeScore + dmiScore
+biasScore = f_clamp(biasScoreRaw * trendBoost, -100.0, 100.0)
+
+overlapNow = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1]))
+overlapPct = overlapNow / math.max(high - low, syminfo.mintick)
+overlapAvg = ta.sma(overlapPct, 5)
+bodyToRange = ta.sma(math.abs(close - open) / math.max(high - low, syminfo.mintick), 5)
+
+biasChopScore = f_clamp(
+     (1.0 - math.min(adx / 25.0, 1.0)) * 40.0 +
+     overlapAvg * 25.0 +
+     (1.0 - bodyToRange) * 20.0 +
+     (1.0 - math.min((math.abs(ema20 - ema50) + math.abs(ema50 - ema200)) / math.max(atr * 4.0, syminfo.mintick), 1.0)) * 15.0,
+     0.0, 100.0
+)
+
+bullSwingStructure = not na(lastSwingHigh) and not na(prevSwingHigh) and not na(lastSwingLow) and not na(prevSwingLow) and lastSwingHigh > prevSwingHigh and lastSwingLow > prevSwingLow
+bearSwingStructure = not na(lastSwingHigh) and not na(prevSwingHigh) and not na(lastSwingLow) and not na(prevSwingLow) and lastSwingHigh < prevSwingHigh and lastSwingLow < prevSwingLow
+
+bullMAContext = close >= ema20 and ema20 >= ema50 and ema50 >= ema200 and ema20 >= ema20[5]
+bearMAContext = close <= ema20 and ema20 <= ema50 and ema50 <= ema200 and ema20 <= ema20[5]
+
+biasBullRaw = bullSwingStructure or (bullMAContext and biasScore >= 25)
+biasBearRaw = bearSwingStructure or (bearMAContext and biasScore <= -25)
+biasBull = biasBullRaw and not biasBearRaw
+biasBear = biasBearRaw and not biasBullRaw
+biasNeutral = not biasBull and not biasBear
+
+biasLabel =
+     biasBull ? "Bullish" :
+     biasBear ? "Bearish" :
+     "Neutral"
+
+//------------------------------------------------------------------------------
+// RELATIVE STRENGTH / WEAKNESS VS BENCHMARK
+//------------------------------------------------------------------------------
+ratio = close / math.max(benchClose, syminfo.mintick)
+ratioRoc10 = ta.roc(ratio, 10)
+relScore = f_clamp((ta.roc(close, 20) - ta.roc(benchClose, 20)) / 8.0, -1.0, 1.0) * 55.0 +
+           f_clamp(ratioRoc10 / 4.0, -1.0, 1.0) * 45.0
+
+relLabel =
+     relScore >= 20 ? "Strong" :
+     relScore <= -20 ? "Weak" :
+     "In-line"
+
+//------------------------------------------------------------------------------
+// CHART QUALITY
+//------------------------------------------------------------------------------
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+wickiness = ta.sma((upperWick + lowerWick) / math.max(high - low, syminfo.mintick), 5)
+maCompression = (math.abs(ema20 - ema50) + math.abs(ema50 - ema200)) / math.max(atr, syminfo.mintick)
+
+qualityPenalty = overlapAvg * 35.0 + wickiness * 25.0 + (1.0 - math.min(adx / 25.0, 1.0)) * 20.0 + (1.0 - math.min(maCompression / 4.0, 1.0)) * 20.0
+qualityScore = f_clamp(100.0 - qualityPenalty, 0.0, 100.0)
+chartQuality = qualityScore >= 55 ? "Clean" : "Messy"
+
+//------------------------------------------------------------------------------
+// SUPPORT / RESISTANCE
+//------------------------------------------------------------------------------
+float supportLevel = na
+string supportName = "n/a"
+
+if not na(lastSwingLow) and lastSwingLow <= close
+    supportLevel := lastSwingLow
+    supportName := "Recent swing low"
+
+if priorDayLow <= close and (na(supportLevel) or close - priorDayLow < close - supportLevel)
+    supportLevel := priorDayLow
+    supportName := "Prior day low"
+
+if priorWeekLow <= close and (na(supportLevel) or close - priorWeekLow < close - supportLevel)
+    supportLevel := priorWeekLow
+    supportName := "Prior week low"
+
+if ema20 <= close and (na(supportLevel) or close - ema20 < close - supportLevel)
+    supportLevel := ema20
+    supportName := "EMA20"
+
+if ema50 <= close and (na(supportLevel) or close - ema50 < close - supportLevel)
+    supportLevel := ema50
+    supportName := "EMA50"
+
+if ema200 <= close and (na(supportLevel) or close - ema200 < close - supportLevel)
+    supportLevel := ema200
+    supportName := "MA200"
+
+if recent20Low <= close and (na(supportLevel) or close - recent20Low < close - supportLevel)
+    supportLevel := recent20Low
+    supportName := "20D low"
+
+float resistanceLevel = na
+string resistanceName = "n/a"
+
+if not na(lastSwingHigh) and lastSwingHigh >= close
+    resistanceLevel := lastSwingHigh
+    resistanceName := "Recent swing high"
+
+if priorDayHigh >= close and (na(resistanceLevel) or priorDayHigh - close < resistanceLevel - close)
+    resistanceLevel := priorDayHigh
+    resistanceName := "Prior day high"
+
+if priorWeekHigh >= close and (na(resistanceLevel) or priorWeekHigh - close < resistanceLevel - close)
+    resistanceLevel := priorWeekHigh
+    resistanceName := "Prior week high"
+
+if ema20 >= close and (na(resistanceLevel) or ema20 - close < resistanceLevel - close)
+    resistanceLevel := ema20
+    resistanceName := "EMA20"
+
+if ema50 >= close and (na(resistanceLevel) or ema50 - close < resistanceLevel - close)
+    resistanceLevel := ema50
+    resistanceName := "EMA50"
+
+if ema200 >= close and (na(resistanceLevel) or ema200 - close < resistanceLevel - close)
+    resistanceLevel := ema200
+    resistanceName := "MA200"
+
+if recent20High >= close and (na(resistanceLevel) or recent20High - close < resistanceLevel - close)
+    resistanceLevel := recent20High
+    resistanceName := "20D high"
+
+distSupportATR = na(supportLevel) ? 999.0 : math.abs(close - supportLevel) / math.max(atr, syminfo.mintick)
+distResistanceATR = na(resistanceLevel) ? 999.0 : math.abs(resistanceLevel - close) / math.max(atr, syminfo.mintick)
+
+nearSupport = distSupportATR <= nearATR
+nearResistance = distResistanceATR <= nearATR
+nearAny = math.min(distSupportATR, distResistanceATR) <= nearATR
+
+middleNowhere = rangePos60 > 0.35 and rangePos60 < 0.65 and math.min(distSupportATR, distResistanceATR) > 0.90
+extendedBull = biasScore > 15 and distSupportATR > extendedATR
+extendedBear = biasScore < -15 and distResistanceATR > extendedATR
+
+//------------------------------------------------------------------------------
+// STRUCTURE / KEY LEVEL / LOCATION
+//------------------------------------------------------------------------------
+breakout  = close > baseHigh and baseWidthATR <= baseATRMax
+breakdown = close < baseLow and baseWidthATR <= baseATRMax
+bullRetest = low <= nz(supportLevel, low) + atr * 0.35
+bearRetest = high >= nz(resistanceLevel, high) - atr * 0.35
+trendPullbackBull = biasBull and nearSupport and bullRetest and close >= ema20 and not breakout
+trendPullbackBear = biasBear and nearResistance and bearRetest and close <= ema20 and not breakdown
+structureMessy = chartQuality == "Messy" and not breakout and not breakdown and not trendPullbackBull and not trendPullbackBear
+
+structure =
+     breakout ? "Breakout" :
+     breakdown ? "Breakdown" :
+     trendPullbackBull or trendPullbackBear ? "Trend pullback" :
+     "Range"
+
+float keyLevel = na
+string keyLevelName = "n/a"
+
+if breakout
+    keyLevel := baseHigh
+    keyLevelName := "Breakout line / base high"
+else if breakdown
+    keyLevel := baseLow
+    keyLevelName := "Breakdown line / base low"
+else if biasBull or (not biasBear and biasScore >= 0)
+    keyLevel := na(supportLevel) ? resistanceLevel : supportLevel
+    keyLevelName := na(supportLevel) ? resistanceName : supportName
+else
+    keyLevel := na(resistanceLevel) ? supportLevel : resistanceLevel
+    keyLevelName := na(resistanceLevel) ? supportName : resistanceName
+
+locationLabel =
+     biasBull and nearSupport ? "Near support" :
+     biasBear and nearResistance ? "Near resistance" :
+     extendedBull or extendedBear ? "Extended" :
+     middleNowhere ? "Mid-range" :
+     "Usable, not ideal"
+
+//------------------------------------------------------------------------------
+// MA CONTEXT
+//------------------------------------------------------------------------------
+ema20Ctx = close > ema20 ? (low <= ema20 ? "hold" : "above") : (high >= ema20 ? "reject" : "below")
+ema50Ctx = close > ema50 ? (low <= ema50 ? "support" : "above") : (high >= ema50 ? "reject" : "below")
+ema200Ctx = close > ema200 ? "above" : (math.abs(close - ema200) / math.max(atr, syminfo.mintick) < 0.35 ? "at 200" : "below")
+
+maContext = "20:" + ema20Ctx + " | 50:" + ema50Ctx + " | 200:" + ema200Ctx
+
+//------------------------------------------------------------------------------
+// VOLUME / RSI / MACD / VOLATILITY / LIQUIDITY
+//------------------------------------------------------------------------------
+volConfirm = (breakout or breakdown) and rvol >= 1.20 or (close > open and biasBull and rvol >= 1.05) or (close < open and biasBear and rvol >= 1.05)
+volWeak = (breakout or breakdown) and rvol < 1.0
+
+volumeLabel =
+     volConfirm ? "Confirming" :
+     volWeak ? "Weak" :
+     "Mixed"
+
+priceUpRsiDown = close > close[10] and rsi < rsi[10] and rsi > 55
+priceDownRsiUp = close < close[10] and rsi > rsi[10] and rsi < 45
+rsiConfirmBull = biasBull and rsi >= 52
+rsiConfirmBear = biasBear and rsi <= 48
+
+rsiLabel =
+     priceUpRsiDown or priceDownRsiUp ? "Divergence heads-up" :
+     rsiConfirmBull or rsiConfirmBear ? "Confirming" :
+     "Not confirming"
+
+macdBullSupport = biasBull and macdLine > macdSignal and macdHist >= macdHist[1]
+macdBearSupport = biasBear and macdLine < macdSignal and macdHist <= macdHist[1]
+
+macdLabel =
+     macdBullSupport or macdBearSupport ? "Momentum supporting" :
+     macdLine > macdSignal or macdLine < macdSignal ? "Fading" :
+     "Neutral"
+
+volatilityLabel =
+     atrPct > highVolPct * 1.25 ? "Too volatile" :
+     atrPct > highVolPct ? "Elevated" :
+     "Normal"
+
+liquidityLabel =
+     avgDollarVol20 >= 20000000 ? "Liquid" :
+     "Thin"
+
+//------------------------------------------------------------------------------
+// ENTRY / STOP / TARGET / REWARD
+//------------------------------------------------------------------------------
+dirLong = breakout ? true : breakdown ? false : biasBull ? true : biasBear ? false : biasScore >= 0
+
+pullbackConstructiveVol = (trendPullbackBull and volume <= volume[1] and rvol <= 1.10) or (trendPullbackBear and volume <= volume[1] and rvol <= 1.10)
+volumeEntryText =
+     volConfirm ? "Impulse confirmed" :
+     pullbackConstructiveVol ? "Constructive pullback volume" :
+     volWeak ? "Break lacks volume" :
+     "No clear volume edge"
+
+h1Close = request.security(syminfo.tickerid, "60", close, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+h1Ema20 = request.security(syminfo.tickerid, "60", ta.ema(close, 20), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+h1Ema50 = request.security(syminfo.tickerid, "60", ta.ema(close, 50), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+h1Rsi = request.security(syminfo.tickerid, "60", ta.rsi(close, 14), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+h1MacdHist = request.security(syminfo.tickerid, "60", f_macdHist(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+
+h2Close = request.security(syminfo.tickerid, "120", close, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+h2Ema20 = request.security(syminfo.tickerid, "120", ta.ema(close, 20), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+h2Ema50 = request.security(syminfo.tickerid, "120", ta.ema(close, 50), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+h2Rsi = request.security(syminfo.tickerid, "120", ta.rsi(close, 14), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+h2MacdHist = request.security(syminfo.tickerid, "120", f_macdHist(), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+
+h1BullCtx = h1Close >= h1Ema20 and h1Ema20 >= h1Ema50 and h1Rsi >= 50 and h1MacdHist >= 0
+h1BearCtx = h1Close <= h1Ema20 and h1Ema20 <= h1Ema50 and h1Rsi <= 50 and h1MacdHist <= 0
+h2BullCtx = h2Close >= h2Ema20 and h2Ema20 >= h2Ema50 and h2Rsi >= 50 and h2MacdHist >= 0
+h2BearCtx = h2Close <= h2Ema20 and h2Ema20 <= h2Ema50 and h2Rsi <= 50 and h2MacdHist <= 0
+
+h1State = dirLong ? (h1BullCtx ? "Bullish" : h1Close >= h1Ema20 ? "Mixed" : "Bearish") : (h1BearCtx ? "Bearish" : h1Close <= h1Ema20 ? "Mixed" : "Bullish")
+h2State = dirLong ? (h2BullCtx ? "Bullish" : h2Close >= h2Ema20 ? "Mixed" : "Bearish") : (h2BearCtx ? "Bearish" : h2Close <= h2Ema20 ? "Mixed" : "Bullish")
+
+ltfSupportive = dirLong ? (h1BullCtx and h2BullCtx) : (h1BearCtx and h2BearCtx)
+ltfNotAgainst = dirLong ? ((h1BullCtx or h1Close >= h1Ema20) and (h2BullCtx or h2Close >= h2Ema20)) : ((h1BearCtx or h1Close <= h1Ema20) and (h2BearCtx or h2Close <= h2Ema20))
+ltfText =
+     ltfSupportive ? "1H + 2H aligned" :
+     ltfNotAgainst ? "Mixed, not against" :
+     "1H / 2H not aligned"
+
+bullConfirm = close > open and close >= ema20 and (nearSupport or breakout)
+bearConfirm = close < open and close <= ema20 and (nearResistance or breakdown)
+
+entrySetupText =
+     breakout ? "Break and hold above resistance" :
+     breakdown ? "Breakdown below support" :
+     dirLong and nearSupport and bullConfirm ? "After confirmation near support" :
+     dirLong and nearSupport ? "Wait for confirmation at support" :
+     not dirLong and nearResistance and bearConfirm ? "After rejection near resistance" :
+     not dirLong and nearResistance ? "Wait for rejection at resistance" :
+     "No clean trigger yet"
+
+entryText =
+     entrySetupText == "No clean trigger yet" ? entrySetupText :
+     not ltfNotAgainst ? entrySetupText + " | wait 1H/2H" :
+     volumeEntryText == "Break lacks volume" ? entrySetupText + " | volume weak" :
+     entrySetupText
+
+float stopLevel = na
+float target1Level = na
+float target2Level = na
+string stopText = ""
+string target1RefName = ""
+string target2RefName = ""
+
+if dirLong
+    longStopCandidate = breakout ? baseHigh : f_safeMin(lastSwingLow, supportLevel)
+    stopLevel := na(longStopCandidate) ? na : longStopCandidate - atr * 0.25
+    if not na(resistanceLevel) and resistanceLevel > close
+        target1Level := resistanceLevel
+        target1RefName := resistanceName
+    longT2Floor = na(target1Level) ? close : target1Level
+    if not na(priorWeekHigh) and priorWeekHigh > longT2Floor + syminfo.mintick and (na(target2Level) or priorWeekHigh < target2Level)
+        target2Level := priorWeekHigh
+        target2RefName := "Prior week high"
+    if not na(recent20High) and recent20High > longT2Floor + syminfo.mintick and (na(target2Level) or recent20High < target2Level)
+        target2Level := recent20High
+        target2RefName := "20D high"
+    if not na(rangeHigh60) and rangeHigh60 > longT2Floor + syminfo.mintick and (na(target2Level) or rangeHigh60 < target2Level)
+        target2Level := rangeHigh60
+        target2RefName := "60D high"
+    stopText := "Below support / thesis fails below structure"
+else
+    shortStopCandidate = breakdown ? baseLow : f_safeMax(lastSwingHigh, resistanceLevel)
+    stopLevel := na(shortStopCandidate) ? na : shortStopCandidate + atr * 0.25
+    if not na(supportLevel) and supportLevel < close
+        target1Level := supportLevel
+        target1RefName := supportName
+    shortT2Ceiling = na(target1Level) ? close : target1Level
+    if not na(priorWeekLow) and priorWeekLow < shortT2Ceiling - syminfo.mintick and (na(target2Level) or priorWeekLow > target2Level)
+        target2Level := priorWeekLow
+        target2RefName := "Prior week low"
+    if not na(recent20Low) and recent20Low < shortT2Ceiling - syminfo.mintick and (na(target2Level) or recent20Low > target2Level)
+        target2Level := recent20Low
+        target2RefName := "20D low"
+    if not na(rangeLow60) and rangeLow60 < shortT2Ceiling - syminfo.mintick and (na(target2Level) or rangeLow60 > target2Level)
+        target2Level := rangeLow60
+        target2RefName := "60D low"
+    stopText := "Above resistance / thesis fails above structure"
+
+if na(target1Level) and not na(target2Level)
+    target1Level := target2Level
+    target1RefName := target2RefName
+    target2Level := na
+    target2RefName := ""
+
+risk = na(stopLevel) ? na : dirLong ? math.max(close - stopLevel, syminfo.mintick) : math.max(stopLevel - close, syminfo.mintick)
+reward1 = na(target1Level) ? na : dirLong ? math.max(target1Level - close, 0.0) : math.max(close - target1Level, 0.0)
+reward2 = na(target2Level) ? na : dirLong ? math.max(target2Level - close, 0.0) : math.max(close - target2Level, 0.0)
+rr1 = not na(risk) and not na(reward1) and reward1 > 0 ? reward1 / risk : na
+rr2 = not na(risk) and not na(reward2) and reward2 > 0 ? reward2 / risk : na
+rr = not na(rr1) ? rr1 : rr2
+rewardLabel =
+     not na(rr1) and rr1 >= 2.0 and not na(rr2) and rr2 >= 3.0 ? "Strong" :
+     not na(rr1) and rr1 >= 2.0 ? "Acceptable" :
+     not na(rr1) and rr1 >= 1.25 and not na(rr2) and rr2 >= 3.0 ? "Acceptable" :
+     not na(rr1) and rr1 >= 1.25 ? "Weak" :
+     "Weak"
+
+//------------------------------------------------------------------------------
+// GRADE / DECISION
+//------------------------------------------------------------------------------
+tradeDir = dirLong ? 1 : -1
+
+biasComp = math.min(math.abs(biasScore), 60.0) / 60.0 * 16.0
+marketComp = marketHighVol ? 5.0 : marketBiasDir == 0 ? 8.0 : marketBiasDir == tradeDir ? 12.0 : 3.0
+rsComp = math.min(math.abs(relScore), 60.0) / 60.0 * 12.0
+qualityComp = qualityScore / 100.0 * 12.0
+locationComp = nearAny ? 12.0 : middleNowhere ? 4.0 : (extendedBull or extendedBear ? 5.0 : 8.0)
+rrBase = not na(rr1) ? rr1 : rr2
+rrComp = na(rrBase) ? 0.0 : rrBase >= 3.0 ? 18.0 : rrBase >= 2.0 ? 14.0 : rrBase >= 1.5 ? 10.0 : rrBase >= 1.0 ? 6.0 : 2.0
+structureComp = breakout or breakdown ? 10.0 : structure == "Range" ? 5.0 : 8.0
+volumeComp = volConfirm ? 6.0 : pullbackConstructiveVol ? 5.0 : volWeak ? 2.0 : 4.0
+rsiComp = rsiConfirmBull or rsiConfirmBear ? 4.0 : 2.0
+macdComp = macdBullSupport or macdBearSupport ? 4.0 : 2.0
+ltfComp = ltfSupportive ? 6.0 : ltfNotAgainst ? 3.0 : 0.0
+
+volPenalty = volatilityLabel == "Too volatile" ? 6.0 : volatilityLabel == "Elevated" ? 3.0 : 0.0
+chopPenalty = biasChopScore > 70 ? 6.0 : biasChopScore > 55 ? 3.0 : 0.0
+
+gradeScore = f_clamp(biasComp + marketComp + rsComp + qualityComp + locationComp + rrComp + structureComp + volumeComp + rsiComp + macdComp + ltfComp - volPenalty - chopPenalty, 0.0, 100.0)
+setupGrade = f_grade(gradeScore)
+
+riskClear = not na(stopLevel)
+rewardJustified = rewardLabel
+rewardRealistic = not na(rr1) and rr1 >= 1.25
+rewardExtended = not na(rr2) and rr2 >= 2.0
+optionFit =
+     liquidityLabel == "Thin" ? "No" :
+     volatilityLabel == "Too volatile" ? "No" :
+     not ltfNotAgainst ? "No" :
+     not rewardRealistic ? "No" :
+     "Yes"
+
+optionChainText =
+     optionFit == "Yes" ? "Manual check required" :
+     "Skip unless chain is clean"
+
+optionChainDetails = "Tight spreads | decent OI | real option volume"
+
+contractChoice =
+     optionFit == "Yes" ? "7-14 DTE preferred" :
+     "No contract"
+
+contractDetails =
+     optionFit == "Yes" ? (dirLong ? "ATM / slightly ITM calls" : "ATM / slightly ITM puts") :
+     "Skip until chain + setup improve"
+
+structureIntact = dirLong ? close >= ema20 and not bearSwingStructure : close <= ema20 and not bullSwingStructure
+exitPlan =
+     not rewardRealistic ? "No valid reward plan" :
+     not ltfNotAgainst ? "Wait for 1H/2H align" :
+     na(target2Level) ? "Take T1 / reassess" :
+     "Scale T1, move stop, hold to T2"
+
+exitDetails =
+     na(target2Level) ? "Runner only if daily structure stays intact" :
+     structureIntact ? "After T1 trail under 1H/2H structure" : "Cut runner if structure breaks"
+
+hardPass = qualityScore < 32 or structureMessy or not riskClear or not rewardRealistic or not ltfNotAgainst or (middleNowhere and (na(rr1) or rr1 < 1.20)) or (volatilityLabel == "Too volatile" and setupGrade == "D")
+
+decision =
+     hardPass ? "Pass" :
+     setupGrade == "A" and ltfSupportive and (volConfirm or pullbackConstructiveVol) and optionFit == "Yes" ? "Take" :
+     (setupGrade == "A" or setupGrade == "B") and optionFit == "Yes" ? "Reduced size" :
+     setupGrade == "C" ? "Reduced size" :
+     "Pass"
+
+//------------------------------------------------------------------------------
+// PLOTS
+//------------------------------------------------------------------------------
+plot(showEMAs ? ema20 : na, "EMA 20", color = color.new(color.yellow, 0), linewidth = 1)
+plot(showEMAs ? ema50 : na, "EMA 50", color = color.new(color.aqua, 0), linewidth = 1)
+plot(showEMAs ? ema200 : na, "MA 200", color = color.new(color.fuchsia, 0), linewidth = 2)
+
+plot(showLevels ? supportLevel : na, "Nearest support", color = color.new(color.green, 55), linewidth = 2, style = plot.style_linebr)
+plot(showLevels ? resistanceLevel : na, "Nearest resistance", color = color.new(color.red, 55), linewidth = 2, style = plot.style_linebr)
+
+plotshape(showSignals and breakout, title = "Breakout", style = shape.triangleup, location = location.belowbar, size = size.tiny, color = color.new(color.lime, 0), text = "BO")
+plotshape(showSignals and breakdown, title = "Breakdown", style = shape.triangledown, location = location.abovebar, size = size.tiny, color = color.new(color.red, 0), text = "BD")
+
+//------------------------------------------------------------------------------
+// TABLE
+//------------------------------------------------------------------------------
+var table dash = table.new(position.top_right, 3, 27, border_width = 1, frame_width = 1, border_color = color.new(color.gray, 70))
+
+if barstate.islast
+    table.clear(dash, 0, 0, 2, 26)
+
+    table.cell(dash, 0, 0, "Element", text_color = color.white, bgcolor = color.new(color.blue, 25), text_halign = text.align_left)
+    table.cell(dash, 1, 0, "Result", text_color = color.white, bgcolor = color.new(color.blue, 25), text_halign = text.align_left)
+    table.cell(dash, 2, 0, "Details", text_color = color.white, bgcolor = color.new(color.blue, 25), text_halign = text.align_left)
+
+    f_row(dash, 1,  "Timeframe",            "1D", "Dashboard liczony na daily", color.new(color.silver, 50))
+    f_row(dash, 2,  "Market support",       marketSupport, "Benchmark: " + benchmark + " | Score: " + str.tostring(marketScore, "#.0"), f_marketBg(marketSupport))
+    f_row(dash, 3,  "Bias",                 biasLabel, "Score: " + str.tostring(biasScore, "#.0") + " | HH/HL: " + (bullSwingStructure ? "Y" : "N") + " | LH/LL: " + (bearSwingStructure ? "Y" : "N"), f_biasBg(biasScore, biasChopScore))
+    f_row(dash, 4,  "RS/RW vs market",      relLabel, "Score: " + str.tostring(relScore, "#.0"), f_relBg(relLabel))
+    f_row(dash, 5,  "Daily chart quality",  chartQuality, "Quality score: " + str.tostring(qualityScore, "#.0"), f_qualityBg(chartQuality))
+    f_row(dash, 6,  "Structure",            structure, "Base width: " + str.tostring(baseWidthATR, "#.00") + " ATR", color.new(color.silver, 55))
+    f_row(dash, 7,  "Key level",            keyLevelName, na(keyLevel) ? "n/a" : "@" + str.tostring(keyLevel, format.mintick), color.new(color.silver, 55))
+    f_row(dash, 8,  "Location",             locationLabel, "Dist S/R: " + str.tostring(math.min(distSupportATR, distResistanceATR), "#.00") + " ATR", locationLabel == "Near support" or locationLabel == "Near resistance" ? color.new(color.green, 35) : locationLabel == "Extended" ? color.new(color.red, 15) : color.new(color.orange, 15))
+    f_row(dash, 9,  "MA context",           maContext, "20 / 50 / 200 context", color.new(color.silver, 55))
+    f_row(dash, 10, "Volume",               volumeLabel, "RVOL: " + str.tostring(rvol, "#.00") + " | " + volumeEntryText, volumeLabel == "Confirming" ? color.new(color.green, 35) : volumeLabel == "Weak" ? color.new(color.red, 15) : color.new(color.orange, 15))
+    f_row(dash, 11, "RSI",                  rsiLabel, "RSI14: " + str.tostring(rsi, "#.0"), rsiLabel == "Confirming" ? color.new(color.green, 35) : rsiLabel == "Divergence heads-up" ? color.new(color.orange, 10) : color.new(color.silver, 55))
+    f_row(dash, 12, "MACD",                 macdLabel, "Hist: " + str.tostring(macdHist, "#.000"), macdLabel == "Momentum supporting" ? color.new(color.green, 35) : color.new(color.silver, 55))
+    f_row(dash, 13, "ATR / Volatility",     volatilityLabel, "ATR%: " + str.tostring(atrPct, "#.00"), volatilityLabel == "Normal" ? color.new(color.green, 45) : volatilityLabel == "Elevated" ? color.new(color.orange, 10) : color.new(color.red, 10))
+    f_row(dash, 14, "Liquidity",            liquidityLabel, "20D $Vol: " + str.tostring(avgDollarVol20 / 1000000.0, "#.0") + "M", liquidityLabel == "Thin" ? color.new(color.red, 10) : color.new(color.green, 45))
+    f_row(dash, 15, "1H / 2H confirm",      ltfText, "1H: " + h1State + " | 2H: " + h2State, ltfSupportive ? color.new(color.green, 35) : ltfNotAgainst ? color.new(color.orange, 10) : color.new(color.red, 10))
+    f_row(dash, 16, "Entry",                entryText, entrySetupText, color.new(color.silver, 55))
+    f_row(dash, 17, "Stop / invalidation",  na(stopLevel) ? "n/a" : str.tostring(stopLevel, format.mintick), stopText, color.new(color.red, 20))
+    f_row(dash, 18, "Target 1",             na(target1Level) ? "n/a" : str.tostring(target1Level, format.mintick), target1RefName == "" ? "Next daily level" : target1RefName, color.new(color.green, 35))
+    f_row(dash, 19, "Target 2",             na(target2Level) ? "n/a" : str.tostring(target2Level, format.mintick), target2RefName == "" ? "Optional runner" : target2RefName, color.new(color.green, 50))
+    f_row(dash, 20, "Reward justification", rewardJustified, "T1 " + f_rrText(rr1) + " | T2 " + f_rrText(rr2), rewardLabel == "Strong" ? color.new(color.green, 35) : rewardLabel == "Acceptable" ? color.new(color.green, 50) : color.new(color.red, 10))
+    f_row(dash, 21, "Setup grade",          setupGrade, "Score: " + str.tostring(gradeScore, "#.0"), f_gradeBg(setupGrade))
+    f_row(dash, 22, "Option fit",           optionFit, optionFit == "Yes" ? "Ticker fits swing options" : "Thin / volatile / weak execution", optionFit == "Yes" ? color.new(color.green, 45) : color.new(color.red, 10))
+    f_row(dash, 23, "Option chain",         optionChainText, optionChainDetails, color.new(color.orange, 10))
+    f_row(dash, 24, "Contract choice",      contractChoice, contractDetails, optionFit == "Yes" ? color.new(color.green, 45) : color.new(color.red, 10))
+    f_row(dash, 25, "Exit plan",            exitPlan, exitDetails, color.new(color.silver, 55))
+    f_row(dash, 26, "Execution decision",   decision, optionFit == "Yes" ? "Needs clean chain before entry" : "Pass on vague risk / weak reward", f_decisionBg(decision))

@@ -1,0 +1,220 @@
+Poniżej masz gotowy **skrót opisu tickera na 1H pod swing option** zbudowany wyłącznie z elementów z *ModMark Blueprint*. Zawężam to do tego, co na 1H służy tam do **structure & planning / confirmation** dla swingów. Sam blueprint mówi, że dla swingów **1H/2H** służy do szukania pullbacków w trendzie, konsolidacji, continuation patternów, stref z jasnym ryzykiem, a także do wyznaczenia **entry zone, stop logic i initial targets**. 
+
+* **Bias:** Bullish / Bearish / Neutral. W blueprintcie dla swingów kierunek ma być jasny: „maybe” to nie bias. 
+
+* **1H Structure:**
+  przykłady opisu:
+
+  * uptrend z pullbackiem
+  * konsolidacja pod oporem
+  * trend continuation
+  * breakout / breakdown
+  * messy structure / chop
+    Na 1H blueprint każe szukać właśnie: **pullbacks within trend, consolidations, trend continuation patterns**. 
+
+* **Location:**
+  przykłady:
+
+  * przy wsparciu
+  * przy oporze
+  * przy breakout level
+  * w obrębie konsolidacji
+  * extended
+  * middle of nowhere
+    Blueprint podkreśla, że dobre trade’y startują z dobrej lokalizacji, a nie „bo cena idzie”. 
+
+* **Key Level:**
+  przykłady:
+
+  * prior high
+  * prior low
+  * support / resistance
+  * consolidation boundary
+  * 20 EMA / 50 MA / 200 MA jako confluence
+    Kluczowy poziom to miejsce, gdzie cena wcześniej reagowała i gdzie da się jasno zdefiniować ryzyko.
+
+* **Reaction at Level:**
+  przykłady:
+
+  * level holds
+  * clean rejection
+  * break and hold
+  * level slices through = invalid
+    W blueprintcie samo dotknięcie poziomu nie wystarcza — trzeba zobaczyć reakcję ceny.
+
+* **Structure Confirmation:**
+  przykłady:
+
+  * higher low + break above prior minor high
+  * consolidation then continuation
+  * lower high + break below prior minor low
+  * failure at resistance
+    To jest dokładnie opis potwierdzenia kierunku przed wejściem.
+
+* **Volume:**
+  przykłady:
+
+  * volume increasing on the move
+  * lighter volume on pullback
+  * inconsistent volume
+  * lacks volume
+    Blueprint chce wolumenu, który **potwierdza ruch**, a nie przypadkowych spike’ów.
+
+* **Momentum:**
+  przykłady:
+
+  * momentum aligned
+  * momentum fading
+  * momentum contradicts price
+    MACD i RSI w blueprintcie są narzędziami do **potwierdzenia momentum**, nie do samodzielnych sygnałów.
+
+* **Entry:**
+  przykłady:
+
+  * on hold above 120
+  * on rejection from resistance
+  * after break and hold over key level
+  * after higher low confirmation
+  * after consolidation breakout
+    Blueprint mówi jasno: wejście ma być po **confirmation**, nie po emocji ani po jednym szybkim ruchu.
+
+* **Invalidation / Stop:**
+  przykłady:
+
+  * below support
+  * below prior swing low
+  * above resistance
+  * above prior swing high
+    Stop ma oznaczać: „ten pomysł już nie działa”, a nie być przypadkową liczbą.
+
+* **Target(s):**
+  przykłady:
+
+  * next resistance
+  * prior high
+  * next support
+  * consolidation measured objective
+  * secondary target if structure continues
+    W blueprintcie target ma być **logiczny**, wyznaczony przed wejściem.
+
+* **R/R:**
+  przykłady oceny:
+
+  * < 2:1 = low quality
+  * 2:1 = acceptable
+  * 3:1+ = strong
+    Jeśli reward jest „vague or optimistic”, trade odpada.
+
+* **Volatility:**
+  przykłady:
+
+  * reasonable volatility
+  * elevated volatility
+  * too volatile for size
+    Wysoka zmienność w blueprintcie oznacza mniejszy size i większą ostrożność.
+
+* **Option Liquidity (ważne pod swing option):**
+  przykłady:
+
+  * tight bid/ask
+  * real open interest
+  * visible contract volume
+  * poor option pricing / thin chain = pass
+    Blueprint wprost odrzuca trade’y z kiepskim pricingiem i słabą płynnością opcji.
+
+* **Setup Grade:**
+  przykłady:
+
+  * **A** = market/supportive context, RS/RW, dobra lokalizacja, jasne ryzyko, sensowny asymetryczny reward
+  * **B** = solid, ale z drobną wadą
+  * **C** = marginal, ostrożnie albo skip
+  * **D** = no trade
+    To jest centralny system oceny jakości setupu w blueprintcie.
+
+* **Decision:**
+  przykłady:
+
+  * execute
+  * wait for confirmation
+  * reduced size
+  * pass
+    Blueprint bardzo mocno podkreśla, że brak trade’u też jest poprawną decyzją, gdy struktura jest niejasna albo trade jest forced.
+
+* **One-sentence thesis:**
+  przykłady:
+
+  * Bullish, 1H pullback in trend, holding support, entry only above 120, stop below swing low, target prior high
+  * Bearish, 1H lower high at resistance, weak volume on bounce, entry on breakdown below 98, stop above rejection high
+    Blueprint ma prostą zasadę: jeśli nie umiesz wyjaśnić trade’u w jednym zdaniu, nie powinieneś go brać. 
+
+Gotowiec do wypełniania:
+
+* **Bias:**
+* **1H Structure:**
+* **Location:**
+* **Key Level:**
+* **Reaction at Level:**
+* **Structure Confirmation:**
+* **Volume:**
+* **Momentum:**
+* **Entry:**
+* **Invalidation / Stop:**
+* **Target 1:**
+* **Target 2:**
+* **R/R:**
+* **Volatility:**
+* **Option Liquidity:**
+* **Setup Grade (A/B/C/D):**
+* **Decision (Execute / Wait / Pass):**
+* **One-sentence thesis:**
+
+
+
+
+
+Sprawdziłem PDF jeszcze raz. Wniosek: **Twoja lista jest w dużej mierze zgodna z ModMark Blueprint, ale nie w 100% kompletna i w 2–3 miejscach wymaga korekty**. Najważniejsze: w ModMark **1H/2H nie działa samodzielnie jako źródło biasu** dla swingu. Dla swingów **Daily daje direction/context**, a **1H/2H służy do structure & planning**: pullbacki, konsolidacje, continuation, entry zone, stop logic i initial targets. Czyli sama karta „na 1H” jest OK jako część procesu, ale nie jako cały proces.  
+
+To, co masz, jest **trafne i zgodne** z Blueprintem: **1H Structure, Location, Key Level, Reaction at Level, Structure Confirmation, Volume, Momentum, Entry, Invalidation/Stop, Target(s), Volatility, Option Liquidity, Setup Grade, Decision, One-sentence thesis**. Wszystkie te elementy albo są wprost wymienione, albo wynikają bezpośrednio z sekcji o pięciu filtrach, entry confirmation, gradingu setupów, exits i swing play-finding.     
+
+Najważniejsza korekta: **„Bias: Bullish / Bearish / Neutral” nie jest idealnie ModMark-clean**. W Blueprintcie dla swingu kierunek ma być **bullish albo bearish**, a jeśli warunki są niejasne, choppy albo range, to wynik częściej brzmi **trade less / size down / no trade**, nie „neutral” jako pełnoprawny bias. W worksheet jest co prawda „Bullish / Bearish / Range”, ale sam framework swingowy mówi wyraźnie: **“Maybe is not a direction”** i jeśli środowisko nie wspiera pozycji, należy się wycofać albo zmniejszyć agresję. Lepiej więc zapisać to jako: **Bias: Bullish / Bearish / Range-Chop / No trade**.   
+
+Druga korekta: **R/R u Ciebie jest akurat poprawne**, ale wcześniej potraktowałeś to jak ogólną heurystykę; w Blueprintcie te progi są już podane dość wprost: **<2:1 = low quality, 2:1+ = acceptable, 3:1+ = strong**. Tu nic nie trzeba zmieniać. 
+
+Trzecia korekta: **Setup Grade** masz sensownie opisany, ale w ModMark powinien być jeszcze wyraźniej oparty o **5 filtrów**: **market alignment, stock behavior, location, risk definition, reward justification**. A-setup to nie tylko „dobry kontekst i RS/RW”, ale pełne zgranie tych filtrów; B ma drobną wadę, np. gorszy timing / wyższa zmienność / neutralniejszy rynek; C ma większe problemy; D nie zasługuje na kapitał.   
+
+Największy brak w Twojej wersji to **Market Context / Market Alignment**. W ModMark to jest **pierwszy filtr**, a przy swingach cały proces zaczyna się od SPY/QQQ i pytania, czy rynek jest trending, ranging czy volatile. Bez tego karta 1H nie jest pełna według Blueprintu, bo stock nie jest oceniany w izolacji.  
+
+Drugi brak to **Stock Behavior / Relative Strength or Weakness vs market**. Blueprint bardzo mocno podkreśla, że stock ma być **silniejszy lub słabszy od rynku**, a nie po prostu „ruszający się”. To powinno być osobne pole, bo wpływa zarówno na jakość tickera, jak i na grading setupu.  
+
+Trzeci brak to **Clean Daily Structure / Clean Chart**. To ważne, bo w sekcji entry confirmation ModMark mówi wprost: **zaczynasz od daily**, a dopiero potem schodzisz na 1H/2H. Dodatkowo w walkthrough swingów selekcja kandydata zaczyna się od **clean daily structure**, np. trend pullback to support albo breakout/breakdown from consolidation. Czyli jeśli chcesz wersję naprawdę zgodną, trzeba dodać krótkie pole typu: **Daily Context / Clean Daily? yes-no**.  
+
+Czwarty brak to **Contract Choice**. Rozumiem, że chciałeś tylko opis tickera na 1H, ale ponieważ napisałeś **„interesuje mnie tylko swing option”**, w ModMark to nadal obejmuje kontrakt: **7–14 DTE preferred, ATM / slightly ITM, solid OI, solid volume, tight spreads, avoid far OTM**. To nie jest opis samego wykresu, ale jest częścią oceny, czy ticker w ogóle nadaje się do Twojego swing option planu.  
+
+Piąty brak to **Exit Management**, nie tylko same targety. Blueprint rozdziela „Target(s)” od późniejszego zarządzania: **scale out at T1, reduce risk, move stop to breakeven / behind structure, hold only while structure remains intact, exit early if momentum fades / price fails at key levels / market conditions change**. Dla swing options dochodzi jeszcze **time decay, implied volatility changes, expiration proximity**. Samo „Target 1 / Target 2” to za mało, jeśli ma to być pełny ModMark workflow.  
+
+Szósty brak to **Size / Risk per trade**. Znów: to nie jest „opis tickera”, ale w Blueprintcie setup nie jest kompletny bez decyzji o wielkości ryzyka, a size zależy od **market regime, setup quality, clarity i volatility**. Jeśli chcesz kartę tylko do oceny tickera, można to pominąć. Jeśli chcesz kartę „zgodną z ModMark” dla realnego zagrania swing option, to powinno tam być choć jedno pole: **Size: normal / reduced / no trade**.  
+
+Czyli mówiąc wprost: **Twoja wersja nie jest błędna**, ale jest to raczej **„1H execution/planning card”**, a nie pełna **ModMark swing-option card**. Żeby była naprawdę zgodna z Blueprintem, powinieneś dodać jeszcze: **Market Context, Relative Strength/Weakness, Daily Context/Clean Chart, Contract Choice, Exit Management, ewentualnie Size**.   
+
+Najbardziej zgodna, ale nadal zwięzła wersja wyglądałaby tak:
+
+* **Market Context:** Trend / Range / Volatile
+* **Bias:** Bullish / Bearish / No trade
+* **Relative Strength/Weakness:** Stronger than market / Weaker than market / Neutral
+* **Daily Context / Clean Chart:** Clean / Messy
+* **1H Structure:** Trend pullback / Consolidation / Breakout / Breakdown / Chop
+* **Location:** At support / resistance / breakout area / extended / middle of nowhere
+* **Key Level:** prior high-low / S-R / consolidation / 20-50-200 MA confluence
+* **Reaction at Level:** hold / reject / break and hold / slices through
+* **Structure Confirmation:** HL + break / LH + break / continuation / failure
+* **Volume:** confirms / inconsistent / weak
+* **Momentum:** aligned / fading / contradicting
+* **Entry Trigger:** what must happen
+* **Invalidation / Stop:** where thesis fails
+* **Target 1 / Target 2:** logical levels
+* **R/R:** <2:1 / 2:1+ / 3:1+
+* **Contract Choice:** 7–14 DTE / ATM or slightly ITM / liquidity OK?
+* **Exit Plan:** scale at T1 / tighten stop / hold only if structure intact
+* **Setup Grade:** A / B / C / D
+* **Decision:** Execute / Wait / Reduced size / Pass
+* **One-sentence thesis:** one clear sentence     

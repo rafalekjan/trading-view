@@ -16,6 +16,7 @@ uiShowMarket1DMarks = input.bool(true, "Show Market 1D marks", group=groupUI)
 uiShow1HMarks = input.bool(true, "Show 1H marks", group=groupUI)
 uiShow4HMarks = input.bool(true, "Show 4H marks", group=groupUI)
 uiShow1DMarks = input.bool(true, "Show 1D marks", group=groupUI)
+uiLaneOpacity = input.int(0, "Lane/marker visibility (0=solid, 100=invisible)", minval=0, maxval=100, group=groupUI)
 uiShowMarkSummary = input.bool(false, "Show mark summary", group=groupUI)
 markSummaryDays = input.int(30, "Mark summary lookback (days)", minval=1, maxval=365, group=groupUI)
 
@@ -39,17 +40,19 @@ maMidLen  = input.int(50, "SMA mid", minval=1, group=groupStructure)
 groupFilters = "Filters / Thresholds"
 atrLen = input.int(14, "ATR length", minval=1, group=groupFilters)
 volLen = input.int(20, "Volume SMA length", minval=1, group=groupFilters)
-nearLevelAtr = input.float(0.8, "Near level within x ATR", minval=0.1, step=0.1, group=groupFilters)
+nearLevelAtr = input.float(0.9, "Near level within x ATR", minval=0.1, step=0.1, group=groupFilters)
 volImpulseMult = input.float(1.2, "Impulse vol >= SMA *", minval=0.5, step=0.1, group=groupFilters)
 wickBodyMult = input.float(0.8, "Reaction wick >= x body", minval=0.1, step=0.1, group=groupFilters)
 closePosPct = input.float(0.6, "Reaction close position (0..1)", minval=0.1, maxval=0.9, step=0.05, group=groupFilters)
+reactionWindowBars = input.int(2, "Reaction validity window (bars)", minval=0, maxval=5, group=groupFilters)
 
 extendedAtr = input.float(1.8, "Extended if |close-EMA| > x ATR", minval=0.5, step=0.25, group=groupFilters)
+softExtendedBandAtr = input.float(0.4, "Soft extension band (x ATR)", minval=0.1, step=0.1, group=groupFilters)
 impulseBars = input.int(4, "Overextension: impulse bars window", minval=2, maxval=10, group=groupFilters)
 impulseBodyPct = input.float(0.55, "Impulse: body/range >= ", minval=0.1, maxval=0.95, step=0.05, group=groupFilters)
 
 pullbackWin = input.int(12, "Pullback health window (bars)", minval=5, maxval=50, group=groupFilters)
-aggrRetracePct = input.float(0.6, "Aggressive pullback if retrace >= ", minval=0.2, maxval=0.9, step=0.05, group=groupFilters)
+aggrRetracePct = input.float(0.65, "Aggressive pullback if retrace >= ", minval=0.2, maxval=0.9, step=0.05, group=groupFilters)
 
 stopBufAtr = input.float(0.20, "Stop buffer (x ATR)", minval=0.0, step=0.05, group=groupFilters)
 riskAtrMax = input.float(2.0, "Max risk (x ATR) for 15m entry", minval=0.5, step=0.25, group=groupFilters)
@@ -88,6 +91,7 @@ f_txtSize(_s) =>
 txtSize = f_txtSize(uiTextSize)
 
 f_c(_col) => color.new(_col, uiOpacity)
+f_laneC(_col) => color.new(_col, uiLaneOpacity)
 
 colOk  = f_c(color.lime)
 colWarn = f_c(color.orange)
@@ -230,19 +234,8 @@ f_m1dMirrorStateColor(_txt) =>
     (_txt == "BEARISH" or _txt == "BULLISH") ? colOk : (_txt == "SUPPORTIVE" ? colWarn : (_txt == "UNSTABLE" ? colBad : colBg))
 
 f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20, _adxWeak, _momFlip, _regimeTxt, _biasOk, _crossOk, _structureSoft, _locationSoft, _hasRR) =>
-    if _unstableState
-        if _isUnstable
-            "VOL"
-        else if _hasClimax
-            "CLIMAX"
-        else if _lost20
-            "EMA20"
-        else if _adxWeak
-            "ADX"
-        else if _momFlip
-            "MACD"
-        else
-            "REGIME"
+    if _unstableState and _isUnstable
+        "VOL"
     else if not _biasOk
         "BIAS"
     else if not _crossOk
@@ -253,6 +246,14 @@ f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20, _adxWeak, _m
         "RANGE"
     else if _regimeTxt != "TREND"
         "TRANSITION"
+    else if _hasClimax
+        "CLIMAX"
+    else if _lost20
+        "EMA20"
+    else if _adxWeak
+        "ADX"
+    else if _momFlip
+        "MACD"
     else if not _locationSoft
         "LOCATION"
     else if not _hasRR
@@ -288,15 +289,16 @@ m1dMirrorRsLen = 20
 m1dMirrorPivLen = 5
 m1dMirrorAtrLen = 14
 m1dMirrorAdxLen = 14
-m1dMirrorAdxTrend = 20.0
+m1dMirrorAdxTrend = 18.0
 m1dMirrorChaosOverlapThresh = 0.55
-m1dMirrorUnstableTrAtr = 2.2
+m1dMirrorUnstableTrAtr = 2.5
 m1dMirrorMa20Len = 20
 m1dMirrorMa50Len = 50
 m1dMirrorMa200Len = 200
 m1dMirrorBbLen = 20
 m1dMirrorBbMult = 2.0
-m1dMirrorMinRR = 2.0
+m1dMirrorMinRR = 1.75
+m1dMirrorRrSupportFloor = 1.5
 m1dMirrorStopBufAtr = 0.25
 m1dMirrorExtendedAtr = 2.0
 m1dMirrorClimaxBars = 4
@@ -343,10 +345,10 @@ f_m1dMirrorState() =>
 
     _climaxSpikeSrc = ta.tr(true) >= m1dMirrorClimaxTrAtr * _atr ? 1.0 : 0.0
     _climaxCount = f_rollSum(_climaxSpikeSrc, m1dMirrorClimaxBars)
-    _hasClimax = _climaxCount >= 2
+    _hasClimax = _climaxCount >= 3
 
-    _bullBias = close > _sma200 and _ema20 > _ema20[5] and _sma50 > _sma50[5]
-    _bearBias = close < _sma200 and _ema20 < _ema20[5] and _sma50 < _sma50[5]
+    _bullBias = close > _sma200 and (_ema20 > _ema20[5] or _sma50 >= _sma50[5])
+    _bearBias = close < _sma200 and (_ema20 < _ema20[5] or _sma50 <= _sma50[5])
 
     _isTrend = _adx >= m1dMirrorAdxTrend and not _isChop and not _isUnstable
     _isRange = (_adx < m1dMirrorAdxTrend) and _isChop
@@ -401,6 +403,8 @@ f_m1dMirrorState() =>
     _putRR = not na(_putRisk) and _putRisk > 0 and not na(_putReward) ? (_putReward / _putRisk) : na
     _callHasRR = not na(_callRR) and _callRR >= m1dMirrorMinRR
     _putHasRR = not na(_putRR) and _putRR >= m1dMirrorMinRR
+    _callRrSupportive = not na(_callRR) and _callRR >= math.min(m1dMirrorRrSupportFloor, m1dMirrorMinRR)
+    _putRrSupportive = not na(_putRR) and _putRR >= math.min(m1dMirrorRrSupportFloor, m1dMirrorMinRR)
 
     _crossDnEma20 = ta.crossunder(close, _ema20)
     _crossUpEma20 = ta.crossover(close, _ema20)
@@ -422,20 +426,25 @@ f_m1dMirrorState() =>
     _crossOkBull = not _crossCheckActive or _crossSlope >= 0
     _crossOkBear = not _crossCheckActive or _crossSlope <= 0
 
-    _callBiasCore = _bullBias and _crossOkBull
-    _putBiasCore = _bearBias and _crossOkBear
+    _callBiasStrong = _bullBias and _crossOkBull
+    _putBiasStrong = _bearBias and _crossOkBear
+    _callBiasSupportive = _bullBias
+    _putBiasSupportive = _bearBias
+    _callBiasCore = _callBiasSupportive
+    _putBiasCore = _putBiasSupportive
     _callStructureSoft = _bullStructure or _structureSupportsMoveBull
     _putStructureSoft = _bearStructure or _structureSupportsMoveBear
-    _callLocationSoft = (not _extended) and (_nearMA or _nearSupport or _isCompression)
-    _putLocationSoft = (not _extended) and (_nearMA or _nearResist or _isCompression)
-    _unstableState = _isUnstable or _hasClimax or _regimeChangeRisk
-    _callSupportive = _callBiasCore and _callStructureSoft and not _unstableState
-    _putSupportive = _putBiasCore and _putStructureSoft and not _unstableState
-    _callStrong = _callSupportive and _regimeTxt == "TREND"
-    _putStrong = _putSupportive and _regimeTxt == "TREND"
+    _callLocationSoft = (not _extended) and (_nearMA or _nearSupport or _isCompression or (_bullBias and close >= _sma50))
+    _putLocationSoft = (not _extended) and (_nearMA or _nearResist or _isCompression or (_bearBias and close <= _sma50))
+    _unstableState = _isUnstable
+    _warningState = _hasClimax or _regimeChangeRisk
+    _callStrong = _callBiasStrong and _callStructureSoft and _callLocationSoft and _callHasRR and _regimeTxt == "TREND" and not _warningState
+    _putStrong = _putBiasStrong and _putStructureSoft and _putLocationSoft and _putHasRR and _regimeTxt == "TREND" and not _warningState
+    _callSupportive = _callBiasSupportive and _callStructureSoft and _callRrSupportive and (_regimeTxt == "TREND" or _regimeTxt == "TRANSITION") and _callLocationSoft
+    _putSupportive = _putBiasSupportive and _putStructureSoft and _putRrSupportive and (_regimeTxt == "TREND" or _regimeTxt == "TRANSITION") and _putLocationSoft
 
-    _putState = _unstableState ? "UNSTABLE" : (_putStrong and _putLocationSoft ? "BEARISH" : (_putSupportive ? "SUPPORTIVE" : "NEUTRAL"))
-    _callState = _unstableState ? "UNSTABLE" : (_callStrong and _callLocationSoft ? "BULLISH" : (_callSupportive ? "SUPPORTIVE" : "NEUTRAL"))
+    _putState = _unstableState ? "UNSTABLE" : (_putStrong ? "BEARISH" : (_putSupportive ? "SUPPORTIVE" : "NEUTRAL"))
+    _callState = _unstableState ? "UNSTABLE" : (_callStrong ? "BULLISH" : (_callSupportive ? "SUPPORTIVE" : "NEUTRAL"))
 
     _putReason = f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20Bear or _lost20Bull, _adxWeak, _momFlip, _regimeTxt, _bearBias, _crossOkBear, _putStructureSoft, _putLocationSoft, _putHasRR)
     _callReason = f_m1dMirrorReason(_unstableState, _isUnstable, _hasClimax, _lost20Bull or _lost20Bear, _adxWeak, _momFlip, _regimeTxt, _bullBias, _crossOkBull, _callStructureSoft, _callLocationSoft, _callHasRR)
@@ -448,8 +457,8 @@ f_m1dMirrorState() =>
 
 // Mirror of the 1H panel's READY FOR LTF state, using the 1H script's core defaults.
 h1MirrorHtfAlignTf = "D"
-h1MirrorAtrLocMult = 0.8
-h1MirrorMinRR = 2.0
+h1MirrorAtrLocMult = 1.0
+h1MirrorMinRR = 1.75
 h1MirrorRrHardFloor = 1.5
 h1MirrorBbLen = 20
 h1MirrorBbMult = 2.0
@@ -584,13 +593,14 @@ d1MirrorPivLen = 5
 d1MirrorAtrLen = 14
 d1MirrorStopBufAtr = 0.25
 d1MirrorLocAtAtr = 0.5
-d1MirrorAtrLocMult = 1.0
-d1MirrorLocExtendedAtr = 1.8
-d1MirrorMinRR = 2.0
-d1MirrorMinSpaceAtr = 2.0
+d1MirrorAtrLocMult = 1.35
+d1MirrorLocExtendedAtr = 2.0
+d1MirrorMinRR = 1.75
+d1MirrorRrWatchFloor = 1.5
+d1MirrorMinSpaceAtr = 1.15
 d1MirrorAdxLen = 14
-d1MirrorAdxTrend = 20.0
-d1MirrorUnstableTrAtr = 2.2
+d1MirrorAdxTrend = 18.0
+d1MirrorUnstableTrAtr = 2.8
 d1MirrorChaosOverlapThresh = 0.55
 d1MirrorMa20Len = 20
 d1MirrorMa50Len = 50
@@ -635,7 +645,9 @@ f_d1MirrorState() =>
 
     _bullStructure = not na(_lastPH) and not na(_prevPH) and not na(_lastPL) and not na(_prevPL) and _lastPH > _prevPH and _lastPL > _prevPL
     _bearStructure = not na(_lastPH) and not na(_prevPH) and not na(_lastPL) and not na(_prevPL) and _lastPH < _prevPH and _lastPL < _prevPL
-    _structureDirectional = _bullStructure or _bearStructure
+    _bullSoftStructure = close >= _ema20 and _ema20 >= _sma50 and _sma50 >= _sma50[5] and (na(_lastPL) or low >= _lastPL - 0.5 * _atr)
+    _bearSoftStructure = close <= _ema20 and _ema20 <= _sma50 and _sma50 <= _sma50[5] and (na(_lastPH) or high <= _lastPH + 0.5 * _atr)
+    _structureDirectional = _bullStructure or _bearStructure or _bullSoftStructure or _bearSoftStructure
 
     _rng = high - low
     _prevRng = high[1] - low[1]
@@ -737,51 +749,77 @@ f_d1MirrorState() =>
     _putSpaceAlt = not na(_putRisk) ? 1.5 * _putRisk : na
     _callSpace = not na(_callSpaceSr) and not na(_callSpaceAlt) ? math.max(_callSpaceSr, _callSpaceAlt) : (not na(_callSpaceSr) ? _callSpaceSr : _callSpaceAlt)
     _putSpace = not na(_putSpaceSr) and not na(_putSpaceAlt) ? math.max(_putSpaceSr, _putSpaceAlt) : (not na(_putSpaceSr) ? _putSpaceSr : _putSpaceAlt)
-    _callSpaceOk = not na(_callSpace) and _callSpace >= d1MirrorMinSpaceAtr * _atr
-    _putSpaceOk = not na(_putSpace) and _putSpace >= d1MirrorMinSpaceAtr * _atr
+    _callSpaceOkSoft = not na(_callSpace) and _callSpace >= 0.8 * _atr
+    _putSpaceOkSoft = not na(_putSpace) and _putSpace >= 0.8 * _atr
+    _callSpaceOkStrong = not na(_callSpace) and _callSpace >= d1MirrorMinSpaceAtr * _atr
+    _putSpaceOkStrong = not na(_putSpace) and _putSpace >= d1MirrorMinSpaceAtr * _atr
     _callRR = not na(_callRisk) and _callRisk > 0 and not na(_callSpace) ? (_callSpace / _callRisk) : na
     _putRR = not na(_putRisk) and _putRisk > 0 and not na(_putSpace) ? (_putSpace / _putRisk) : na
+    _callRrWatch = not na(_callRR) and _callRR >= math.min(d1MirrorRrWatchFloor, d1MirrorMinRR)
+    _putRrWatch = not na(_putRR) and _putRR >= math.min(d1MirrorRrWatchFloor, d1MirrorMinRR)
     _callHasRR = not na(_callRR) and _callRR >= d1MirrorMinRR
     _putHasRR = not na(_putRR) and _putRR >= d1MirrorMinRR
 
-    _callLocationOk = f_d1MirrorLocValid(_callLocationState) and not _nearResist
-    _putLocationOk = f_d1MirrorLocValid(_putLocationState) and not _nearSupport
-    _callRSOk = _rsSlope > 0
-    _putRSOk = _rsSlope < 0
+    _callTrendPullback = not _structureChaos and close >= _sma50 and close <= _ema20 + 1.0 * _atr and _ema20 >= _sma50
+    _putTrendPullback = not _structureChaos and close <= _sma50 and close >= _ema20 - 1.0 * _atr and _ema20 <= _sma50
+    _callLocationOkWatchBase = f_d1MirrorLocValid(_callLocationState) or _callTrendPullback
+    _putLocationOkWatchBase = f_d1MirrorLocValid(_putLocationState) or _putTrendPullback
+    _callMidWatch = _callLocationState == "MID" and not _structureChaos and close >= _sma50 and close <= _ema20 + 1.5 * _atr and _ema20 >= _sma50
+    _putMidWatch = _putLocationState == "MID" and not _structureChaos and close <= _sma50 and close >= _ema20 - 1.5 * _atr and _ema20 <= _sma50
+    _callTrendContextWatch = (_bullStructure or _bullSoftStructure) and _marketBull and close >= _sma50 and close <= _ema20 + 1.75 * _atr and not _trSpike
+    _putTrendContextWatch = (_bearStructure or _bearSoftStructure) and _marketBear and close <= _sma50 and close >= _ema20 - 1.75 * _atr and not _trSpike
+    _callLocationOkWatch = _callLocationOkWatchBase or _callMidWatch or _callTrendContextWatch
+    _putLocationOkWatch = _putLocationOkWatchBase or _putMidWatch or _putTrendContextWatch
+    _callLocationOkCandidate = _callLocationOkWatchBase and not _nearResist
+    _putLocationOkCandidate = _putLocationOkWatchBase and not _nearSupport
+    _rsNeutralBand = 0.00005
+    _callRSStrong = not na(_rsSlope) and _rsSlope > _rsNeutralBand
+    _putRSStrong = not na(_rsSlope) and _rsSlope < -_rsNeutralBand
+    _callRSOk = not na(_rsSlope) and _rsSlope > -_rsNeutralBand
+    _putRSOk = not na(_rsSlope) and _rsSlope < _rsNeutralBand
+    _callRSWatch = not na(_rsSlope) and _rsSlope > -2.0 * _rsNeutralBand
+    _putRSWatch = not na(_rsSlope) and _rsSlope < 2.0 * _rsNeutralBand
     _callMarketAligned = _marketBull
     _putMarketAligned = _marketBear
-    _callDirectionOk = _structureClear and _bullStructure and _callRSOk and _callMarketAligned
-    _putDirectionOk = _structureClear and _bearStructure and _putRSOk and _putMarketAligned
+    _callDirectionStrong = _structureClear and _callMarketAligned and ((_bullStructure and _callRSOk) or (_bullSoftStructure and _callRSStrong))
+    _putDirectionStrong = _structureClear and _putMarketAligned and ((_bearStructure and _putRSOk) or (_bearSoftStructure and _putRSStrong))
+    _callDirectionOk =        (_bullStructure or _bullSoftStructure) and        ((_callRSWatch and (_callMarketAligned or _callRSStrong) and not _structureChaos) or (_bullStructure and _callRSStrong) or (_bullSoftStructure and _callMarketAligned and not _trSpike) or (_bullStructure and _callMarketAligned and not _structureChaos))
+    _putDirectionOk =        (_bearStructure or _bearSoftStructure) and        ((_putRSWatch and (_putMarketAligned or _putRSStrong) and not _structureChaos) or (_bearStructure and _putRSStrong) or (_bearSoftStructure and _putMarketAligned and not _trSpike) or (_bearStructure and _putMarketAligned and not _structureChaos))
     _callRiskDefined = not na(_callInvalid) and not na(_callStop) and _riskRealisticCall
     _putRiskDefined = not na(_putInvalid) and not na(_putStop) and _riskRealisticPut
-    _callRewardDefined = _callHasRR and _callSpaceOk
-    _putRewardDefined = _putHasRR and _putSpaceOk
-    _callDailyCandidate = _callDirectionOk and _callLocationOk and _callRiskDefined and _callRewardDefined
-    _putDailyCandidate = _putDirectionOk and _putLocationOk and _putRiskDefined and _putRewardDefined
-    _callPass = not _callDirectionOk ? 0 : (not _callLocationOk ? 1 : (not _callRiskDefined ? 2 : (not _callRewardDefined ? 3 : 4)))
-    _putPass = not _putDirectionOk ? 0 : (not _putLocationOk ? 1 : (not _putRiskDefined ? 2 : (not _putRewardDefined ? 3 : 4)))
+    _callRewardDefined = _callHasRR and _callSpaceOkStrong
+    _putRewardDefined = _putHasRR and _putSpaceOkStrong
+    _callRewardWatch = _callRrWatch and _callSpaceOkSoft
+    _putRewardWatch = _putRrWatch and _putSpaceOkSoft
+    _callDailyConfirmed = _callDirectionOk and _callLocationOkWatch and _callRiskDefined and _callRewardWatch
+    _putDailyConfirmed = _putDirectionOk and _putLocationOkWatch and _putRiskDefined and _putRewardWatch
+    _callDailyCandidate = _callDirectionStrong and _callLocationOkCandidate and _callRiskDefined and _callRewardDefined
+    _putDailyCandidate = _putDirectionStrong and _putLocationOkCandidate and _putRiskDefined and _putRewardDefined
+    _callPass = not _callDirectionOk ? 0 : (not _callLocationOkWatch ? 1 : (not _callRiskDefined ? 2 : (_callDailyCandidate ? 4 : (_callDailyConfirmed ? 3 : 2))))
+    _putPass = not _putDirectionOk ? 0 : (not _putLocationOkWatch ? 1 : (not _putRiskDefined ? 2 : (_putDailyCandidate ? 4 : (_putDailyConfirmed ? 3 : 2))))
 
-    _callState = _callDailyCandidate ? "LONG CANDIDATE" : (_structureChaos ? "STRUCTURE CHAOS" : (not _structureDirectional ? "WAIT STRUCTURE" : (not _bullStructure ? "OPPOSITE STRUCTURE" : (not _callRSOk ? "WAIT RS" : (not _callMarketAligned ? "WAIT MARKET" : (not _callLocationOk ? "WAIT LOCATION" : ((na(_callInvalid) or na(_callStop)) ? "NO STOP" : (not _riskRealisticCall ? "RISK TOO WIDE" : (not _callHasRR ? "RR TOO LOW" : (not _callSpaceOk ? "SPACE TOO TIGHT" : "WAIT LOCATION"))))))))))
-    _putState = _putDailyCandidate ? "SHORT CANDIDATE" : (_structureChaos ? "STRUCTURE CHAOS" : (not _structureDirectional ? "WAIT STRUCTURE" : (not _bearStructure ? "OPPOSITE STRUCTURE" : (not _putRSOk ? "WAIT RS" : (not _putMarketAligned ? "WAIT MARKET" : (not _putLocationOk ? "WAIT LOCATION" : ((na(_putInvalid) or na(_putStop)) ? "NO STOP" : (not _riskRealisticPut ? "RISK TOO WIDE" : (not _putHasRR ? "RR TOO LOW" : (not _putSpaceOk ? "SPACE TOO TIGHT" : "WAIT LOCATION"))))))))))
+    _callState = _callDailyCandidate ? "LONG CANDIDATE" : (_structureChaos ? "STRUCTURE CHAOS" : ((na(_callInvalid) or na(_callStop)) ? "NO STOP" : (not _riskRealisticCall ? "RISK TOO WIDE" : (not _callRrWatch ? "RR TOO LOW" : (not _callDirectionOk ? (not _structureDirectional ? "WAIT STRUCTURE" : (not (_bullStructure or _bullSoftStructure) ? "OPPOSITE STRUCTURE" : (not _callRSOk ? "WAIT RS" : "WAIT MARKET"))) : (not _callLocationOkWatch ? "WAIT LOCATION" : (_callDailyConfirmed ? "WATCH" : "SPACE TOO TIGHT")))))))
+    _putState = _putDailyCandidate ? "SHORT CANDIDATE" : (_structureChaos ? "STRUCTURE CHAOS" : ((na(_putInvalid) or na(_putStop)) ? "NO STOP" : (not _riskRealisticPut ? "RISK TOO WIDE" : (not _putRrWatch ? "RR TOO LOW" : (not _putDirectionOk ? (not _structureDirectional ? "WAIT STRUCTURE" : (not (_bearStructure or _bearSoftStructure) ? "OPPOSITE STRUCTURE" : (not _putRSOk ? "WAIT RS" : "WAIT MARKET"))) : (not _putLocationOkWatch ? "WAIT LOCATION" : (_putDailyConfirmed ? "WATCH" : "SPACE TOO TIGHT")))))))
 
-    [_putDailyCandidate, _callDailyCandidate, _putState, _callState, _putPass, _callPass]
+    [_putDailyConfirmed, _callDailyConfirmed, _putDailyCandidate, _callDailyCandidate, _putState, _callState, _putPass, _callPass]
 
 // Mirror of the 4H panel's state engine, using the 4H script's core defaults.
 h4MirrorAtrLen = 14
-h4MirrorPivLen = 5
-h4MirrorAtrLocMult = 0.9
-h4MirrorMinRR = 2.0
+h4MirrorPivLen = 4
+h4MirrorAtrLocMult = 1.25
+h4MirrorMinRR = 1.75
+h4MirrorRrWatchFloor = 1.5
 h4MirrorVolLen = 20
 h4MirrorVolBreakMult = 1.2
 h4MirrorRsiLen = 14
 h4MirrorAdxLen = 14
-h4MirrorAdxTrend = 20.0
-h4MirrorUnstableTrAtr = 2.2
+h4MirrorAdxTrend = 18.0
+h4MirrorUnstableTrAtr = 2.5
 h4MirrorWickRejectionMult = 0.9
 h4MirrorStopBufAtr = 0.25
 h4MirrorRiskAtrMin = 0.6
 h4MirrorRiskAtrMax = 4.5
-h4MirrorExtendedAtr = 1.4
+h4MirrorExtendedAtr = 1.6
 h4MirrorMa20Len = 20
 h4MirrorMa50Len = 50
 h4MirrorMa200Len = 200
@@ -855,7 +893,7 @@ f_h4MirrorState() =>
     _nearMA = math.abs(close - _ema20) <= h4MirrorAtrLocMult * _atr or math.abs(close - _sma50) <= h4MirrorAtrLocMult * _atr or math.abs(close - _sma200) <= h4MirrorAtrLocMult * _atr
 
     _trendStrength = _atr > 0 ? math.abs(_ema20 - _emaTrend50) / _atr : na
-    _structureChop = _isChaos or (not na(_trendStrength) and _trendStrength < 0.4)
+    _structureChop = _isChaos or (not na(_trendStrength) and _trendStrength < 0.25)
 
     _body = math.abs(close - open)
     _upperWick = high - math.max(open, close)
@@ -867,11 +905,9 @@ f_h4MirrorState() =>
     _volWeak = not na(_volRatio) and _volRatio < 0.8
 
     _locDistAtr = _atr > 0 ? (math.abs(close - _ema20) / _atr) : na
-    _locAtStructure = not na(_locDistAtr) and _locDistAtr <= 0.5
-    _locNearStructure = not na(_locDistAtr) and _locDistAtr > 0.5 and _locDistAtr <= 1.0
-    _locExtended = not na(_locDistAtr) and _locDistAtr > 1.0
-    _callLocationOk = (_nearSupport or _locAtStructure or _locNearStructure) and not _nearResist and not _locExtended
-    _putLocationOk = (_nearResist or _locAtStructure or _locNearStructure) and not _nearSupport and not _locExtended
+    _locAtStructure = not na(_locDistAtr) and _locDistAtr <= 0.9
+    _locNearStructure = not na(_locDistAtr) and _locDistAtr > 0.9 and _locDistAtr <= 1.5
+    _locExtended = not na(_locDistAtr) and _locDistAtr > 1.5
 
     _extended = not na(_locDistAtr) and _locDistAtr > h4MirrorExtendedAtr
 
@@ -894,16 +930,26 @@ f_h4MirrorState() =>
     _putReward = not na(_putRewardSr) and not na(_putRewardAlt) ? math.max(_putRewardSr, _putRewardAlt) : (not na(_putRewardSr) ? _putRewardSr : _putRewardAlt)
     _callRR = not na(_callRisk) and _callRisk > 0 and not na(_callReward) ? (_callReward / _callRisk) : na
     _putRR = not na(_putRisk) and _putRisk > 0 and not na(_putReward) ? (_putReward / _putRisk) : na
+    _callRrWatch = not na(_callRR) and _callRR >= math.min(h4MirrorRrWatchFloor, h4MirrorMinRR)
+    _putRrWatch = not na(_putRR) and _putRR >= math.min(h4MirrorRrWatchFloor, h4MirrorMinRR)
     _callHasRR = not na(_callRR) and _callRR >= h4MirrorMinRR
     _putHasRR = not na(_putRR) and _putRR >= h4MirrorMinRR
+    _callOppositeTooClose = _nearResist and not _nearMA and not _callRrWatch
+    _putOppositeTooClose = _nearSupport and not _nearMA and not _putRrWatch
+    _callLocationOk = (_nearSupport or _nearMA or _locAtStructure or _locNearStructure) and not _callOppositeTooClose and not _locExtended
+    _putLocationOk = (_nearResist or _nearMA or _locAtStructure or _locNearStructure) and not _putOppositeTooClose and not _locExtended
 
     _isTrend = _adx >= h4MirrorAdxTrend and not _isChaos
     _regimeTxt = _unstableNow ? "UNSTABLE" : (_isTrend ? "TREND" : (_isRange ? "RANGE" : "MIXED"))
 
     _crossUpEma20 = ta.crossover(close, _ema20)
     _crossDnEma20 = ta.crossunder(close, _ema20)
-    _callLevelReaction = (_nearSupport and _bullRejection) or (_nearMA and _crossUpEma20)
-    _putLevelReaction = (_nearResist and _bearRejection) or (_nearMA and _crossDnEma20)
+    _callHoldAboveEma20 = _nearMA and close >= _ema20 and close[1] >= _ema20[1]
+    _putHoldBelowEma20 = _nearMA and close <= _ema20 and close[1] <= _ema20[1]
+    _callBaseBreak = _isCompression and close > high[1] and close >= _ema20
+    _putBaseBreak = _isCompression and close < low[1] and close <= _ema20
+    _callLevelReaction = (_nearSupport and (_bullRejection or close > open or close > close[1])) or (_nearMA and (_crossUpEma20 or _callHoldAboveEma20)) or _callBaseBreak
+    _putLevelReaction = (_nearResist and (_bearRejection or close < open or close < close[1])) or (_nearMA and (_crossDnEma20 or _putHoldBelowEma20)) or _putBaseBreak
     _callRsiOk = _rsi >= 45.0
     _putRsiOk = _rsi <= 55.0
     _callMacdOk = _macdHist >= 0 and _macdHist >= _macdHist[1]
@@ -912,8 +958,13 @@ f_h4MirrorState() =>
     _putVolAtrOk = not _volWeak and _riskRealisticPut
     _callKeyLvlsOk = close >= _sma200 and (close >= _sma50 or _nearMA) and (close >= _ema20 or _nearMA)
     _putKeyLvlsOk = close <= _sma200 and (close <= _sma50 or _nearMA) and (close <= _ema20 or _nearMA)
-    _callRSOk = _rsSlope > 0
-    _putRSOk = _rsSlope < 0
+    _rsNeutralBand = 0.00005
+    _callRSStrong = not na(_rsSlope) and _rsSlope > _rsNeutralBand
+    _putRSStrong = not na(_rsSlope) and _rsSlope < -_rsNeutralBand
+    _callRSOk = not na(_rsSlope) and _rsSlope > -_rsNeutralBand
+    _putRSOk = not na(_rsSlope) and _rsSlope < _rsNeutralBand
+    _callMarketOk = not _callMarketHeadwind or _callRSOk or (not na(_trendStrength) and _trendStrength > 0.6)
+    _putMarketOk = not _putMarketHeadwind or _putRSOk or (not na(_trendStrength) and _trendStrength > 0.6)
     _callInvalidOk = not na(_callInvalid) and _riskRealisticCall
     _putInvalidOk = not na(_putInvalid) and _riskRealisticPut
     _tradeable = not _unstableNow and volume > 0 and (volume >= 0.5 * _volSma)
@@ -928,22 +979,24 @@ f_h4MirrorState() =>
     _pullbackVolBear = f_rollSum(_bearPullbackVolSrc, h4MirrorPbWindow)
     _callPBVolOk = _impulseVolBull > _pullbackVolBull
     _putPBVolOk = _impulseVolBear > _pullbackVolBear
+    _callConfirmOk = _callLevelReaction or (_callRsiOk and _callMacdOk) or (_callPBVolOk and _callKeyLvlsOk)
+    _putConfirmOk = _putLevelReaction or (_putRsiOk and _putMacdOk) or (_putPBVolOk and _putKeyLvlsOk)
 
-    _callQ6 = (_regimeTxt != "UNSTABLE") and (_isTrend or _isRange) and not _callMarketHeadwind
-    _putQ6 = (_regimeTxt != "UNSTABLE") and (_isTrend or _isRange) and not _putMarketHeadwind
+    _callQ6 = (_regimeTxt != "UNSTABLE") and _callMarketOk
+    _putQ6 = (_regimeTxt != "UNSTABLE") and _putMarketOk
     _callQ7 = not _structureChop
     _putQ7 = not _structureChop
     _callQ9 = _callInvalidOk
     _putQ9 = _putInvalidOk
 
-    _putStatus = _regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not _putHasRR ? "NO TRADE (RR)" : (not _putQ9 ? "NO TRADE (RISK)" : (not _putQ6 ? "WAIT MARKET" : (not _putQ7 ? "WAIT STRUCTURE" : (not _putRSOk ? "WAIT EDGE" : (_extended ? "WAIT PULLBACK" : (not _putLocationOk ? "WAIT LOCATION" : "ENTRY NOW")))))))
-    _callStatus = _regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not _callHasRR ? "NO TRADE (RR)" : (not _callQ9 ? "NO TRADE (RISK)" : (not _callQ6 ? "WAIT MARKET" : (not _callQ7 ? "WAIT STRUCTURE" : (not _callRSOk ? "WAIT EDGE" : (_extended ? "WAIT PULLBACK" : (not _callLocationOk ? "WAIT LOCATION" : "ENTRY NOW")))))))
+    _putStatus = _regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not _putRrWatch ? "NO TRADE (RR)" : (not _putQ9 ? "NO TRADE (RISK)" : (not _putQ6 ? "WAIT MARKET" : (not _putQ7 ? "WAIT STRUCTURE" : (_extended ? "WAIT PULLBACK" : (not _putLocationOk ? "WAIT LOCATION" : (not _putHasRR ? "WAIT RR" : (not (_putRSOk or _putConfirmOk) ? "WAIT EDGE" : "ENTRY NOW"))))))))
+    _callStatus = _regimeTxt == "UNSTABLE" ? "NO TRADE (REGIME)" : (not _callRrWatch ? "NO TRADE (RR)" : (not _callQ9 ? "NO TRADE (RISK)" : (not _callQ6 ? "WAIT MARKET" : (not _callQ7 ? "WAIT STRUCTURE" : (_extended ? "WAIT PULLBACK" : (not _callLocationOk ? "WAIT LOCATION" : (not _callHasRR ? "WAIT RR" : (not (_callRSOk or _callConfirmOk) ? "WAIT EDGE" : "ENTRY NOW"))))))))
 
-    _putState = str.contains(_putStatus, "NO TRADE") ? "NO TRADE" : (_putStatus == "ENTRY NOW" ? "READY" : (_putStatus == "WAIT PULLBACK" ? "WAIT PULLBACK" : (_putStatus == "WAIT MARKET" ? "WAIT MARKET" : (_putStatus == "WAIT EDGE" ? "WAIT EDGE" : (_putStatus == "WAIT LOCATION" ? "WAIT LEVEL" : "WAIT STRUCTURE")))))
-    _callState = str.contains(_callStatus, "NO TRADE") ? "NO TRADE" : (_callStatus == "ENTRY NOW" ? "READY" : (_callStatus == "WAIT PULLBACK" ? "WAIT PULLBACK" : (_callStatus == "WAIT MARKET" ? "WAIT MARKET" : (_callStatus == "WAIT EDGE" ? "WAIT EDGE" : (_callStatus == "WAIT LOCATION" ? "WAIT LEVEL" : "WAIT STRUCTURE")))))
+    _putState = str.contains(_putStatus, "NO TRADE") ? "NO TRADE" : (_putStatus == "ENTRY NOW" ? "READY" : (_putStatus == "WAIT PULLBACK" ? "WAIT PULLBACK" : (_putStatus == "WAIT MARKET" ? "WAIT MARKET" : (_putStatus == "WAIT EDGE" ? "WAIT EDGE" : (_putStatus == "WAIT RR" ? "WAIT RR" : (_putStatus == "WAIT LOCATION" ? "WAIT LEVEL" : "WAIT STRUCTURE"))))))
+    _callState = str.contains(_callStatus, "NO TRADE") ? "NO TRADE" : (_callStatus == "ENTRY NOW" ? "READY" : (_callStatus == "WAIT PULLBACK" ? "WAIT PULLBACK" : (_callStatus == "WAIT MARKET" ? "WAIT MARKET" : (_callStatus == "WAIT EDGE" ? "WAIT EDGE" : (_callStatus == "WAIT RR" ? "WAIT RR" : (_callStatus == "WAIT LOCATION" ? "WAIT LEVEL" : "WAIT STRUCTURE"))))))
 
-    _putPass = _regimeTxt == "UNSTABLE" ? 0 : (not _putHasRR ? 1 : (not _putQ9 ? 2 : (not _putQ6 ? 3 : (not _putQ7 ? 4 : (not _putRSOk ? 5 : ((_extended or not _putLocationOk) ? 6 : 7))))))
-    _callPass = _regimeTxt == "UNSTABLE" ? 0 : (not _callHasRR ? 1 : (not _callQ9 ? 2 : (not _callQ6 ? 3 : (not _callQ7 ? 4 : (not _callRSOk ? 5 : ((_extended or not _callLocationOk) ? 6 : 7))))))
+    _putPass = _regimeTxt == "UNSTABLE" ? 0 : (not _putRrWatch ? 1 : (not _putQ9 ? 2 : (not _putQ6 ? 3 : (not _putQ7 ? 4 : ((_extended or not _putLocationOk) ? 5 : (not _putHasRR ? 6 : 7))))))
+    _callPass = _regimeTxt == "UNSTABLE" ? 0 : (not _callRrWatch ? 1 : (not _callQ9 ? 2 : (not _callQ6 ? 3 : (not _callQ7 ? 4 : ((_extended or not _callLocationOk) ? 5 : (not _callHasRR ? 6 : 7))))))
 
     [_putState, _callState, _putPass, _callPass]
 
@@ -1027,13 +1080,17 @@ lowerW = math.min(open, close) - low
 
 closePos = rng > 0 ? (close - low) / rng : na  // 0 bottom, 1 top
 
-// Reaction definition (execution-friendly): wick rejection OR body-close strength, with softer volume floor.
+// Reaction definition (execution-friendly): wick rejection OR body-close strength.
 wickRejectLong = (lowerW >= wickBodyMult * body) and (not na(closePos) and closePos >= closePosPct)
 wickRejectShort = (upperW >= wickBodyMult * body) and (not na(closePos) and closePos <= (1 - closePosPct))
 bodyConfirmLong = close > open and (not na(closePos) and closePos >= 0.5)
 bodyConfirmShort = close < open and (not na(closePos) and closePos <= 0.5)
-reactionLong  = (wickRejectLong or bodyConfirmLong) and (volume >= 0.7 * volSma)
-reactionShort = (wickRejectShort or bodyConfirmShort) and (volume >= 0.7 * volSma)
+reactionLong  = wickRejectLong or bodyConfirmLong
+reactionShort = wickRejectShort or bodyConfirmShort
+callReactionBarsAgo = ta.barssince(nearSupportZone and reactionLong)
+putReactionBarsAgo = ta.barssince(nearResistZone and reactionShort)
+callRecentReaction = not na(callReactionBarsAgo) and callReactionBarsAgo <= reactionWindowBars
+putRecentReaction = not na(putReactionBarsAgo) and putReactionBarsAgo <= reactionWindowBars
 
 // Impulse definition
 bodyPct = rng > 0 ? (body / rng) : 0.0
@@ -1044,10 +1101,12 @@ impulseBear = close < open and bodyPct >= impulseBodyPct and volume >= volSma * 
 distToEma = math.abs(close - emaFast)
 distEmaAtr = atr > 0 ? (distToEma / atr) : na
 extended = not na(distEmaAtr) and distEmaAtr > extendedAtr
+softExtended = extended and distEmaAtr <= (extendedAtr + softExtendedBandAtr)
+hardExtended = not na(distEmaAtr) and distEmaAtr > (extendedAtr + softExtendedBandAtr)
 impulseSpikeSrc = (impulseBull or impulseBear) ? 1.0 : 0.0
 impulseCount = f_rollSum(impulseSpikeSrc, impulseBars)
 impulseHeat = impulseCount >= math.max(3, impulseBars - 1)
-isOverextended = extended
+isOverextended = hardExtended
 
 // Pullback health (measurable proxies)
 impulseRange = ta.sma((impulseBull or impulseBear) ? rng : 0.0, pullbackWin)
@@ -1058,8 +1117,8 @@ impulseVol = ta.sma((impulseBull or impulseBear) ? volume : 0.0, pullbackWin)
 counterVolBull = ta.sma(close < open ? volume : 0.0, pullbackWin)
 counterVolBear = ta.sma(close > open ? volume : 0.0, pullbackWin)
 
-healthyPullbackBull = counterRangeBull <= 0.9 * impulseRange and counterVolBull <= impulseVol
-healthyPullbackBear = counterRangeBear <= 0.9 * impulseRange and counterVolBear <= impulseVol
+healthyPullbackBull = counterRangeBull <= 1.0 * impulseRange and counterVolBull <= impulseVol
+healthyPullbackBear = counterRangeBear <= 1.0 * impulseRange and counterVolBear <= impulseVol
 
 lastImpulseMove = math.abs(close - close[pullbackWin])
 retraceMove = math.abs(close - close[math.floor(pullbackWin / 2)])
@@ -1155,8 +1214,8 @@ m1dCallStateDisplay = (m1dCallReason == "OK" ? m1dCallStateTxt : (m1dCallStateTx
 m1dPutStateCol = f_m1dMirrorStateColor(m1dPutStateTxt)
 m1dCallStateCol = f_m1dMirrorStateColor(m1dCallStateTxt)
 
-// Stock 1D context mirrors the native 1D panel's SCAN 4H candidate pipeline, plus a first-blocker label and pass count.
-[d1PutCandidate, d1CallCandidate, d1PutStateTxt, d1CallStateTxt, d1PutPass, d1CallPass] = request.security(syminfo.tickerid, d1MirrorTf, f_d1MirrorState())
+// Stock 1D context mirrors the native 1D panel's SCAN 4H pipeline (watch + candidate), plus a first-blocker label and pass count.
+[d1PutConfirmed, d1CallConfirmed, d1PutCandidate, d1CallCandidate, d1PutStateTxt, d1CallStateTxt, d1PutPass, d1CallPass] = request.security(syminfo.tickerid, d1MirrorTf, f_d1MirrorState())
 d1PutStateDisplay = d1PutStateTxt + " (" + str.tostring(d1PutPass) + "/4)"
 d1CallStateDisplay = d1CallStateTxt + " (" + str.tostring(d1CallPass) + "/4)"
 d1PutStateCol = f_d1MirrorStateColor(d1PutStateTxt)
@@ -1178,6 +1237,14 @@ h1PutSetupStateDisplay = h1PutSetupStateTxt + " (" + str.tostring(h1PutPass) + "
 h1CallSetupStateDisplay = h1CallSetupStateTxt + " (" + str.tostring(h1CallPass) + "/8)"
 h1PutSetupStateCol = f_h1MirrorStateColor(h1PutSetupStateTxt)
 h1CallSetupStateCol = f_h1MirrorStateColor(h1CallSetupStateTxt)
+h1PutHardReady = h1PutReadyForLtfState
+h1CallHardReady = h1CallReadyForLtfState
+h1PutSoftReady = h1PutHardReady or h1PutPass >= 7
+h1CallSoftReady = h1CallHardReady or h1CallPass >= 7
+h1PutSoftBlocker = h1PutSetupStateTxt == "RR BELOW FULL" or h1PutSetupStateTxt == "WAIT LOCATION"
+h1CallSoftBlocker = h1CallSetupStateTxt == "RR BELOW FULL" or h1CallSetupStateTxt == "WAIT LOCATION"
+h1PutContextReady = h1PutSoftReady or h1PutSoftBlocker
+h1CallContextReady = h1CallSoftReady or h1CallSoftBlocker
 
 //------------------------------------------------------------------------------
 // 15m Questions & Weights (sum = 100 for checklist)
@@ -1186,8 +1253,8 @@ h1CallSetupStateCol = f_h1MirrorStateColor(h1CallSetupStateTxt)
 w1=20, w2=18, w3=15, w4=12, w5=10, w6=9, w7=7, w8=6, w9=3
 
 // Directional checks (CALL bullish, PUT bearish)
-callQ1 = nearSupportZone and reactionLong
-putQ1  = nearResistZone and reactionShort
+callQ1 = callRecentReaction
+putQ1  = putRecentReaction
 
 callQ2 = bullMicro or trendAlignBull
 putQ2  = bearMicro or trendAlignBear
@@ -1221,8 +1288,8 @@ minorBreakLow  = ta.lowest(low[1], entryBreakLookback)
 callBreakHold = not na(minorBreakHigh) and close > minorBreakHigh and close >= (minorBreakHigh - entryHoldTol)
 putBreakHold  = not na(minorBreakLow)  and close < minorBreakLow  and close <= (minorBreakLow + entryHoldTol)
 
-callRejectContinue = nearSupportZone and reactionLong and (close >= emaFast or (not na(closePos) and closePos >= 0.55))
-putRejectContinue  = nearResistZone  and reactionShort and (close <= emaFast or (not na(closePos) and closePos <= 0.45))
+callRejectContinue = callRecentReaction and (close >= emaFast or (not na(closePos) and closePos >= 0.55))
+putRejectContinue  = putRecentReaction  and (close <= emaFast or (not na(closePos) and closePos <= 0.45))
 
 // Price trigger is independent; volume remains in quality scoring (Q7) and confidence/grade soft caps.
 callEntryPattern = callBreakHold or callRejectContinue
@@ -1235,8 +1302,8 @@ putEntryPatternTxt  = putBreakHold  ? "break&hold" : (putRejectContinue  ? "reje
 // Trend core is inherited from 1H readiness to keep 15m as execution/timing TF.
 trendCoreW = w2 + w8
 entryCoreW = w1 + w3 + w5 + w6 + w7
-callTrendCoreRaw = f_score(h1CallReady, trendCoreW)
-putTrendCoreRaw  = f_score(h1PutReady, trendCoreW)
+callTrendCoreRaw = f_score(h1CallContextReady, trendCoreW)
+putTrendCoreRaw  = f_score(h1PutContextReady, trendCoreW)
 callEntryCoreRaw = f_score(callQ1, w1) + f_score(callQ3, w3) + f_score(callQ5, w5) + f_score(callQ6, w6) + f_score(callQ7, w7)
 putEntryCoreRaw  = f_score(putQ1, w1)  + f_score(putQ3, w3)  + f_score(putQ5, w5)  + f_score(putQ6, w6)  + f_score(putQ7, w7)
 callTrendCoreScore = trendCoreW > 0 ? 100.0 * callTrendCoreRaw / trendCoreW : 0.0
@@ -1255,26 +1322,32 @@ putSetupQualityOk  = putEntryCoreScore  >= entryScoreMin and putTrendCoreScore  
 // Process-state flags (ModMark-style): bias -> level -> reaction -> trigger.
 callBiasOk = h1BullCtx
 putBiasOk  = h1BearCtx
-callLevelOk = nearSupportZone
-putLevelOk  = nearResistZone
-callReactionOk = reactionLong
-putReactionOk  = reactionShort
+callLevelOk = nearSupportZone or callRecentReaction
+putLevelOk  = nearResistZone or putRecentReaction
+callReactionOk = callRecentReaction
+putReactionOk  = putRecentReaction
 callLtfReversalOk = callQ2 or (close >= emaFast and (rsi >= rsiMid or macdHist >= macdHist[1]))
 putLtfReversalOk  = putQ2  or (close <= emaFast and (rsi <= rsiMid or macdHist <= macdHist[1]))
+callContextConfirmedState = h1CallContextReady and callQ3 and callHasRR and not hardExtended
+putContextConfirmedState  = h1PutContextReady  and putQ3  and putHasRR  and not hardExtended
 
 callNoTradeState = (not callBiasOk) or (not callHasRR) or na(callInvalid) or na(callStop)
 putNoTradeState  = (not putBiasOk)  or (not putHasRR)  or na(putInvalid)  or na(putStop)
 
-callWaitPullbackState = (not callLevelOk) or isOverextended
-putWaitPullbackState  = (not putLevelOk)  or isOverextended
+callWaitLevelState = not callLevelOk
+putWaitLevelState  = not putLevelOk
+callWaitPullbackState = hardExtended
+putWaitPullbackState  = hardExtended
 
-callWaitReversalState = (not h1CallReady) or (not callLtfReversalOk) or (not callReactionOk)
-putWaitReversalState  = (not h1PutReady)  or (not putLtfReversalOk)  or (not putReactionOk)
+callWaitReversalState = (not h1CallContextReady) or (not callLtfReversalOk) or (not callReactionOk)
+putWaitReversalState  = (not h1PutContextReady)  or (not putLtfReversalOk)  or (not putReactionOk)
 
-callSetupDevelopingState = h1CallReady and not isOverextended and callLevelOk and callReactionOk and (not callEntryPattern)
-putSetupDevelopingState  = h1PutReady  and not isOverextended and putLevelOk  and putReactionOk  and (not putEntryPattern)
-callEntryNowState = h1CallReady and not isOverextended and callLevelOk and callReactionOk and callEntryPattern
-putEntryNowState  = h1PutReady  and not isOverextended and putLevelOk  and putReactionOk  and putEntryPattern
+callSetupDevelopingState = callContextConfirmedState and callLevelOk and callReactionOk and (not callEntryPattern)
+putSetupDevelopingState  = putContextConfirmedState  and putLevelOk  and putReactionOk  and (not putEntryPattern)
+callEntryNowState = h1CallHardReady and not hardExtended and callLevelOk and callReactionOk and callEntryPattern
+putEntryNowState  = h1PutHardReady  and not hardExtended and putLevelOk  and putReactionOk  and putEntryPattern
+callConfirmedContextState = callContextConfirmedState and not callEntryNowState and not callSetupDevelopingState
+putConfirmedContextState  = putContextConfirmedState  and not putEntryNowState  and not putSetupDevelopingState
 callEntryReadyState = callEntryNowState and not callNoTradeState
 putEntryReadyState  = putEntryNowState  and not putNoTradeState
 
@@ -1310,7 +1383,7 @@ f_clearTable(_rows) =>
         for c = 0 to 2
             f_setCell(r, c, "", color.new(color.black, 100), color.new(color.white, 100))
 
-maxRows = 56
+maxRows = 60
 if barstate.isfirst
     t := table.new(position.top_right, 3, maxRows, border_width=1)
 
@@ -1345,7 +1418,7 @@ f_applyColVisibility(_r) =>
 
 f_failReason(_id, _isPut) =>
     if _id == 1
-        _isPut ? (not nearResistZone ? "not near level" : (upperW < wickBodyMult * body ? "wick too small" : (closePos > (1 - closePosPct) ? "weak close" : "low volume"))) : (not nearSupportZone ? "not near level" : (lowerW < wickBodyMult * body ? "wick too small" : (closePos < closePosPct ? "weak close" : "low volume")))
+        _isPut ? (not putLevelOk ? "not near level" : (not putRecentReaction ? "no recent reaction" : "reaction stale")) : (not callLevelOk ? "not near level" : (not callRecentReaction ? "no recent reaction" : "reaction stale"))
     else if _id == 2
         "no structure align"
     else if _id == 3
@@ -1387,8 +1460,21 @@ f_updateSrLine(_ln, _y, _col) =>
             line.set_width(_out, 1)
     _out
 
+f_laneSideText(_tf, _callActive, _putActive) =>
+    _callActive and _putActive ? _tf + " (c/p)" : (_callActive ? _tf + " (c)" : (_putActive ? _tf + " (p)" : _tf))
+
 var line srSupportLine = na
 var line srResistLine = na
+var line spyLaneExtLine = na
+var line d1LaneExtLine = na
+var line h4LaneExtLine = na
+var line h1LaneExtLine = na
+var line m15LaneExtLine = na
+var label spyLaneLabel = na
+var label d1LaneLabel = na
+var label h4LaneLabel = na
+var label h1LaneLabel = na
+var label m15LaneLabel = na
 
 render = uiShow and (not onlyOn15m or is15m)
 showEMarks = uiShowEMarks and (not onlyOn15m or is15m)
@@ -1396,38 +1482,36 @@ showMarket1DMarks = uiShowMarket1DMarks and (not onlyOn15m or is15m)
 show1HMarks = uiShow1HMarks and (not onlyOn15m or is15m)
 show4HMarks = uiShow4HMarks and (not onlyOn15m or is15m)
 show1DMarks = uiShow1DMarks and (not onlyOn15m or is15m)
+laneRightShiftBars = 4
+laneLabelGapBars = 1
 
 srSupportLine := f_updateSrLine(srSupportLine, render ? nearestSupport : na, f_c(color.teal))
 srResistLine := f_updateSrLine(srResistLine, render ? nearestResist : na, f_c(color.orange))
 
-// Render markers at the top of the pane so they stay above price action.
-plotchar(showEMarks and putEntryReadyState, title="PUT entry ready", char="E", location=location.top, color=colBad, size=size.tiny)
-plotchar(showEMarks and callEntryReadyState, title="CALL entry ready", char="E", location=location.top, color=colOk, size=size.tiny)
-
-// HTF readiness markers are event-based to avoid repeating the same higher-timeframe state on every 15m bar.
+// HTF summary counts one hit per closed bar of the source timeframe while state is true.
 m1dPutSoftActive = m1dPutStateTxt == "BEARISH" or m1dPutStateTxt == "SUPPORTIVE"
 m1dCallSoftActive = m1dCallStateTxt == "BULLISH" or m1dCallStateTxt == "SUPPORTIVE"
-m1dPutStrictActive = m1dPutStateTxt == "BEARISH"
-m1dCallStrictActive = m1dCallStateTxt == "BULLISH"
-m1dPutSoftEvent = m1dPutSoftActive and not m1dPutSoftActive[1]
-m1dCallSoftEvent = m1dCallSoftActive and not m1dCallSoftActive[1]
-m1dPutSoftOutEvent = not m1dPutSoftActive and m1dPutSoftActive[1]
-m1dCallSoftOutEvent = not m1dCallSoftActive and m1dCallSoftActive[1]
-m1dPutStrictEvent = m1dPutStrictActive and not m1dPutStrictActive[1]
-m1dCallStrictEvent = m1dCallStrictActive and not m1dCallStrictActive[1]
-d1PutReadyEvent = d1PutCandidate and not d1PutCandidate[1]
-d1CallReadyEvent = d1CallCandidate and not d1CallCandidate[1]
-h4PutReadyEvent = h4PutStateTxt == "READY" and h4PutStateTxt[1] != "READY"
-h4CallReadyEvent = h4CallStateTxt == "READY" and h4CallStateTxt[1] != "READY"
-h1PutReadyEvent = h1PutReadyForLtfState and not h1PutReadyForLtfState[1]
-h1CallReadyEvent = h1CallReadyForLtfState and not h1CallReadyForLtfState[1]
+newMarket1DBar = ta.change(time(dailyTF)) != 0
+newStock1DBar = ta.change(time(d1MirrorTf)) != 0
+newStock4HBar = ta.change(time("240")) != 0
+newStock1HBar = ta.change(time("60")) != 0
+newStock15mBar = ta.change(time("15")) != 0
 
+m1dPutBarHit = newMarket1DBar and m1dPutSoftActive[1] == true
+m1dCallBarHit = newMarket1DBar and m1dCallSoftActive[1] == true
+d1PutBarHit = newStock1DBar and d1PutConfirmed[1] == true
+d1CallBarHit = newStock1DBar and d1CallConfirmed[1] == true
+h4PutBarHit = newStock4HBar and h4PutStateTxt[1] == "READY"
+h4CallBarHit = newStock4HBar and h4CallStateTxt[1] == "READY"
+h1PutBarHit = newStock1HBar and h1PutReadyForLtfState[1] == true
+h1CallBarHit = newStock1HBar and h1CallReadyForLtfState[1] == true
+m15PutBarHit = newStock15mBar and putEntryReadyState[1] == true
+m15CallBarHit = newStock15mBar and callEntryReadyState[1] == true
+
+var float putSpyAccum = 0.0
+var float callSpyAccum = 0.0
 var float putEAccum = 0.0
 var float callEAccum = 0.0
-var float putMSoftAccum = 0.0
-var float callMSoftAccum = 0.0
-var float putMStrictAccum = 0.0
-var float callMStrictAccum = 0.0
 var float put1Accum = 0.0
 var float call1Accum = 0.0
 var float put4Accum = 0.0
@@ -1435,30 +1519,26 @@ var float call4Accum = 0.0
 var float putDAccum = 0.0
 var float callDAccum = 0.0
 
-putEAccum := nz(putEAccum[1]) + (putEntryReadyState ? 1.0 : 0.0)
-callEAccum := nz(callEAccum[1]) + (callEntryReadyState ? 1.0 : 0.0)
-putMSoftAccum := nz(putMSoftAccum[1]) + (m1dPutSoftEvent ? 1.0 : 0.0)
-callMSoftAccum := nz(callMSoftAccum[1]) + (m1dCallSoftEvent ? 1.0 : 0.0)
-putMStrictAccum := nz(putMStrictAccum[1]) + (m1dPutStrictEvent ? 1.0 : 0.0)
-callMStrictAccum := nz(callMStrictAccum[1]) + (m1dCallStrictEvent ? 1.0 : 0.0)
-put1Accum := nz(put1Accum[1]) + (h1PutReadyEvent ? 1.0 : 0.0)
-call1Accum := nz(call1Accum[1]) + (h1CallReadyEvent ? 1.0 : 0.0)
-put4Accum := nz(put4Accum[1]) + (h4PutReadyEvent ? 1.0 : 0.0)
-call4Accum := nz(call4Accum[1]) + (h4CallReadyEvent ? 1.0 : 0.0)
-putDAccum := nz(putDAccum[1]) + (d1PutReadyEvent ? 1.0 : 0.0)
-callDAccum := nz(callDAccum[1]) + (d1CallReadyEvent ? 1.0 : 0.0)
+putSpyAccum := nz(putSpyAccum[1]) + (m1dPutBarHit ? 1.0 : 0.0)
+callSpyAccum := nz(callSpyAccum[1]) + (m1dCallBarHit ? 1.0 : 0.0)
+putEAccum := nz(putEAccum[1]) + (m15PutBarHit ? 1.0 : 0.0)
+callEAccum := nz(callEAccum[1]) + (m15CallBarHit ? 1.0 : 0.0)
+put1Accum := nz(put1Accum[1]) + (h1PutBarHit ? 1.0 : 0.0)
+call1Accum := nz(call1Accum[1]) + (h1CallBarHit ? 1.0 : 0.0)
+put4Accum := nz(put4Accum[1]) + (h4PutBarHit ? 1.0 : 0.0)
+call4Accum := nz(call4Accum[1]) + (h4CallBarHit ? 1.0 : 0.0)
+putDAccum := nz(putDAccum[1]) + (d1PutBarHit ? 1.0 : 0.0)
+callDAccum := nz(callDAccum[1]) + (d1CallBarHit ? 1.0 : 0.0)
 
 maxDynamicHistoryBars = 5000
 markSummaryBarsRaw = f_lookbackBarsFromDays(markSummaryDays)
 // Pine limits dynamic history indexing to 5000 bars.
 markSummaryBars = math.min(markSummaryBarsRaw, maxDynamicHistoryBars)
 markSummaryLabel = markSummaryBarsRaw > markSummaryBars ? str.tostring(f_lookbackDaysFromBars(markSummaryBars), "#.##") + "D eff." : str.tostring(markSummaryDays) + "D"
+putSpyCount = putSpyAccum - nz(putSpyAccum[markSummaryBars], 0.0)
+callSpyCount = callSpyAccum - nz(callSpyAccum[markSummaryBars], 0.0)
 putECount = putEAccum - nz(putEAccum[markSummaryBars], 0.0)
 callECount = callEAccum - nz(callEAccum[markSummaryBars], 0.0)
-putMSoftCount = putMSoftAccum - nz(putMSoftAccum[markSummaryBars], 0.0)
-callMSoftCount = callMSoftAccum - nz(callMSoftAccum[markSummaryBars], 0.0)
-putMStrictCount = putMStrictAccum - nz(putMStrictAccum[markSummaryBars], 0.0)
-callMStrictCount = callMStrictAccum - nz(callMStrictAccum[markSummaryBars], 0.0)
 put1Count = put1Accum - nz(put1Accum[markSummaryBars], 0.0)
 call1Count = call1Accum - nz(call1Accum[markSummaryBars], 0.0)
 put4Count = put4Accum - nz(put4Accum[markSummaryBars], 0.0)
@@ -1466,16 +1546,163 @@ call4Count = call4Accum - nz(call4Accum[markSummaryBars], 0.0)
 putDCount = putDAccum - nz(putDAccum[markSummaryBars], 0.0)
 callDCount = callDAccum - nz(callDAccum[markSummaryBars], 0.0)
 
-plotshape(showMarket1DMarks and m1dPutSoftEvent, title="PUT Market 1D in", style=shape.labeldown, location=location.top, color=colBad, text="Min", textcolor=color.white, size=size.tiny)
-plotshape(showMarket1DMarks and m1dPutSoftOutEvent, title="PUT Market 1D out", style=shape.labeldown, location=location.top, color=colBad, text="Mout", textcolor=color.white, size=size.tiny)
-plotshape(showMarket1DMarks and m1dCallSoftEvent, title="CALL Market 1D in", style=shape.labeldown, location=location.top, color=colOk, text="Min", textcolor=color.white, size=size.tiny)
-plotshape(showMarket1DMarks and m1dCallSoftOutEvent, title="CALL Market 1D out", style=shape.labeldown, location=location.top, color=colOk, text="Mout", textcolor=color.white, size=size.tiny)
-plotchar(show1DMarks and d1PutReadyEvent, title="PUT 1D ready", char="D", location=location.top, color=colBad, size=size.tiny)
-plotchar(show1DMarks and d1CallReadyEvent, title="CALL 1D ready", char="D", location=location.top, color=colOk, size=size.tiny)
-plotchar(show4HMarks and h4PutReadyEvent, title="PUT 4H ready", char="4", location=location.top, color=colBad, size=size.tiny)
-plotchar(show4HMarks and h4CallReadyEvent, title="CALL 4H ready", char="4", location=location.top, color=colOk, size=size.tiny)
-plotchar(show1HMarks and h1PutReadyEvent, title="PUT 1H ready", char="1", location=location.top, color=colBad, size=size.tiny)
-plotchar(show1HMarks and h1CallReadyEvent, title="CALL 1H ready", char="1", location=location.top, color=colOk, size=size.tiny)
+// Readiness lanes (state duration, not trigger events):
+// top -> bottom: SPY, 1D, 4H, 1H, 15m
+laneLookback = 300
+laneTop = ta.highest(high, laneLookback)
+laneBottom = ta.lowest(low, laneLookback)
+laneStepBase = math.max(nz(atr, 0.0), laneTop - laneBottom)
+laneStep = math.max(syminfo.mintick * 20.0, laneStepBase * 0.04)
+
+spyLaneY = laneTop + 5.0 * laneStep
+d1LaneY = laneTop + 4.0 * laneStep
+h4LaneY = laneTop + 3.0 * laneStep
+h1LaneY = laneTop + 2.0 * laneStep
+m15LaneY = laneTop + 1.0 * laneStep
+
+spyLaneCol = f_laneC(color.silver)
+d1LaneCol = f_laneC(color.yellow)
+h4LaneCol = f_laneC(color.aqua)
+h1LaneCol = f_laneC(color.orange)
+m15LaneCol = f_laneC(color.lime)
+
+spyReadyLine = showMarket1DMarks and (m1dPutSoftActive or m1dCallSoftActive)
+d1ReadyLine = show1DMarks and (d1PutConfirmed or d1CallConfirmed)
+h4ReadyLine = show4HMarks and (h4PutStateTxt == "READY" or h4CallStateTxt == "READY")
+h1ReadyLine = show1HMarks and (h1PutReadyForLtfState or h1CallReadyForLtfState)
+m15ReadyLine = showEMarks and (putEntryReadyState or callEntryReadyState)
+
+plot(spyReadyLine ? spyLaneY : na, title="SPY readiness line", style=plot.style_linebr, color=spyLaneCol, linewidth=2)
+plot(d1ReadyLine ? d1LaneY : na, title="1D readiness line", style=plot.style_linebr, color=d1LaneCol, linewidth=2)
+plot(h4ReadyLine ? h4LaneY : na, title="4H readiness line", style=plot.style_linebr, color=h4LaneCol, linewidth=2)
+plot(h1ReadyLine ? h1LaneY : na, title="1H readiness line", style=plot.style_linebr, color=h1LaneCol, linewidth=2)
+plot(m15ReadyLine ? m15LaneY : na, title="15m readiness line", style=plot.style_linebr, color=m15LaneCol, linewidth=2)
+
+spyLaneTxt = f_laneSideText("SPY", m1dCallSoftActive and not m1dPutSoftActive, m1dPutSoftActive and not m1dCallSoftActive)
+d1LaneTxt = f_laneSideText("1D", d1CallConfirmed and not d1PutConfirmed, d1PutConfirmed and not d1CallConfirmed)
+h4LaneTxt = f_laneSideText("4H", h4CallStateTxt == "READY" and h4PutStateTxt != "READY", h4PutStateTxt == "READY" and h4CallStateTxt != "READY")
+h1LaneTxt = f_laneSideText("1H", h1CallReadyForLtfState and not h1PutReadyForLtfState, h1PutReadyForLtfState and not h1CallReadyForLtfState)
+m15LaneTxt = f_laneSideText("15m", callEntryReadyState and not putEntryReadyState, putEntryReadyState and not callEntryReadyState)
+
+if not spyReadyLine or na(spyLaneY)
+    if not na(spyLaneExtLine)
+        line.delete(spyLaneExtLine)
+        spyLaneExtLine := na
+    if not na(spyLaneLabel)
+        label.delete(spyLaneLabel)
+        spyLaneLabel := na
+else
+    if na(spyLaneExtLine)
+        spyLaneExtLine := line.new(bar_index, spyLaneY, bar_index + laneRightShiftBars, spyLaneY, xloc=xloc.bar_index, extend=extend.none, color=spyLaneCol, width=2)
+    else
+        line.set_xy1(spyLaneExtLine, bar_index, spyLaneY)
+        line.set_xy2(spyLaneExtLine, bar_index + laneRightShiftBars, spyLaneY)
+        line.set_color(spyLaneExtLine, spyLaneCol)
+        line.set_width(spyLaneExtLine, 2)
+    if na(spyLaneLabel)
+        spyLaneLabel := label.new(bar_index + laneRightShiftBars + laneLabelGapBars, spyLaneY, spyLaneTxt, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=spyLaneCol, size=size.small)
+    else
+        label.set_xy(spyLaneLabel, bar_index + laneRightShiftBars + laneLabelGapBars, spyLaneY)
+        label.set_text(spyLaneLabel, spyLaneTxt)
+        label.set_textcolor(spyLaneLabel, spyLaneCol)
+        label.set_size(spyLaneLabel, size.tiny)
+        label.set_style(spyLaneLabel, label.style_none)
+
+if not d1ReadyLine or na(d1LaneY)
+    if not na(d1LaneExtLine)
+        line.delete(d1LaneExtLine)
+        d1LaneExtLine := na
+    if not na(d1LaneLabel)
+        label.delete(d1LaneLabel)
+        d1LaneLabel := na
+else
+    if na(d1LaneExtLine)
+        d1LaneExtLine := line.new(bar_index, d1LaneY, bar_index + laneRightShiftBars, d1LaneY, xloc=xloc.bar_index, extend=extend.none, color=d1LaneCol, width=2)
+    else
+        line.set_xy1(d1LaneExtLine, bar_index, d1LaneY)
+        line.set_xy2(d1LaneExtLine, bar_index + laneRightShiftBars, d1LaneY)
+        line.set_color(d1LaneExtLine, d1LaneCol)
+        line.set_width(d1LaneExtLine, 2)
+    if na(d1LaneLabel)
+        d1LaneLabel := label.new(bar_index + laneRightShiftBars + laneLabelGapBars, d1LaneY, d1LaneTxt, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=d1LaneCol, size=size.small)
+    else
+        label.set_xy(d1LaneLabel, bar_index + laneRightShiftBars + laneLabelGapBars, d1LaneY)
+        label.set_text(d1LaneLabel, d1LaneTxt)
+        label.set_textcolor(d1LaneLabel, d1LaneCol)
+        label.set_size(d1LaneLabel, size.tiny)
+        label.set_style(d1LaneLabel, label.style_none)
+
+if not h4ReadyLine or na(h4LaneY)
+    if not na(h4LaneExtLine)
+        line.delete(h4LaneExtLine)
+        h4LaneExtLine := na
+    if not na(h4LaneLabel)
+        label.delete(h4LaneLabel)
+        h4LaneLabel := na
+else
+    if na(h4LaneExtLine)
+        h4LaneExtLine := line.new(bar_index, h4LaneY, bar_index + laneRightShiftBars, h4LaneY, xloc=xloc.bar_index, extend=extend.none, color=h4LaneCol, width=2)
+    else
+        line.set_xy1(h4LaneExtLine, bar_index, h4LaneY)
+        line.set_xy2(h4LaneExtLine, bar_index + laneRightShiftBars, h4LaneY)
+        line.set_color(h4LaneExtLine, h4LaneCol)
+        line.set_width(h4LaneExtLine, 2)
+    if na(h4LaneLabel)
+        h4LaneLabel := label.new(bar_index + laneRightShiftBars + laneLabelGapBars, h4LaneY, h4LaneTxt, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=h4LaneCol, size=size.small)
+    else
+        label.set_xy(h4LaneLabel, bar_index + laneRightShiftBars + laneLabelGapBars, h4LaneY)
+        label.set_text(h4LaneLabel, h4LaneTxt)
+        label.set_textcolor(h4LaneLabel, h4LaneCol)
+        label.set_size(h4LaneLabel, size.tiny)
+        label.set_style(h4LaneLabel, label.style_none)
+
+if not h1ReadyLine or na(h1LaneY)
+    if not na(h1LaneExtLine)
+        line.delete(h1LaneExtLine)
+        h1LaneExtLine := na
+    if not na(h1LaneLabel)
+        label.delete(h1LaneLabel)
+        h1LaneLabel := na
+else
+    if na(h1LaneExtLine)
+        h1LaneExtLine := line.new(bar_index, h1LaneY, bar_index + laneRightShiftBars, h1LaneY, xloc=xloc.bar_index, extend=extend.none, color=h1LaneCol, width=2)
+    else
+        line.set_xy1(h1LaneExtLine, bar_index, h1LaneY)
+        line.set_xy2(h1LaneExtLine, bar_index + laneRightShiftBars, h1LaneY)
+        line.set_color(h1LaneExtLine, h1LaneCol)
+        line.set_width(h1LaneExtLine, 2)
+    if na(h1LaneLabel)
+        h1LaneLabel := label.new(bar_index + laneRightShiftBars + laneLabelGapBars, h1LaneY, h1LaneTxt, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=h1LaneCol, size=size.small)
+    else
+        label.set_xy(h1LaneLabel, bar_index + laneRightShiftBars + laneLabelGapBars, h1LaneY)
+        label.set_text(h1LaneLabel, h1LaneTxt)
+        label.set_textcolor(h1LaneLabel, h1LaneCol)
+        label.set_size(h1LaneLabel, size.tiny)
+        label.set_style(h1LaneLabel, label.style_none)
+
+if not m15ReadyLine or na(m15LaneY)
+    if not na(m15LaneExtLine)
+        line.delete(m15LaneExtLine)
+        m15LaneExtLine := na
+    if not na(m15LaneLabel)
+        label.delete(m15LaneLabel)
+        m15LaneLabel := na
+else
+    if na(m15LaneExtLine)
+        m15LaneExtLine := line.new(bar_index, m15LaneY, bar_index + laneRightShiftBars, m15LaneY, xloc=xloc.bar_index, extend=extend.none, color=m15LaneCol, width=2)
+    else
+        line.set_xy1(m15LaneExtLine, bar_index, m15LaneY)
+        line.set_xy2(m15LaneExtLine, bar_index + laneRightShiftBars, m15LaneY)
+        line.set_color(m15LaneExtLine, m15LaneCol)
+        line.set_width(m15LaneExtLine, 2)
+    if na(m15LaneLabel)
+        m15LaneLabel := label.new(bar_index + laneRightShiftBars + laneLabelGapBars, m15LaneY, m15LaneTxt, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=m15LaneCol, size=size.small)
+    else
+        label.set_xy(m15LaneLabel, bar_index + laneRightShiftBars + laneLabelGapBars, m15LaneY)
+        label.set_text(m15LaneLabel, m15LaneTxt)
+        label.set_textcolor(m15LaneLabel, m15LaneCol)
+        label.set_size(m15LaneLabel, size.tiny)
+        label.set_style(m15LaneLabel, label.style_none)
 
 if not render
     f_clearTable(maxRows)
@@ -1490,23 +1717,29 @@ else
 
     putBaseGrade  = f_grade(putScore)
     callBaseGrade = f_grade(callScore)
-    putCapGradeHard  = (not putHasRR and isOverextended) ? "D" : ((not putHasRR or isOverextended or not h1PutReady) ? "C" : "A")
-    callCapGradeHard = (not callHasRR and isOverextended) ? "D" : ((not callHasRR or isOverextended or not h1CallReady) ? "C" : "A")
-    putCapGradeSoft  = (dHighVol or not putRiskCompression or impulseHeat or not putMomOk or not trendOK) ? "C" : "A"
-    callCapGradeSoft = (dHighVol or not callRiskCompression or impulseHeat or not callMomOk or not trendOK) ? "C" : "A"
+    putCapGradeHard  = (not putHasRR and hardExtended) ? "D" : ((not putHasRR or hardExtended or not h1PutContextReady) ? "C" : ((softExtended or not h1PutHardReady) ? "B" : "A"))
+    callCapGradeHard = (not callHasRR and hardExtended) ? "D" : ((not callHasRR or hardExtended or not h1CallContextReady) ? "C" : ((softExtended or not h1CallHardReady) ? "B" : "A"))
+    putSoftCapHits = (dHighVol ? 1 : 0) + (not putRiskCompression ? 1 : 0) + (impulseHeat ? 1 : 0) + (not putMomOk ? 1 : 0) + (not trendOK ? 1 : 0)
+    callSoftCapHits = (dHighVol ? 1 : 0) + (not callRiskCompression ? 1 : 0) + (impulseHeat ? 1 : 0) + (not callMomOk ? 1 : 0) + (not trendOK ? 1 : 0)
+    putCapGradeSoft  = putSoftCapHits >= 2 ? "C" : (putSoftCapHits == 1 ? "B" : "A")
+    callCapGradeSoft = callSoftCapHits >= 2 ? "C" : (callSoftCapHits == 1 ? "B" : "A")
     putCapGrade  = f_capGrade(putCapGradeHard, putCapGradeSoft)
     callCapGrade = f_capGrade(callCapGradeHard, callCapGradeSoft)
     putGrade  = f_capGrade(putBaseGrade, putCapGrade)
     callGrade = f_capGrade(callBaseGrade, callCapGrade)
 
-    putStatus = putNoTradeState ? putNoTradeStatus : (putWaitPullbackState ? "WAIT PULLBACK" : (putWaitReversalState ? "WAIT REVERSAL" : (putEntryNowState ? "ENTRY NOW" : (putSetupDevelopingState ? "SETUP DEVELOPING" : "WAIT REVERSAL"))))
-    callStatus = callNoTradeState ? callNoTradeStatus : (callWaitPullbackState ? "WAIT PULLBACK" : (callWaitReversalState ? "WAIT REVERSAL" : (callEntryNowState ? "ENTRY NOW" : (callSetupDevelopingState ? "SETUP DEVELOPING" : "WAIT REVERSAL"))))
-    putState = putNoTradeState ? "NO TRADE" : (putWaitPullbackState ? "WAIT PULLBACK" : (putEntryNowState ? "ENTRY READY" : "WAIT TRIGGER"))
-    callState = callNoTradeState ? "NO TRADE" : (callWaitPullbackState ? "WAIT PULLBACK" : (callEntryNowState ? "ENTRY READY" : "WAIT TRIGGER"))
+    putStatus = putNoTradeState ? putNoTradeStatus : (putWaitPullbackState ? "WAIT PULLBACK" : (putWaitLevelState ? "WAIT LEVEL" : (putEntryNowState ? "ENTRY NOW" : (putSetupDevelopingState ? "SETUP DEVELOPING" : (putConfirmedContextState ? "CONFIRMED CONTEXT" : (putWaitReversalState ? "WAIT REVERSAL" : "WAIT TRIGGER"))))))
+    callStatus = callNoTradeState ? callNoTradeStatus : (callWaitPullbackState ? "WAIT PULLBACK" : (callWaitLevelState ? "WAIT LEVEL" : (callEntryNowState ? "ENTRY NOW" : (callSetupDevelopingState ? "SETUP DEVELOPING" : (callConfirmedContextState ? "CONFIRMED CONTEXT" : (callWaitReversalState ? "WAIT REVERSAL" : "WAIT TRIGGER"))))))
+    putState = putNoTradeState ? "NO TRADE" : (putWaitPullbackState ? "WAIT PULLBACK" : (putWaitLevelState ? "WAIT LEVEL" : (putEntryNowState ? "ENTRY READY" : (putSetupDevelopingState ? "SETUP DEVELOPING" : (putConfirmedContextState ? "CONFIRMED CONTEXT" : "WAIT TRIGGER")))))
+    callState = callNoTradeState ? "NO TRADE" : (callWaitPullbackState ? "WAIT PULLBACK" : (callWaitLevelState ? "WAIT LEVEL" : (callEntryNowState ? "ENTRY READY" : (callSetupDevelopingState ? "SETUP DEVELOPING" : (callConfirmedContextState ? "CONFIRMED CONTEXT" : "WAIT TRIGGER")))))
     putStateCol = putState == "ENTRY READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
     callStateCol = callState == "ENTRY READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
-    putNextStep = putState == "ENTRY READY" ? "EXECUTE" : (putState == "NO TRADE" ? "SKIP" : "WAIT REACTION")
-    callNextStep = callState == "ENTRY READY" ? "EXECUTE" : (callState == "NO TRADE" ? "SKIP" : "WAIT REACTION")
+    putPipeline = putNoTradeState ? "BLOCKED" : (putEntryReadyState ? "ENTRY" : (putSetupDevelopingState ? "DEVELOPING" : (putConfirmedContextState ? "CONTEXT" : "WAIT")))
+    callPipeline = callNoTradeState ? "BLOCKED" : (callEntryReadyState ? "ENTRY" : (callSetupDevelopingState ? "DEVELOPING" : (callConfirmedContextState ? "CONTEXT" : "WAIT")))
+    putPipelineCol = putPipeline == "ENTRY" ? colOk : (putPipeline == "BLOCKED" ? colBad : (putPipeline == "WAIT" ? colBg : colWarn))
+    callPipelineCol = callPipeline == "ENTRY" ? colOk : (callPipeline == "BLOCKED" ? colBad : (callPipeline == "WAIT" ? colBg : colWarn))
+    putNextStep = putState == "ENTRY READY" ? "EXECUTE" : (putState == "NO TRADE" ? "SKIP" : (putState == "WAIT LEVEL" ? "WAIT LEVEL RETEST" : (putState == "CONFIRMED CONTEXT" ? "WAIT REACTION/TRIGGER" : "WAIT REACTION")))
+    callNextStep = callState == "ENTRY READY" ? "EXECUTE" : (callState == "NO TRADE" ? "SKIP" : (callState == "WAIT LEVEL" ? "WAIT LEVEL RETEST" : (callState == "CONFIRMED CONTEXT" ? "WAIT REACTION/TRIGGER" : "WAIT REACTION")))
     putNextStepCol = putState == "ENTRY READY" ? colOk : (putState == "NO TRADE" ? colBad : colBg)
     callNextStepCol = callState == "ENTRY READY" ? colOk : (callState == "NO TRADE" ? colBad : colBg)
 
@@ -1536,27 +1769,28 @@ else
         f_applyColVisibility(row)
         row += 1
 
-        f_metricRow(row, "E", str.tostring(int(math.round(putECount))), colBg, str.tostring(int(math.round(callECount))), colBg)
+        if markSummaryDays <= 7
+            f_valueRow(row, "7D note", "1D counts can be sparse", "1D counts can be sparse")
+            f_applyColVisibility(row)
+            row += 1
+
+        f_metricRow(row, "SPY/QQQ 1D", str.tostring(int(math.round(putSpyCount))), colBg, str.tostring(int(math.round(callSpyCount))), colBg)
         f_applyColVisibility(row)
         row += 1
 
-        f_metricRow(row, "1", str.tostring(int(math.round(put1Count))), colBg, str.tostring(int(math.round(call1Count))), colBg)
+        f_metricRow(row, "Stock 1D", str.tostring(int(math.round(putDCount))), colBg, str.tostring(int(math.round(callDCount))), colBg)
         f_applyColVisibility(row)
         row += 1
 
-        f_metricRow(row, "4", str.tostring(int(math.round(put4Count))), colBg, str.tostring(int(math.round(call4Count))), colBg)
+        f_metricRow(row, "Stock 4H", str.tostring(int(math.round(put4Count))), colBg, str.tostring(int(math.round(call4Count))), colBg)
         f_applyColVisibility(row)
         row += 1
 
-        f_metricRow(row, "D", str.tostring(int(math.round(putDCount))), colBg, str.tostring(int(math.round(callDCount))), colBg)
+        f_metricRow(row, "Stock 1H", str.tostring(int(math.round(put1Count))), colBg, str.tostring(int(math.round(call1Count))), colBg)
         f_applyColVisibility(row)
         row += 1
 
-        f_metricRow(row, "Min soft", str.tostring(int(math.round(putMSoftCount))), colBg, str.tostring(int(math.round(callMSoftCount))), colBg)
-        f_applyColVisibility(row)
-        row += 1
-
-        f_metricRow(row, "Min strict", str.tostring(int(math.round(putMStrictCount))), colBg, str.tostring(int(math.round(callMStrictCount))), colBg)
+        f_metricRow(row, "Stock 15m", str.tostring(int(math.round(putECount))), colBg, str.tostring(int(math.round(callECount))), colBg)
         f_applyColVisibility(row)
         row += 1
 
@@ -1566,6 +1800,10 @@ else
     row += 1
 
     f_metricRow(row, "State", putState, putStateCol, callState, callStateCol)
+    f_applyColVisibility(row)
+    row += 1
+
+    f_metricRow(row, "Pipeline", putPipeline, putPipelineCol, callPipeline, callPipelineCol)
     f_applyColVisibility(row)
     row += 1
 
@@ -1582,8 +1820,8 @@ else
     f_applyColVisibility(row)
     row += 1
 
-    putReactionTxt = putReactionOk ? "CONFIRMED" : (putLevelOk ? "NO REACTION" : "NOT AT LEVEL")
-    callReactionTxt = callReactionOk ? "CONFIRMED" : (callLevelOk ? "NO REACTION" : "NOT AT LEVEL")
+    putReactionTxt = putReactionOk ? (putReactionBarsAgo == 0 ? "CONFIRMED NOW" : ("CONFIRMED " + str.tostring(putReactionBarsAgo) + "B AGO")) : (putLevelOk ? "NO REACTION" : "NOT AT LEVEL")
+    callReactionTxt = callReactionOk ? (callReactionBarsAgo == 0 ? "CONFIRMED NOW" : ("CONFIRMED " + str.tostring(callReactionBarsAgo) + "B AGO")) : (callLevelOk ? "NO REACTION" : "NOT AT LEVEL")
     f_metricRow(row, "Reaction @ level", putReactionTxt, f_statusColor(putReactionOk, false), callReactionTxt, f_statusColor(callReactionOk, false))
     f_applyColVisibility(row)
     row += 1

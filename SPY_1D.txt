@@ -1,0 +1,136 @@
+Gotowy szablon opisu/oceny SPY/QQQ na 1D (tylko wg PDF):
+
+Ticker: SPY / QQQ.
+Bias:
+Bullish = higher highs + higher lows
+Bearish = lower highs + lower lows
+Neutral / Chop = overlapping candles, sideways movement, brak klarownego kierunku.
+Market regime / typ tygodnia:
+Trend week
+Range week
+High-volatility week.
+To pole opisuje, czy preferować swing directional, czy raczej ograniczyć agresję.
+Directional play:
+Calls – gdy 1D jest trending up
+Puts – gdy 1D jest trending down
+No trade / smaller size – gdy 1D jest sideways/chop albo zbyt niestabilny.
+Structure (1D):
+Trend pullback to support
+Breakout from consolidation
+Breakdown from consolidation
+Range.
+Jeśli nie da się opisać wykresu jednym zdaniem jako trend / range / breakout / breakdown, setup nie jest czysty.
+Key level:
+prior day/week high or low
+recent swing high / swing low
+clear support / resistance zone
+major MA area: 20 / 50 / 200, ale tylko gdy zgadza się ze strukturą.
+Location:
+Good location = cena jest near structure / near key level
+Bad location = cena jest extended, far from structure, albo in the middle of nowhere.
+Entry:
+after confirmation near the level
+hold at support
+rejection from resistance
+break and hold above resistance
+break and hold below support.
+W Blueprint wejście nie jest „bo wygląda dobrze”, tylko po reakcji ceny przy poziomie.
+Invalidation / Stop:
+dla calls: below support / below prior swing low
+dla puts: above resistance / above prior swing high.
+Stop ma unieważniać tezę, a nie być przypadkowym procentem.
+Target:
+next major level on the daily chart
+dla calls: next resistance
+dla puts: next support
+R:R: <2:1 low quality, 2:1 acceptable, 3:1+ strong.
+Trade grade:
+A-setup = market supports trade, price near key level, risk clear, reward realistic/asymmetric
+B-setup = solid, ale z drobną wadą, np. wyższa zmienność lub neutralny market
+C-setup = unclear market / poor location / vague risk / weak reward
+D-setup = chasing, no structure, emotional entry, no defined stop.
+Contract choice (swing options):
+7–14 DTE preferred
+same-week only jeśli trend jest mocny, entry czysty i ryzyko da się trzymać krótko
+ATM or slightly ITM
+avoid far OTM
+szukaj: tight spreads, solid volume, solid open interest.
+Sizing / aggressiveness:
+normal or slightly increased tylko przy A-setup i klarownym trendzie
+reduced size przy B-setup, range week albo higher volatility
+very small / skip przy C-setup
+no trade przy D-setup.
+Management / exit:
+scale out at Target 1
+reduce risk / move stop
+let the remainder work only if structure stays intact
+exit early gdy momentum fades, price fails at key level, albo market conditions change
+przy opcjach: bliżej expiry zarządzanie ma być ciaśniejsze.
+No trade:
+market is choppy / unclear
+price is extended
+structure is messy
+risk is vague
+reward is optimistic, not realistic
+trade cannot be explained simply.
+
+Najprostsza wersja zapisu, zgodna z PDF:
+
+Bias: Bullish / Bearish / Neutral-Chop
+Regime: Trend week / Range week / High-volatility week
+Structure: Trend / Range / Breakout / Breakdown
+Key level: prior week high-low / swing high-low / support-resistance / 20-50-200 MA
+Location: Near structure / Extended / Middle of nowhere
+Entry: After confirmation near level
+Stop: Below support / Above resistance
+Target: Next major daily level
+Grade: A / B / C / D
+Contract: 7–14 DTE, ATM / slightly ITM, tight spreads
+Action: Calls / Puts / No trade.
+
+Przykładowe opisy w stylu Blueprint:
+
+SPY — Bias: Bullish; Structure: trend pullback to support; Location: near key level; Entry: after confirmation near support; Stop: below support; Target: next major resistance; Contract: 7–14 DTE, ATM/slightly ITM calls; Grade: A/B depending on volatility.
+QQQ — Bias: Bearish; Structure: breakdown below support / failed bounce into resistance; Location: near broken level; Entry: after confirmation near resistance; Stop: above resistance / last lower high; Target: next major support; Contract: 7–14 DTE, ATM/slightly ITM puts; Grade: A/B depending on clarity and reward.
+
+
+
+
+
+
+jeśli pytasz o „najważniejsze co dotyczy SPY/QQQ na 1D dla swing options”, to najpierw zostawiłbym tylko ten rdzeń:
+
+Bias / market direction: bullish, bearish, chop.
+Stan rynku: trending / ranging / unstable; jeśli nie umiesz opisać rynku jednym zdaniem, masz handlować mniejszym size albo rzadziej.
+Typ tygodnia: trend week / range week / high-volatility week, bo to steruje agresją, sizingiem i tym, czy preferujesz swings czy defensywę.
+Action: jeśli QQQ/SPY trend up → prefer calls; trend down → prefer puts; sideways/chop → trade less / size down.
+Rola SPY/QQQ: używasz ich do określenia warunków i kierunku, czyli jak agresywny lub defensywny masz być.
+
+Dopiero druga warstwa to rzeczy, które masz na liście i które są poprawne, ale są już bardziej ogólnym frameworkiem swing options, a nie „samym sednem SPY/QQQ 1D”:
+
+Structure: trend pullback / breakout / breakdown / range.
+Key level: prior day/week high-low, swing high-low, support/resistance, 20/50/200 MA gdy pasuje do struktury.
+Location: near structure = lepiej; extended / middle of nowhere = gorzej.
+Entry tylko po confirmation near level.
+Stop jako invalidation, nie losowy procent.
+Contract: 7–14 DTE, ATM lub slightly ITM, tight spreads, open interest, avoid far OTM.
+Target: next major daily level.
+
+To, co bym w Twojej wersji obniżył w hierarchii albo potraktował jako „opcjonalne rozszerzenie”, jeśli celem jest tylko SPY/QQQ 1D:
+
+rozbudowane A/B/C/D grading — to jest ważne w Blueprint, ale to już bardziej pełna ocena trade idea niż sam rdzeń SPY/QQQ 1D;
+szczegółowe management / exit;
+dokładne progi R:R <2:1 / 2:1 / 3:1+ — poprawne wg PDF, ale znowu: to bardziej ocena jakości setupu niż najważniejsza rzecz o samym SPY/QQQ jako market guide.
+
+Czyli po ścisłym trzymaniu się PDF, najwierniejsza i najważniejsza wersja dla Ciebie brzmiałaby tak:
+
+Bias: Bullish / Bearish / Chop.
+Market state: Trending / Ranging / Unstable.
+Week type: Trend week / Range week / High-volatility week.
+Action: Prefer Calls / Prefer Puts / Trade less & size down / No trade.
+Key level: prior high-low / support-resistance / swing high-low / MA 20-50-200 if matching structure.
+Entry: only after confirmation near level.
+Stop: invalidation level.
+Target: next major daily level.
+Contract: 7–14 DTE, ATM/slightly ITM, good liquidity.
+Note: SPY/QQQ = bias tools first.
